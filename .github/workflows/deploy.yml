@@ -30,7 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Emscripten
-        uses: emscripten-core/setup-emsdk@v11
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
       - name: Build WASM
         run: make wasm
       - name: Prepare Deployment Artifact
