@@ -79,7 +79,7 @@ clean:
 	rm -rf $(BIN_DIR) $(LIB_DIR) tests/results
 
 # WASM Build (Requires emscripten)
-wasm:
+wasm: directories
 	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \
 	-s MODULARIZE=1 -s EXPORT_NAME='createGSSK' \
 	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_Free", "_malloc", "_free"]' \
