@@ -85,7 +85,7 @@
             oscillator: {
                 nodes: [{ id: "resource", type: "source", value: 1 }, { id: "prey", type: "storage", value: 10 }, { id: "predator", type: "storage", value: 5 }, { id: "env", type: "sink", value: 0 }],
                 edges: [{ id: "growth", origin: "resource", target: "prey", logic: "linear", params: { k: 0.5 } }, { id: "consumption", origin: "prey", target: "predator", logic: "interaction", params: { k: 0.1, control_node: "predator" } }, { id: "predator_death", origin: "predator", target: "env", logic: "linear", params: { k: 0.2 } }],
-                config: { t_start: 0, t_end: 100, dt: 0.1, method: "rk4" }
+                config: { t_start: 0, t_end: 10000, dt: 0.1, method: "rk4" }
             },
             decay: {
                 nodes: [{ id: "A", type: "storage", value: 100 }, { id: "B", type: "sink", value: 0 }],
