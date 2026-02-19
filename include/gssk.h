@@ -93,11 +93,6 @@ const char *GSSK_GetNodeID(GSSK_Instance *inst, size_t index);
 size_t GSSK_GetStateSize(GSSK_Instance *inst);
 
 /**
- * @brief Free all memory associated with an instance.
- *
- * @param inst Pointer to the GSSK instance.
- */
-/**
  * @brief Get the simulation start time.
  *
  * @param inst Pointer to the GSSK instance.
