@@ -40,7 +40,7 @@ $(LIB_DIR)/%.o: $(SRC_DIR)/%.c
 
 # CLI Tool
 $(TARGET_CLI): $(SRC_DIR)/main.c $(TARGET_LIB)
-	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) $(TARGET_LIB) -o $@ $(LDFLAGS)
 
 # Test Utility
 $(TARGET_COMPARE): $(TEST_DIR)/csv_compare.c
