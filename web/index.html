@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSSK | General Systems Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background: #0f172a;
+            color: #f8fafc;
+        }
+
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+
+<body class="min-h-screen p-8">
+    <div class="max-w-6xl mx-auto">
+        <header class="mb-12 flex justify-between items-center">
+            <div>
+                <h1 class="text-4xl font-extrabold tracking-tight text-white mb-2">GSSK WASM Demo</h1>
+                <p class="text-slate-400">Numerical engine running in-browser via Emscripten</p>
+            </div>
+            <div id="status" class="px-4 py-2 rounded-full glass text-sm font-medium text-amber-400">
+                WASM Loading...
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Sidebar: Controls & Model -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="glass p-6 rounded-2xl">
+                    <h2 class="text-xl font-semibold mb-4 text-sky-400">Model Selection</h2>
+                    <select id="modelSelect" class="w-full bg-slate-800 border-slate-700 rounded-lg p-3 text-slate-200">
+                        <option value="oscillator">Predator-Prey Oscillator</option>
+                        <option value="decay">Linear Decay</option>
+                        <option value="saturation">Saturation (Limit Logic)</option>
+                    </select>
+                </div>
+
+                <div class="glass p-6 rounded-2xl">
+                    <h2 class="text-xl font-semibold mb-4 text-sky-400">Engine Stats</h2>
+                    <div class="space-y-3 text-sm">
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">Integration</span>
+                            <span id="statMethod" class="text-slate-200 uppercase">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">Step Size (dt)</span>
+                            <span id="statDt" class="text-slate-200">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-slate-500">Performance</span>
+                            <span id="statPerf" class="text-emerald-400">-</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="runBtn"
+                    class="w-full py-4 bg-sky-600 hover:bg-sky-500 transition-colors rounded-2xl font-bold shadow-lg shadow-sky-900/20">
+                    Run Simulation
+                </button>
+            </div>
+
+            <!-- Main Panel: Chart -->
+            <div class="lg:col-span-2">
+                <div class="glass p-8 rounded-3xl h-[600px]">
+                    <canvas id="mainChart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- The models are embedded for the demo ease -->
+    <script src="../bin/gssk.js"></script>
+    <script>
+        const MODELS = {
+            oscillator: {
+                nodes: [{ id: "resource", type: "source", value: 1 }, { id: "prey", type: "storage", value: 10 }, { id: "predator", type: "storage", value: 5 }, { id: "env", type: "sink", value: 0 }],
+                edges: [{ id: "growth", origin: "resource", target: "prey", logic: "linear", params: { k: 0.5 } }, { id: "consumption", origin: "prey", target: "predator", logic: "interaction", params: { k: 0.1, control_node: "predator" } }, { id: "predator_death", origin: "predator", target: "env", logic: "linear", params: { k: 0.2 } }],
+                config: { t_start: 0, t_end: 100, dt: 0.1, method: "rk4" }
+            },
+            decay: {
+                nodes: [{ id: "A", type: "storage", value: 100 }, { id: "B", type: "sink", value: 0 }],
+                edges: [{ id: "decay", origin: "A", target: "B", logic: "linear", params: { k: 0.05 } }],
+                config: { t_start: 0, t_end: 100, dt: 0.5, method: "euler" }
+            },
+            saturation: {
+                nodes: [{ id: "sugar", type: "constant", value: 10 }, { id: "microbes", type: "storage", value: 1 }, { id: "waste", type: "sink", value: 0 }],
+                edges: [{ id: "uptake", origin: "sugar", target: "microbes", logic: "limit", params: { k: 0.5, control_node: "sugar" } }, { id: "death", origin: "microbes", target: "waste", logic: "linear", params: { k: 0.1 } }],
+                config: { t_start: 0, t_end: 50, dt: 0.5, method: "rk4" }
+            }
+        };
+
+        let chart;
+        let gssk; // This will hold the initialized EM instance
+
+        // Initialize the WASM module
+        createGSSK().then(instance => {
+            gssk = instance;
+            document.getElementById('status').innerText = 'WASM Ready';
+            document.getElementById('status').classList.replace('text-amber-400', 'text-emerald-400');
+        }).catch(err => {
+            console.error("WASM Load Error:", err);
+            document.getElementById('status').innerText = 'WASM Load Failed';
+            document.getElementById('status').classList.replace('text-amber-400', 'text-red-400');
+        });
+
+        function runSimulation() {
+            if (!gssk) {
+                alert("WASM not ready");
+                return;
+            }
+
+            const modelName = document.getElementById('modelSelect').value;
+            const modelJson = JSON.stringify(MODELS[modelName]);
+
+            // Allocate memory for the JSON string
+            const jsonLen = gssk.lengthBytesUTF8(modelJson) + 1;
+            const jsonPtr = gssk._malloc(jsonLen);
+            gssk.stringToUTF8(modelJson, jsonPtr, jsonLen);
+
+            // Initialize kernel instance
+            const kernel = gssk._GSSK_Init(jsonPtr);
+            gssk._free(jsonPtr);
+
+            if (!kernel) {
+                alert("Failed to initialize kernel. Check console for schema errors.");
+                return;
+            }
+
+            const t_start = gssk._GSSK_GetTStart(kernel);
+            const t_end = gssk._GSSK_GetTEnd(kernel);
+            const dt = gssk._GSSK_GetDt(kernel);
+            const node_count = gssk._GSSK_GetStateSize(kernel);
+
+            document.getElementById('statDt').innerText = dt.toFixed(3);
+            document.getElementById('statMethod').innerText = MODELS[modelName].config.method;
+
+            const datasets = [];
+            for (let i = 0; i < node_count; i++) {
+                const idPtr = gssk._GSSK_GetNodeID(kernel, i);
+                const id = gssk.UTF8ToString(idPtr);
+                datasets.push({
+                    label: id,
+                    data: [],
+                    borderColor: `hsl(${(i * 137.5) % 360}, 70%, 60%)`,
+                    borderWidth: 2,
+                    tension: 0.2,
+                    pointRadius: 0
+                });
+            }
+
+            const labels = [];
+            let t = t_start;
+            const startTime = performance.now();
+
+            while (t <= t_end + (dt * 0.01)) {
+                labels.push(t.toFixed(1));
+                const statePtr = gssk._GSSK_GetState(kernel);
+
+                // Read doubles from raw WASM memory - compatible with Emscripten 4.x
+                // statePtr is a byte offset; Float64 = 8 bytes each
+                const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
+                for (let i = 0; i < node_count; i++) {
+                    datasets[i].data.push(stateArray[i]);
+                }
+
+                gssk._GSSK_Step(kernel, dt);
+                t += dt;
+            }
+
+            const endTime = performance.now();
+            document.getElementById('statPerf').innerText = `${(endTime - startTime).toFixed(2)} ms`;
+
+            updateChart(labels, datasets);
+            gssk._GSSK_Free(kernel);
+        }
+
+        function updateChart(labels, datasets) {
+            if (chart) chart.destroy();
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#94a3b8' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { color: '#94a3b8', maxRotation: 0 }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#f8fafc' } }
+                    }
+                }
+            });
+        }
+
+        document.getElementById('runBtn').onclick = runSimulation;
+    </script>
+</body>
+
+</html>

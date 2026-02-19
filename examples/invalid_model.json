@@ -1,0 +1,20 @@
+{
+    "nodes": [
+        {
+            "id": "sun",
+            "type": "source",
+            "value": 100.0
+        }
+    ],
+    "edges": [
+        {
+            "id": "broken_edge",
+            "origin": "sun",
+            "target": "missing_node",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        }
+    ]
+}

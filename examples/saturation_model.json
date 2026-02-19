@@ -1,0 +1,46 @@
+{
+    "nodes": [
+        {
+            "id": "sugar",
+            "type": "constant",
+            "value": 10.0
+        },
+        {
+            "id": "microbes",
+            "type": "storage",
+            "value": 1.0
+        },
+        {
+            "id": "waste",
+            "type": "sink",
+            "value": 0.0
+        }
+    ],
+    "edges": [
+        {
+            "id": "uptake",
+            "origin": "sugar",
+            "target": "microbes",
+            "logic": "limit",
+            "params": {
+                "k": 0.5,
+                "control_node": "sugar"
+            }
+        },
+        {
+            "id": "death",
+            "origin": "microbes",
+            "target": "waste",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        }
+    ],
+    "config": {
+        "t_start": 0.0,
+        "t_end": 50.0,
+        "dt": 1.0,
+        "method": "rk4"
+    }
+}

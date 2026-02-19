@@ -1,0 +1,17 @@
+[
+    {
+        "directory": "/Users/sholtomaud/Development/GSSK",
+        "command": "gcc -Wall -Wextra -Werror -std=c99 -Iinclude -c src/gssk.c -o lib/gssk.o",
+        "file": "src/gssk.c"
+    },
+    {
+        "directory": "/Users/sholtomaud/Development/GSSK",
+        "command": "gcc -Wall -Wextra -Werror -std=c99 -Iinclude -c src/cJSON.c -o lib/cJSON.o",
+        "file": "src/cJSON.c"
+    },
+    {
+        "directory": "/Users/sholtomaud/Development/GSSK",
+        "command": "gcc -Wall -Wextra -Werror -std=c99 -Iinclude src/main.c lib/libgssk.a -o bin/gssk -lm",
+        "file": "src/main.c"
+    }
+]
