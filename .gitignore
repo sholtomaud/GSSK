@@ -1,0 +1,28 @@
+# GSSK Build Artifacts
+bin/
+lib/
+tests/results/
+
+# Temporary deployment folder
+public/
+
+# Object files and libraries
+*.o
+*.a
+*.so
+*.dylib
+*.exe
+
+# Emscripten generated files
+# These are usually in bin/ but just in case
+*.js.mem
+*.wasm
+
+# IDE and system files
+.DS_Store
+.vscode/
+.idea/
+.cache/
+
+# Compilation database (usually generated)
+# compile_commands.json

@@ -24,8 +24,13 @@ int main(int argc, char **argv) {
     fclose(f);
     return EXIT_FAILURE;
   }
-  fread(data, 1, length, f);
+  size_t read_bytes = fread(data, 1, length, f);
   fclose(f);
+  if (read_bytes != (size_t)length) {
+    fprintf(stderr, "Error reading file\n");
+    free(data);
+    return EXIT_FAILURE;
+  }
   data[length] = '\0';
 
   // Initialize Kernel

@@ -83,5 +83,5 @@ wasm:
 	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \
 	-s MODULARIZE=1 -s EXPORT_NAME='createGSSK' \
 	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_Free", "_malloc", "_free"]' \
-	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "stringToUTF8", "UTF8ToString", "lengthBytesUTF8", "allocate", "ALLOC_NORMAL"]' \
+	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "stringToUTF8", "UTF8ToString", "lengthBytesUTF8", "allocate", "ALLOC_NORMAL", "HEAPU8", "HEAPF64"]' \
 	-o bin/gssk.js

@@ -35,6 +35,12 @@ We use a **Registration-based Regression Testing** system.
 GSSK is designed for web integration. Ensure any core changes are compatible with `emcc` (Emscripten).
 Command: `make wasm`
 
+## ✅ Programmatic Checks
+Before submitting any changes, you MUST ensure:
+1. `make clean && make` completes without any errors or warnings.
+2. `make test` passes all regression tests with "PASSED" status.
+3. `make wasm` (if `emcc` is available) generates a valid `bin/gssk.js` and `bin/gssk.wasm`.
+
 ## 📂 Directory Structure
 - `include/`: Public headers.
 - `src/`: Implementation.

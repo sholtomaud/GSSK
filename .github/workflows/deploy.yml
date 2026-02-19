@@ -1,0 +1,53 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  native-build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Build
+        run: make
+      - name: Run Tests
+        run: make test
+
+  wasm-build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: native-build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v11
+      - name: Build WASM
+        run: make wasm
+      - name: Prepare Deployment Artifact
+        run: |
+          mkdir public
+          cp web/index.html public/
+          cp bin/gssk.js public/
+          cp bin/gssk.wasm public/
+          # No need to sed if we also update the source in Step 5 of the plan,
+          # but let's be robust here.
+          sed -i 's|../bin/gssk.js|gssk.js|' public/index.html
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'public'
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
