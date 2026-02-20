@@ -1,7 +1,7 @@
 # GSSK Build Artifacts
 bin/
 lib/
-!dist/
+dist/
 tests/results/
 
 # Temporary deployment folder
