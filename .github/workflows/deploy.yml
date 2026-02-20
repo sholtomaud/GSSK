@@ -3,11 +3,12 @@ name: Build and Deploy
 on:
   push:
     branches: [ main ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -37,15 +38,20 @@ jobs:
           version: 3.1.64
       - name: Build WASM
         run: make wasm
+      - name: Commit Built Artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add dist/
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update built wasm artifacts" && git push)
       - name: Prepare Deployment Artifact
         run: |
           mkdir public
           cp web/index.html public/
-          cp bin/gssk.js public/
-          cp bin/gssk.wasm public/
-          # No need to sed if we also update the source in Step 5 of the plan,
-          # but let's be robust here.
-          sed -i 's|../bin/gssk.js|gssk.js|' public/index.html
+          cp dist/gssk.js public/
+          cp dist/gssk.wasm public/
+          sed -i 's|../dist/gssk.js|gssk.js|' public/index.html
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Upload Pages Artifact
@@ -55,3 +61,32 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  release:
+    runs-on: ubuntu-latest
+    needs: native-build-and-test
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Build
+        run: make
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+      - name: Build WASM
+        run: make wasm
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/gssk.js
+            dist/gssk.wasm
+            dist/gssk.d.ts
+            lib/libgssk.a
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

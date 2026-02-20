@@ -1,0 +1,28 @@
+{
+  "name": "gssk",
+  "version": "1.0.0",
+  "description": "General Systems Simulation Kernel (GSSK) - A C99 numerical engine for systems simulation.",
+  "main": "dist/gssk.js",
+  "types": "dist/gssk.d.ts",
+  "files": [
+    "dist/",
+    "include/",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "make test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sholtomaud/GSSK.git"
+  },
+  "keywords": [
+    "simulation",
+    "wasm",
+    "numerical",
+    "ode",
+    "systems theory"
+  ],
+  "author": "Sholto Maud",
+  "license": "MIT"
+}
