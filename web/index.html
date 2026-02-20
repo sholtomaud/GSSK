@@ -42,6 +42,16 @@
                         <option value="oscillator">Predator-Prey Oscillator</option>
                         <option value="decay">Linear Decay</option>
                         <option value="saturation">Saturation (Limit Logic)</option>
+                        <option value="economic">Economic Model (Market)</option>
+                        <option value="atwood">Atwood Machine (Physics)</option>
+                    </select>
+                </div>
+
+                <div class="glass p-6 rounded-2xl">
+                    <h2 class="text-xl font-semibold mb-4 text-sky-400">Simulation Mode</h2>
+                    <select id="simMode" class="w-full bg-slate-800 border-slate-700 rounded-lg p-3 text-slate-200">
+                        <option value="bulk">Bulk (Static)</option>
+                        <option value="streaming">Streaming (Real-time)</option>
                     </select>
                 </div>
 
@@ -96,11 +106,32 @@
                 nodes: [{ id: "sugar", type: "constant", value: 10 }, { id: "microbes", type: "storage", value: 1 }, { id: "waste", type: "sink", value: 0 }],
                 edges: [{ id: "uptake", origin: "sugar", target: "microbes", logic: "limit", params: { k: 0.5, control_node: "sugar" } }, { id: "death", origin: "microbes", target: "waste", logic: "linear", params: { k: 0.1 } }],
                 config: { t_start: 0, t_end: 50, dt: 0.5, method: "rk4" }
+            },
+            economic: {
+                nodes: [{ id: "inventory", type: "storage", value: 50 }, { id: "price", type: "storage", value: 10 }, { id: "source", type: "source", value: 1 }, { id: "sink", type: "sink", value: 0 }],
+                edges: [
+                    { id: "production", origin: "source", target: "inventory", logic: "interaction", params: { k: 0.1, control_node: "price" } },
+                    { id: "consumption", origin: "inventory", target: "sink", logic: "constant", params: { k: 1.0 } },
+                    { id: "price_up", origin: "source", target: "price", logic: "constant", params: { k: 0.5 } },
+                    { id: "price_down", origin: "price", target: "sink", logic: "interaction", params: { k: 0.01, control_node: "inventory" } }
+                ],
+                config: { t_start: 0, t_end: 100, dt: 0.1, method: "rk4" }
+            },
+            atwood: {
+                nodes: [{ id: "velocity", type: "storage", value: 0 }, { id: "position", type: "storage", value: 0 }, { id: "source", type: "source", value: 1 }, { id: "env", type: "sink", value: 0 }],
+                edges: [
+                    { id: "acceleration", origin: "source", target: "velocity", logic: "constant", params: { k: 3.333 } },
+                    { id: "displacement", origin: "source", target: "position", logic: "interaction", params: { k: 1.0, control_node: "velocity" } }
+                ],
+                config: { t_start: 0, t_end: 10, dt: 0.05, method: "rk4" }
             }
         };
 
         let chart;
         let gssk; // This will hold the initialized EM instance
+        let isRunning = false;
+        let animationId = null;
+        let currentKernel = null;
 
         // Initialize the WASM module
         createGSSK().then(instance => {
@@ -113,40 +144,60 @@
             document.getElementById('status').classList.replace('text-amber-400', 'text-red-400');
         });
 
+        function stopSimulation() {
+            isRunning = false;
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            if (currentKernel) {
+                gssk._GSSK_Free(currentKernel);
+                currentKernel = null;
+            }
+            const btn = document.getElementById('runBtn');
+            btn.innerText = 'Run Simulation';
+            btn.classList.remove('bg-red-600', 'hover:bg-red-500');
+            btn.classList.add('bg-sky-600', 'hover:bg-sky-500');
+        }
+
         function runSimulation() {
+            if (isRunning) {
+                stopSimulation();
+                return;
+            }
+
             if (!gssk) {
                 alert("WASM not ready");
                 return;
             }
 
             const modelName = document.getElementById('modelSelect').value;
+            const simMode = document.getElementById('simMode').value;
             const modelJson = JSON.stringify(MODELS[modelName]);
 
-            // Allocate memory for the JSON string
             const jsonLen = gssk.lengthBytesUTF8(modelJson) + 1;
             const jsonPtr = gssk._malloc(jsonLen);
             gssk.stringToUTF8(modelJson, jsonPtr, jsonLen);
 
-            // Initialize kernel instance
-            const kernel = gssk._GSSK_Init(jsonPtr);
+            currentKernel = gssk._GSSK_Init(jsonPtr);
             gssk._free(jsonPtr);
 
-            if (!kernel) {
-                alert("Failed to initialize kernel. Check console for schema errors.");
+            if (!currentKernel) {
+                alert("Failed to initialize kernel.");
                 return;
             }
 
-            const t_start = gssk._GSSK_GetTStart(kernel);
-            const t_end = gssk._GSSK_GetTEnd(kernel);
-            const dt = gssk._GSSK_GetDt(kernel);
-            const node_count = gssk._GSSK_GetStateSize(kernel);
+            const t_start = gssk._GSSK_GetTStart(currentKernel);
+            const t_end = gssk._GSSK_GetTEnd(currentKernel);
+            const dt = gssk._GSSK_GetDt(currentKernel);
+            const node_count = gssk._GSSK_GetStateSize(currentKernel);
 
             document.getElementById('statDt').innerText = dt.toFixed(3);
             document.getElementById('statMethod').innerText = MODELS[modelName].config.method;
 
             const datasets = [];
             for (let i = 0; i < node_count; i++) {
-                const idPtr = gssk._GSSK_GetNodeID(kernel, i);
+                const idPtr = gssk._GSSK_GetNodeID(currentKernel, i);
                 const id = gssk.UTF8ToString(idPtr);
                 datasets.push({
                     label: id,
@@ -159,32 +210,6 @@
             }
 
             const labels = [];
-            let t = t_start;
-            const startTime = performance.now();
-
-            while (t <= t_end + (dt * 0.01)) {
-                labels.push(t.toFixed(1));
-                const statePtr = gssk._GSSK_GetState(kernel);
-
-                // Read doubles from raw WASM memory - compatible with Emscripten 4.x
-                // statePtr is a byte offset; Float64 = 8 bytes each
-                const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
-                for (let i = 0; i < node_count; i++) {
-                    datasets[i].data.push(stateArray[i]);
-                }
-
-                gssk._GSSK_Step(kernel, dt);
-                t += dt;
-            }
-
-            const endTime = performance.now();
-            document.getElementById('statPerf').innerText = `${(endTime - startTime).toFixed(2)} ms`;
-
-            updateChart(labels, datasets);
-            gssk._GSSK_Free(kernel);
-        }
-
-        function updateChart(labels, datasets) {
             if (chart) chart.destroy();
             const ctx = document.getElementById('mainChart').getContext('2d');
             chart = new Chart(ctx, {
@@ -193,21 +218,63 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: false,
                     scales: {
-                        y: {
-                            grid: { color: 'rgba(255,255,255,0.05)' },
-                            ticks: { color: '#94a3b8' }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: { color: '#94a3b8', maxRotation: 0 }
-                        }
+                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#94a3b8' } },
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8', maxRotation: 0 } }
                     },
-                    plugins: {
-                        legend: { labels: { color: '#f8fafc' } }
-                    }
+                    plugins: { legend: { labels: { color: '#f8fafc' } } }
                 }
             });
+
+            isRunning = true;
+            const btn = document.getElementById('runBtn');
+            btn.innerText = 'Stop Simulation';
+            btn.classList.remove('bg-sky-600', 'hover:bg-sky-500');
+            btn.classList.add('bg-red-600', 'hover:bg-red-500');
+
+            let t = t_start;
+            const startTime = performance.now();
+
+            if (simMode === 'bulk') {
+                while (t <= t_end + (dt * 0.01)) {
+                    labels.push(t.toFixed(1));
+                    const statePtr = gssk._GSSK_GetState(currentKernel);
+                    const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
+                    for (let i = 0; i < node_count; i++) {
+                        datasets[i].data.push(stateArray[i]);
+                    }
+                    gssk._GSSK_Step(currentKernel, dt);
+                    t += dt;
+                }
+                chart.update();
+                const endTime = performance.now();
+                document.getElementById('statPerf').innerText = `${(endTime - startTime).toFixed(2)} ms`;
+                stopSimulation();
+            } else {
+                function step() {
+                    if (!isRunning) return;
+                    for (let i = 0; i < 50; i++) {
+                        if (t > t_end + (dt * 0.01)) break;
+                        labels.push(t.toFixed(1));
+                        const statePtr = gssk._GSSK_GetState(currentKernel);
+                        const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
+                        for (let j = 0; j < node_count; j++) datasets[j].data.push(stateArray[j]);
+                        gssk._GSSK_Step(currentKernel, dt);
+                        t += dt;
+                    }
+                    chart.update('none');
+                    document.getElementById('statPerf').innerText = `Streaming... t=${t.toFixed(1)}`;
+                    if (t <= t_end + (dt * 0.01)) {
+                        animationId = requestAnimationFrame(step);
+                    } else {
+                        const endTime = performance.now();
+                        document.getElementById('statPerf').innerText = `${(endTime - startTime).toFixed(2)} ms`;
+                        stopSimulation();
+                    }
+                }
+                animationId = requestAnimationFrame(step);
+            }
         }
 
         document.getElementById('runBtn').onclick = runSimulation;

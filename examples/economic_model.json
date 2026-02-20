@@ -1,0 +1,44 @@
+{
+    "nodes": [
+        { "id": "inventory", "type": "storage", "value": 50.0 },
+        { "id": "price", "type": "storage", "value": 10.0 },
+        { "id": "source", "type": "source", "value": 1.0 },
+        { "id": "sink", "type": "sink", "value": 0.0 }
+    ],
+    "edges": [
+        {
+            "id": "production",
+            "origin": "source",
+            "target": "inventory",
+            "logic": "interaction",
+            "params": { "k": 0.1, "control_node": "price" }
+        },
+        {
+            "id": "consumption",
+            "origin": "inventory",
+            "target": "sink",
+            "logic": "constant",
+            "params": { "k": 1.0 }
+        },
+        {
+            "id": "price_up",
+            "origin": "source",
+            "target": "price",
+            "logic": "constant",
+            "params": { "k": 0.5 }
+        },
+        {
+            "id": "price_down",
+            "origin": "price",
+            "target": "sink",
+            "logic": "interaction",
+            "params": { "k": 0.01, "control_node": "inventory" }
+        }
+    ],
+    "config": {
+        "t_start": 0.0,
+        "t_end": 100.0,
+        "dt": 0.1,
+        "method": "rk4"
+    }
+}
