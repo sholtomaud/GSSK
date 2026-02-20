@@ -85,7 +85,8 @@ The editor uses the standard GSSK JSON format but adds a `visual` property to no
 
 ### 4.2 Edge & Interaction Logic
 - **Flow Edge**: A solid line with an arrow at the target.
-- **Control Edge**: For `interaction` and `limit` logic, a dashed line originates from the `control_node` and terminates at a **"Gate Symbol"** (small circle or hexagon) located on the midpoint of the flow edge.
+- **Control Edge**: For `interaction` and `limit` logic, a dashed line originates from the `control_node` and terminates at a **"Gate Symbol"**.
+- **Gate Symbol**: Visually represented as a small circle or hexagon located at the midpoint of the flow edge. This symbol is rendered dynamically as part of the edge logic and is not a separate entity in the JSON data.
 
 ### 4.3 Simulation Visualization
 - **Node Filling**: Storage nodes should have a background "fill" color that rises/falls based on `current_value / capacity`.
@@ -95,15 +96,21 @@ The editor uses the standard GSSK JSON format but adds a `visual` property to no
 
 ## 5. Interaction Design
 
-### 5.1 Building the Model
-- **Palette**: A sidebar containing icons for Source, Storage, and Sink.
+### 5.1 Internal UI and Layout
+- **Structure**: The component should feature a central SVG canvas flanked by two collapsible side panels.
+- **Palette (Left)**: Contains draggable icons for Source, Storage, Sink, and Constant.
+- **Property Panel (Right)**: Displays the properties of the currently selected node or edge.
+- **Collapsibility**: Both panels must be toggleable/collapsible to maximize simulation viewing space.
+
+### 5.2 Building the Model
 - **Drag-and-Drop**: Users drag from the palette onto the SVG canvas to create nodes.
 - **Wiring**:
   - Clicking a "port" (invisible circle on node edges) and dragging creates a wire.
   - Dropping the wire onto another node creates a standard flow edge.
-  - Dropping the wire onto an *existing edge* automatically sets the `control_node` for that edge and changes its logic to `interaction`.
+  - **Interaction Logic**: Dropping a wire onto an *existing edge* automatically sets the `control_node` of that edge to the origin node and updates the edge `logic` to `"interaction"`.
+- **Grid & Snapping**: All node positions and edge waypoints should snap to the `gridSize` by default to ensure a clean "circuit" layout.
 
-### 5.2 Property Editing
+### 5.3 Property Editing
 - **Side Panel**: When a node/edge is selected, a panel appears to edit `id`, `value`, and `params.k`.
 - **In-place Edit**: Double-clicking a label allows direct text editing on the canvas.
 
@@ -117,10 +124,33 @@ The editor uses the standard GSSK JSON format but adds a `visual` property to no
    - Maintain an internal map of nodes and edges.
    - **Index Mapping**: Upon `loadModel`, the component must record the index of each node as they appear in the JSON array. This index is used to look up values in the `stateArray` during `updateState` calls.
    - Use `requestAnimationFrame` for smooth updates when `updateState` is called.
-4. **Odum Icons**: Define icons as `<symbol>` elements in an internal SVG `<defs>` block for reusability.
-5. **Path Calculation**: Use simple linear paths or Quadratic Bezier curves for edges. When a control node is linked, calculate the intersection point on the flow path to place the "gate" symbol.
+4. **Validation**: Use a JSON Schema validator (e.g., `ajv`) bundled during the build step to ensure `loadModel` receives valid GSSK-compatible data.
+5. **Theming**: Provide CSS custom properties for deep customization:
+   - `--gssk-bg`: `#0f172a` (Default background)
+   - `--gssk-accent`: `#38bdf8` (Default sky blue for edges/active states)
+   - `--gssk-fill`: `#10b981` (Emerald color for storage filling)
+   - `--gssk-node-bg`: `#1e293b`
+6. **Odum Icons**: Define icons as `<symbol>` elements in an internal SVG `<defs>` block for reusability.
+7. **Path Calculation**: Use simple linear paths or Quadratic Bezier curves for edges. When a control node is linked, calculate the intersection point on the flow path to place the "gate" symbol.
 
-## 7. Real-time Integration Example
+## 7. Recommended File Structure
+```text
+/
+├── src/
+│   ├── gssk-editor.js (Main component)
+│   ├── symbols.js (SVG definitions)
+│   ├── styles.css (Shadow DOM styles)
+│   └── validator.js (Schema validation logic)
+├── tests/
+│   └── editor.spec.js (Playwright/Component tests)
+├── index.html (Component demo page)
+├── package.json
+└── vite.config.js
+```
+
+---
+
+## 8. Real-time Integration Example
 The host application should interface with the editor as follows:
 ```javascript
 const editor = document.querySelector('gssk-editor');
