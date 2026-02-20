@@ -1,0 +1,508 @@
+{
+    "nodes": [
+        {
+            "id": "global_source",
+            "type": "source",
+            "value": 10.0
+        },
+        {
+            "id": "prod_1",
+            "type": "storage",
+            "value": 50.0
+        },
+        {
+            "id": "prod_2",
+            "type": "storage",
+            "value": 50.0
+        },
+        {
+            "id": "prod_3",
+            "type": "storage",
+            "value": 50.0
+        },
+        {
+            "id": "prod_4",
+            "type": "storage",
+            "value": 50.0
+        },
+        {
+            "id": "prod_5",
+            "type": "storage",
+            "value": 50.0
+        },
+        {
+            "id": "proc_1",
+            "type": "storage",
+            "value": 20.0
+        },
+        {
+            "id": "proc_2",
+            "type": "storage",
+            "value": 20.0
+        },
+        {
+            "id": "proc_3",
+            "type": "storage",
+            "value": 20.0
+        },
+        {
+            "id": "proc_4",
+            "type": "storage",
+            "value": 20.0
+        },
+        {
+            "id": "proc_5",
+            "type": "storage",
+            "value": 20.0
+        },
+        {
+            "id": "dist_1",
+            "type": "storage",
+            "value": 10.0
+        },
+        {
+            "id": "dist_2",
+            "type": "storage",
+            "value": 10.0
+        },
+        {
+            "id": "dist_3",
+            "type": "storage",
+            "value": 10.0
+        },
+        {
+            "id": "dist_4",
+            "type": "storage",
+            "value": 10.0
+        },
+        {
+            "id": "dist_5",
+            "type": "storage",
+            "value": 10.0
+        },
+        {
+            "id": "retail_1",
+            "type": "storage",
+            "value": 5.0
+        },
+        {
+            "id": "retail_2",
+            "type": "storage",
+            "value": 5.0
+        },
+        {
+            "id": "retail_3",
+            "type": "storage",
+            "value": 5.0
+        },
+        {
+            "id": "retail_4",
+            "type": "storage",
+            "value": 5.0
+        },
+        {
+            "id": "retail_5",
+            "type": "storage",
+            "value": 5.0
+        },
+        {
+            "id": "cons_1",
+            "type": "storage",
+            "value": 0.0
+        },
+        {
+            "id": "cons_2",
+            "type": "storage",
+            "value": 0.0
+        },
+        {
+            "id": "cons_3",
+            "type": "storage",
+            "value": 0.0
+        },
+        {
+            "id": "cons_4",
+            "type": "storage",
+            "value": 0.0
+        },
+        {
+            "id": "recy_1",
+            "type": "storage",
+            "value": 0.0
+        },
+        {
+            "id": "recy_2",
+            "type": "storage",
+            "value": 0.0
+        },
+        {
+            "id": "recy_3",
+            "type": "storage",
+            "value": 0.0
+        },
+        {
+            "id": "recy_4",
+            "type": "storage",
+            "value": 0.0
+        },
+        {
+            "id": "global_sink",
+            "type": "sink",
+            "value": 0.0
+        }
+    ],
+    "edges": [
+        {
+            "id": "supply_1",
+            "origin": "global_source",
+            "target": "prod_1",
+            "logic": "constant",
+            "params": {
+                "k": 2.0
+            }
+        },
+        {
+            "id": "supply_2",
+            "origin": "global_source",
+            "target": "prod_2",
+            "logic": "constant",
+            "params": {
+                "k": 2.0
+            }
+        },
+        {
+            "id": "supply_3",
+            "origin": "global_source",
+            "target": "prod_3",
+            "logic": "constant",
+            "params": {
+                "k": 2.0
+            }
+        },
+        {
+            "id": "supply_4",
+            "origin": "global_source",
+            "target": "prod_4",
+            "logic": "constant",
+            "params": {
+                "k": 2.0
+            }
+        },
+        {
+            "id": "supply_5",
+            "origin": "global_source",
+            "target": "prod_5",
+            "logic": "constant",
+            "params": {
+                "k": 2.0
+            }
+        },
+        {
+            "id": "process_1",
+            "origin": "prod_1",
+            "target": "proc_1",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "process_cross_1",
+            "origin": "prod_2",
+            "target": "proc_1",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "process_2",
+            "origin": "prod_2",
+            "target": "proc_2",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "process_cross_2",
+            "origin": "prod_3",
+            "target": "proc_2",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "process_3",
+            "origin": "prod_3",
+            "target": "proc_3",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "process_cross_3",
+            "origin": "prod_4",
+            "target": "proc_3",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "process_4",
+            "origin": "prod_4",
+            "target": "proc_4",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "process_cross_4",
+            "origin": "prod_5",
+            "target": "proc_4",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "process_5",
+            "origin": "prod_5",
+            "target": "proc_5",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "process_cross_5",
+            "origin": "prod_1",
+            "target": "proc_5",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "distribute_1",
+            "origin": "proc_1",
+            "target": "dist_1",
+            "logic": "linear",
+            "params": {
+                "k": 0.2
+            }
+        },
+        {
+            "id": "distribute_2",
+            "origin": "proc_2",
+            "target": "dist_2",
+            "logic": "linear",
+            "params": {
+                "k": 0.2
+            }
+        },
+        {
+            "id": "distribute_3",
+            "origin": "proc_3",
+            "target": "dist_3",
+            "logic": "linear",
+            "params": {
+                "k": 0.2
+            }
+        },
+        {
+            "id": "distribute_4",
+            "origin": "proc_4",
+            "target": "dist_4",
+            "logic": "linear",
+            "params": {
+                "k": 0.2
+            }
+        },
+        {
+            "id": "distribute_5",
+            "origin": "proc_5",
+            "target": "dist_5",
+            "logic": "linear",
+            "params": {
+                "k": 0.2
+            }
+        },
+        {
+            "id": "sell_1",
+            "origin": "dist_1",
+            "target": "retail_1",
+            "logic": "linear",
+            "params": {
+                "k": 0.3
+            }
+        },
+        {
+            "id": "sell_2",
+            "origin": "dist_2",
+            "target": "retail_2",
+            "logic": "linear",
+            "params": {
+                "k": 0.3
+            }
+        },
+        {
+            "id": "sell_3",
+            "origin": "dist_3",
+            "target": "retail_3",
+            "logic": "linear",
+            "params": {
+                "k": 0.3
+            }
+        },
+        {
+            "id": "sell_4",
+            "origin": "dist_4",
+            "target": "retail_4",
+            "logic": "linear",
+            "params": {
+                "k": 0.3
+            }
+        },
+        {
+            "id": "sell_5",
+            "origin": "dist_5",
+            "target": "retail_5",
+            "logic": "linear",
+            "params": {
+                "k": 0.3
+            }
+        },
+        {
+            "id": "consume_1",
+            "origin": "retail_1",
+            "target": "cons_1",
+            "logic": "interaction",
+            "params": {
+                "k": 0.01,
+                "control_node": "cons_1"
+            }
+        },
+        {
+            "id": "waste_1",
+            "origin": "cons_1",
+            "target": "recy_1",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "consume_2",
+            "origin": "retail_2",
+            "target": "cons_2",
+            "logic": "interaction",
+            "params": {
+                "k": 0.01,
+                "control_node": "cons_2"
+            }
+        },
+        {
+            "id": "waste_2",
+            "origin": "cons_2",
+            "target": "recy_2",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "consume_3",
+            "origin": "retail_3",
+            "target": "cons_3",
+            "logic": "interaction",
+            "params": {
+                "k": 0.01,
+                "control_node": "cons_3"
+            }
+        },
+        {
+            "id": "waste_3",
+            "origin": "cons_3",
+            "target": "recy_3",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "consume_4",
+            "origin": "retail_4",
+            "target": "cons_4",
+            "logic": "interaction",
+            "params": {
+                "k": 0.01,
+                "control_node": "cons_4"
+            }
+        },
+        {
+            "id": "waste_4",
+            "origin": "cons_4",
+            "target": "recy_4",
+            "logic": "linear",
+            "params": {
+                "k": 0.05
+            }
+        },
+        {
+            "id": "sell_5_direct",
+            "origin": "retail_5",
+            "target": "global_sink",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "recycle_back_1",
+            "origin": "recy_1",
+            "target": "prod_1",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "recycle_back_2",
+            "origin": "recy_2",
+            "target": "prod_2",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "recycle_back_3",
+            "origin": "recy_3",
+            "target": "prod_3",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        },
+        {
+            "id": "recycle_back_4",
+            "origin": "recy_4",
+            "target": "prod_4",
+            "logic": "linear",
+            "params": {
+                "k": 0.1
+            }
+        }
+    ],
+    "config": {
+        "t_start": 0.0,
+        "t_end": 50.0,
+        "dt": 0.05,
+        "method": "rk4"
+    }
+}
