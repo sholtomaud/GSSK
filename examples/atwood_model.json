@@ -1,0 +1,30 @@
+{
+    "nodes": [
+        { "id": "velocity", "type": "storage", "value": 0.0 },
+        { "id": "position", "type": "storage", "value": 0.0 },
+        { "id": "source", "type": "source", "value": 1.0 },
+        { "id": "env", "type": "sink", "value": 0.0 }
+    ],
+    "edges": [
+        {
+            "id": "acceleration",
+            "origin": "source",
+            "target": "velocity",
+            "logic": "constant",
+            "params": { "k": 3.333 }
+        },
+        {
+            "id": "displacement",
+            "origin": "source",
+            "target": "position",
+            "logic": "interaction",
+            "params": { "k": 1.0, "control_node": "velocity" }
+        }
+    ],
+    "config": {
+        "t_start": 0.0,
+        "t_end": 10.0,
+        "dt": 0.05,
+        "method": "rk4"
+    }
+}
