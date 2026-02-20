@@ -66,7 +66,7 @@ The editor uses the standard GSSK JSON format but adds a `visual` property to no
 
 ### 3.2 Methods
 - `loadModel(json)`: Re-renders the canvas with the provided model.
-- `updateState(stateArray)`: Accepts a `Float64Array` of state values (from WASM) and updates node visualizations (filling levels).
+- `updateState(stateArray)`: Accepts a `Float64Array` of state values. The index $i$ in the array corresponds exactly to the $i$-th element in the `nodes` array of the loaded JSON model.
 - `getJson()`: Returns the current model JSON including visual metadata.
 
 ### 3.3 Events
@@ -103,7 +103,7 @@ The editor uses the standard GSSK JSON format but adds a `visual` property to no
   - Dropping the wire onto another node creates a standard flow edge.
   - Dropping the wire onto an *existing edge* automatically sets the `control_node` for that edge and changes its logic to `interaction`.
 
-### 4.2 Property Editing
+### 5.2 Property Editing
 - **Side Panel**: When a node/edge is selected, a panel appears to edit `id`, `value`, and `params.k`.
 - **In-place Edit**: Double-clicking a label allows direct text editing on the canvas.
 
@@ -115,6 +115,7 @@ The editor uses the standard GSSK JSON format but adds a `visual` property to no
 2. **SVG Viewbox**: Use an `<svg>` element with `viewBox="0 0 1000 1000"` to handle scaling and panning.
 3. **State Management**:
    - Maintain an internal map of nodes and edges.
+   - **Index Mapping**: Upon `loadModel`, the component must record the index of each node as they appear in the JSON array. This index is used to look up values in the `stateArray` during `updateState` calls.
    - Use `requestAnimationFrame` for smooth updates when `updateState` is called.
 4. **Odum Icons**: Define icons as `<symbol>` elements in an internal SVG `<defs>` block for reusability.
 5. **Path Calculation**: Use simple linear paths or Quadratic Bezier curves for edges. When a control node is linked, calculate the intersection point on the flow path to place the "gate" symbol.
