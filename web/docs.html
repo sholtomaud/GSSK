@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GSSK | Documentation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        body {
+            background: #0f172a;
+            color: #f8fafc;
+        }
+
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        /* Markdown styling */
+        #content h1 { @apply text-4xl font-bold mb-6 text-white border-b border-slate-700 pb-2; }
+        #content h2 { @apply text-2xl font-semibold mt-8 mb-4 text-sky-400; }
+        #content h3 { @apply text-xl font-medium mt-6 mb-2 text-slate-200; }
+        #content p { @apply mb-4 text-slate-400 leading-relaxed; }
+        #content ul { @apply list-disc list-inside mb-4 text-slate-400; }
+        #content code { @apply bg-slate-800 px-1.5 py-0.5 rounded text-sky-300 font-mono text-sm; }
+        #content pre { @apply bg-slate-800 p-4 rounded-xl overflow-x-auto mb-6 border border-slate-700; }
+        #content pre code { @apply bg-transparent p-0 text-slate-300; }
+        #content a { @apply text-sky-500 hover:underline; }
+        #content blockquote { @apply border-l-4 border-slate-700 pl-4 italic text-slate-500 mb-4; }
+        #content table { @apply w-full mb-6 border-collapse; }
+        #content th { @apply bg-slate-800 text-left p-2 border border-slate-700 text-slate-200; }
+        #content td { @apply p-2 border border-slate-700 text-slate-400; }
+    </style>
+</head>
+
+<body class="min-h-screen">
+    <div class="flex flex-col md:flex-row h-screen">
+        <!-- Sidebar Navigation -->
+        <aside class="w-full md:w-64 glass border-r border-slate-800 flex flex-col">
+            <div class="p-6 border-b border-slate-800">
+                <h1 class="text-xl font-bold text-white">GSSK Docs</h1>
+                <p class="text-xs text-slate-500 mt-1">Documentation & Specs</p>
+            </div>
+            <nav class="flex-1 overflow-y-auto p-4 space-y-2">
+                <button onclick="loadDoc('README')" class="doc-link w-full text-left px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-400" id="link-README">Overview</button>
+                <button onclick="loadDoc('SPECIFICATION')" class="doc-link w-full text-left px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-400" id="link-SPECIFICATION">Technical Spec</button>
+                <button onclick="loadDoc('REQUIREMENTS')" class="doc-link w-full text-left px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-400" id="link-REQUIREMENTS">Requirements</button>
+                <button onclick="loadDoc('DOCS_GPU')" class="doc-link w-full text-left px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-400" id="link-DOCS_GPU">GPU Acceleration</button>
+                <button onclick="loadDoc('AGENTS')" class="doc-link w-full text-left px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors text-slate-400" id="link-AGENTS">Agent Guidelines</button>
+            </nav>
+            <div class="p-4 border-t border-slate-800">
+                <a href="../" class="block w-full text-center py-2 bg-sky-600 hover:bg-sky-500 rounded-lg text-sm font-bold transition-colors">
+                    Back to Demo
+                </a>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-1 overflow-y-auto p-8 md:p-12">
+            <div id="content" class="max-w-4xl mx-auto">
+                <div class="animate-pulse space-y-4">
+                    <div class="h-8 bg-slate-800 rounded w-3/4"></div>
+                    <div class="h-4 bg-slate-800 rounded w-1/2"></div>
+                    <div class="h-4 bg-slate-800 rounded w-full"></div>
+                    <div class="h-4 bg-slate-800 rounded w-full"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function loadDoc(name) {
+            // Update UI
+            document.querySelectorAll('.doc-link').forEach(link => {
+                link.classList.remove('bg-sky-900/30', 'text-sky-400', 'font-semibold');
+                link.classList.add('text-slate-400');
+            });
+            const activeLink = document.getElementById('link-' + name);
+            if (activeLink) {
+                activeLink.classList.remove('text-slate-400');
+                activeLink.classList.add('bg-sky-900/30', 'text-sky-400', 'font-semibold');
+            }
+
+            // Fetch and render
+            const content = document.getElementById('content');
+            // Try different paths depending on environment
+            // In dev, MD files are at root. In production, we'll copy them to /
+            const paths = [`${name}.md`, `../${name}.md` ];
+
+            async function tryPaths(p) {
+                for (let path of p) {
+                    try {
+                        const response = await fetch(path);
+                        if (response.ok) return await response.text();
+                    } catch (e) {}
+                }
+                throw new Error("Could not find " + name + ".md");
+            }
+
+            tryPaths(paths)
+                .then(text => {
+                    content.innerHTML = marked.parse(text);
+                    // Update URL hash without jumping
+                    history.pushState(null, null, '# ' + name);
+                })
+                .catch(err => {
+                    content.innerHTML = `<div class="text-red-400 p-4 glass rounded-xl">Error loading documentation: ${err.message}</div>`;
+                });
+        }
+
+        // Initial load
+        const hash = window.location.hash.replace('#', '').trim();
+        loadDoc(hash || 'README');
+
+        // Handle back/forward
+        window.onpopstate = () => {
+            const hash = window.location.hash.replace('#', '').trim();
+            loadDoc(hash || 'README');
+        };
+    </script>
+</body>
+
+</html>
