@@ -10,6 +10,7 @@ A high-performance numerical engine for General Systems Theory and Odum Energy S
 - `lib/`: Compiled libraries (static/shared).
 - `tests/`: Numerical validation suite and benchmarks.
 - `examples/`: Reference models and integration examples.
+- `docs/`: VitePress documentation source.
 
 ## 🛠 Building
 
@@ -34,6 +35,18 @@ make wasm
 ```
 
 ## 📖 Documentation
-- **[Live Demo & Documentation](https://sholtomaud.github.io/GSSK/)**: Interactive WASM simulation and rendered specs.
-- [REQUIREMENTS.md](REQUIREMENTS.md): User-facing needs and philosophy.
-- [SPECIFICATION.md](SPECIFICATION.md): Technical blueprint and mathematical definitions.
+- **[Live Demo](https://sholtomaud.github.io/GSSK/)**: Interactive WASM simulation demo.
+- **[Technical Documentation](https://sholtomaud.github.io/GSSK/docs/)**: Comprehensive documentation powered by VitePress.
+
+## 📦 NPM Installation (GitHub)
+To use GSSK in your Node.js or browser project, install the pre-compiled distribution branch:
+```bash
+npm install sholtomaud/GSSK#dist
+```
+This ensures you receive the built WebAssembly binaries and TypeScript definitions without needing to compile the C source yourself.
+
+## 🚀 Releasing
+To create a new release:
+1. Run `./scripts/release.sh [version]`
+2. Push with tags: `git push origin main --tags`
+The GitHub Action will automatically build the WASM, update the `dist` branch, and create a GitHub Release.

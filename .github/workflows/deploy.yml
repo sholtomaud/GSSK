@@ -21,6 +21,11 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
@@ -35,6 +40,11 @@ jobs:
       - name: Run Tests
         run: make test
 
+      - name: Build Documentation
+        run: |
+          npm install
+          npm run docs:build
+
       - name: Archive build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -45,7 +55,9 @@ jobs:
             dist/
             include/
             web/
-            *.md
+            docs/.vitepress/dist/
+            README.md
+            package.json
 
   deploy:
     needs: build
@@ -64,35 +76,41 @@ jobs:
         with:
           name: build-artifacts
 
-      - name: Commit Built Artifacts
+      - name: Deploy to Distribution Branch (Option B)
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add dist/
-          if ! git diff --quiet --staged; then
-            git commit -m "chore: update built wasm artifacts [skip ci]"
-            if [[ ${{ github.ref }} == refs/tags/* ]]; then
-              # Push artifacts to main and update tag to include them
-              git push origin HEAD:main
-              git tag -f ${{ github.ref_name }}
-              git push origin ${{ github.ref_name }} -f
-            else
-              git push origin main
-            fi
-          else
-            echo "No changes to commit in dist/"
+
+          # Create temporary directory for dist branch content
+          mkdir -p tmp_dist
+          cp -r dist tmp_dist/
+          cp -r include tmp_dist/
+          cp README.md tmp_dist/
+          cp package.json tmp_dist/
+
+          # Initialize new repo in tmp_dist and push to dist branch
+          cd tmp_dist
+          git init
+          git add .
+          git commit -m "chore: distribution build [skip ci]"
+          git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          git push origin HEAD:dist --force
+
+          # If this is a tag, also tag the dist branch
+          if [[ ${{ github.ref }} == refs/tags/* ]]; then
+            git tag ${{ github.ref_name }}
+            git push origin ${{ github.ref_name }} --force
           fi
 
-      - name: Prepare Deployment Artifact
+      - name: Prepare Pages Deployment Artifact
         run: |
-          mkdir -p public/docs
+          mkdir -p public
           cp web/index.html public/
-          cp web/docs.html public/docs/index.html
-          cp *.md public/
           cp dist/gssk.js public/
           cp dist/gssk.wasm public/
+          cp -r docs/.vitepress/dist public/docs
           touch public/.nojekyll
-          # Adjust paths for flat structure in public/
+          # Adjust paths for flat structure in public/ root
           sed -i 's|../dist/gssk.js|gssk.js|' public/index.html
 
       - name: Setup Pages
