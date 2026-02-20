@@ -39,7 +39,7 @@ Command: `make wasm`
 Before submitting any changes, you MUST ensure:
 1. `make clean && make` completes without any errors or warnings.
 2. `make test` passes all regression tests with "PASSED" status.
-3. `make wasm` (if `emcc` is available) generates a valid `bin/gssk.js` and `bin/gssk.wasm`.
+3. `make wasm` (if `emcc` is available) generates a valid `dist/gssk.js` and `dist/gssk.wasm`.
 
 ## 📂 Directory Structure
 - `include/`: Public headers.

@@ -15,6 +15,7 @@ SRC_DIR = src
 INC_DIR = include
 BIN_DIR = bin
 LIB_DIR = lib
+DIST_DIR = dist
 TEST_DIR = tests
 
 # Files
@@ -29,7 +30,7 @@ TARGET_COMPARE = $(BIN_DIR)/csv_compare
 all: directories $(TARGET_LIB) $(TARGET_CLI) $(TARGET_COMPARE)
 
 directories:
-	@mkdir -p $(BIN_DIR) $(LIB_DIR) tests/results tests/expected
+	@mkdir -p $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results tests/expected
 
 # Static Library
 $(TARGET_LIB): $(OBJECTS)
@@ -76,12 +77,13 @@ test-update: all
 	done
 
 clean:
-	rm -rf $(BIN_DIR) $(LIB_DIR) tests/results
+	rm -rf $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results
 
 # WASM Build (Requires emscripten)
 wasm: directories
+	cp $(SRC_DIR)/gssk.d.ts $(DIST_DIR)/gssk.d.ts
 	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \
 	-s MODULARIZE=1 -s EXPORT_NAME='createGSSK' \
 	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_Free", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "stringToUTF8", "UTF8ToString", "lengthBytesUTF8", "allocate", "ALLOC_NORMAL", "HEAPU8", "HEAPF64"]' \
-	-o bin/gssk.js
+	-o $(DIST_DIR)/gssk.js

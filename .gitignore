@@ -1,6 +1,7 @@
 # GSSK Build Artifacts
 bin/
 lib/
+!dist/
 tests/results/
 
 # Temporary deployment folder
@@ -15,8 +16,8 @@ public/
 
 # Emscripten generated files
 # These are usually in bin/ but just in case
-*.js.mem
-*.wasm
+bin/*.js.mem
+bin/*.wasm
 
 # IDE and system files
 .DS_Store
