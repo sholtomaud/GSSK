@@ -34,5 +34,6 @@ make wasm
 ```
 
 ## 📖 Documentation
+- **[Live Demo & Documentation](https://sholtomaud.github.io/GSSK/)**: Interactive WASM simulation and rendered specs.
 - [REQUIREMENTS.md](REQUIREMENTS.md): User-facing needs and philosophy.
 - [SPECIFICATION.md](SPECIFICATION.md): Technical blueprint and mathematical definitions.
