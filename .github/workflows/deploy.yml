@@ -13,14 +13,10 @@ permissions:
   id-token: write
 
 jobs:
-  build-test-deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential
@@ -39,8 +35,36 @@ jobs:
       - name: Run Tests
         run: make test
 
+      - name: Archive build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            bin/
+            lib/
+            dist/
+            include/
+            web/
+            *.md
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifacts
+
       - name: Commit Built Artifacts
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -60,7 +84,6 @@ jobs:
           fi
 
       - name: Prepare Deployment Artifact
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         run: |
           mkdir -p public/docs
           cp web/index.html public/
@@ -73,17 +96,14 @@ jobs:
           sed -i 's|../dist/gssk.js|gssk.js|' public/index.html
 
       - name: Setup Pages
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: actions/configure-pages@v4
 
       - name: Upload Pages Artifact
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: actions/upload-pages-artifact@v3
         with:
           path: 'public'
 
       - name: Deploy to GitHub Pages
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         id: deployment
         uses: actions/deploy-pages@v4
 
