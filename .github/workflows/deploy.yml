@@ -78,9 +78,6 @@ jobs:
 
       - name: Deploy to Distribution Branch (Option B)
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-
           # Create temporary directory for dist branch content
           mkdir -p tmp_dist
           cp -r dist tmp_dist/
@@ -90,11 +87,13 @@ jobs:
 
           # Initialize new repo in tmp_dist and push to dist branch
           cd tmp_dist
-          git init
+          git init -b dist
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
           git add .
           git commit -m "chore: distribution build [skip ci]"
           git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git push origin HEAD:dist --force
+          git push origin dist --force
 
           # If this is a tag, also tag the dist branch
           if [[ ${{ github.ref }} == refs/tags/* ]]; then
