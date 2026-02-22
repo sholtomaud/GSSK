@@ -35,8 +35,8 @@ make wasm
 ```
 
 ## 📖 Documentation
-- **[Live Demo](https://sholtomaud.github.io/GSSK/)**: Interactive WASM simulation demo.
-- **[Technical Documentation](https://sholtomaud.github.io/GSSK/docs/)**: Comprehensive documentation powered by VitePress.
+- **[Live Demo](https://sholtomaud.github.io/GSSK/demo/)**: Interactive WASM simulation demo.
+- **[Technical Documentation](https://sholtomaud.github.io/GSSK/)**: Comprehensive documentation powered by VitePress.
 
 ## 📦 NPM Installation (GitHub)
 To use GSSK in your Node.js or browser project, install the pre-compiled distribution branch:
