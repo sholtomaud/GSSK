@@ -8,7 +8,7 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Spec', link: '/SPECIFICATION' },
-      { text: 'WASM Demo', link: '/demo/' }
+      { text: 'WASM Demo', link: '/demo/', target: '_blank' }
     ],
     sidebar: [
       {
