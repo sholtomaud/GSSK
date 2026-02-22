@@ -15,7 +15,6 @@ public/
 *.exe
 
 # Emscripten generated files
-# These are usually in bin/ but just in case
 bin/*.js.mem
 bin/*.wasm
 
@@ -25,5 +24,9 @@ bin/*.wasm
 .idea/
 .cache/
 
-# Compilation database (usually generated)
-# compile_commands.json
+# Node.js
+node_modules/
+docs/.vitepress/dist/
+
+# Ensure dist/ artifacts are tracked
+!dist/

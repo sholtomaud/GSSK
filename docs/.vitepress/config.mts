@@ -3,12 +3,12 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: "GSSK",
   description: "General Systems Simulation Kernel Documentation",
-  base: '/GSSK/docs/',
+  base: '/GSSK/',
   themeConfig: {
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Spec', link: '/SPECIFICATION' },
-      { text: 'WASM Demo', link: 'https://sholtomaud.github.io/GSSK/' }
+      { text: 'WASM Demo', link: '/demo/' }
     ],
     sidebar: [
       {

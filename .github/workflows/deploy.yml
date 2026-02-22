@@ -103,14 +103,14 @@ jobs:
 
       - name: Prepare Pages Deployment Artifact
         run: |
-          mkdir -p public
-          cp web/index.html public/
-          cp dist/gssk.js public/
-          cp dist/gssk.wasm public/
-          cp -r docs/.vitepress/dist public/docs
+          mkdir -p public/demo
+          cp -r docs/.vitepress/dist/* public/
+          cp web/index.html public/demo/
+          cp dist/gssk.js public/demo/
+          cp dist/gssk.wasm public/demo/
           touch public/.nojekyll
-          # Adjust paths for flat structure in public/ root
-          sed -i 's|../dist/gssk.js|gssk.js|' public/index.html
+          # Adjust paths for flat structure in public/demo/
+          sed -i 's|../dist/gssk.js|gssk.js|' public/demo/index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
