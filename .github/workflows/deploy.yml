@@ -106,6 +106,7 @@ jobs:
           mkdir -p public/demo
           cp -r docs/.vitepress/dist/* public/
           cp web/index.html public/demo/
+          cp web/favicon.png public/demo/
           cp dist/gssk.js public/demo/
           cp dist/gssk.wasm public/demo/
           touch public/.nojekyll
