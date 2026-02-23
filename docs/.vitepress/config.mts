@@ -4,6 +4,9 @@ export default defineConfig({
   title: "GSSK",
   description: "General Systems Simulation Kernel Documentation",
   base: '/GSSK/',
+  head: [
+    ['link', { rel: 'icon', href: '/favicon.png' }]
+  ],
   themeConfig: {
     nav: [
       { text: 'Home', link: '/' },
