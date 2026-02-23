@@ -83,10 +83,29 @@
 
                 <div class="glass p-6 rounded-2xl">
                     <h2 class="text-xl font-semibold mb-4 text-brand">Simulation Mode</h2>
-                    <select id="simMode" class="w-full bg-vpsoft border-white/10 rounded-lg p-3 text-white/90">
+                    <select id="simMode" class="w-full bg-vpsoft border-white/10 rounded-lg p-3 text-white/90 mb-4">
                         <option value="bulk">Bulk (Static)</option>
-                        <option value="streaming">Streaming (Real-time)</option>
+                        <option value="streaming" selected>Streaming (Real-time)</option>
                     </select>
+
+                    <div class="space-y-4 pt-4 border-t border-white/5">
+                        <h3 class="text-xs font-bold text-white/30 uppercase tracking-widest">Override Parameters</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs text-white/40 mb-1">Start Time</label>
+                                <input type="number" id="inputTStart" value="0" step="0.1" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-white/40 mb-1">End Time</label>
+                                <input type="number" id="inputTEnd" value="1000" step="10" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs text-white/40 mb-1">Time Step (dt)</label>
+                            <input type="number" id="inputDt" value="0.1" step="0.01" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                        </div>
+                        <div id="recommendation" class="text-[10px] text-brand/60 italic"></div>
+                    </div>
                 </div>
 
                 <div class="glass p-6 rounded-2xl">
@@ -207,7 +226,14 @@
 
             const modelName = document.getElementById('modelSelect').value;
             const simMode = document.getElementById('simMode').value;
-            const modelJson = JSON.stringify(MODELS[modelName]);
+            const model = JSON.parse(JSON.stringify(MODELS[modelName]));
+
+            // Override with UI values
+            model.config.t_start = parseFloat(document.getElementById('inputTStart').value);
+            model.config.t_end = parseFloat(document.getElementById('inputTEnd').value);
+            model.config.dt = parseFloat(document.getElementById('inputDt').value);
+
+            const modelJson = JSON.stringify(model);
 
             const jsonLen = gssk.lengthBytesUTF8(modelJson) + 1;
             const jsonPtr = gssk._malloc(jsonLen);
@@ -270,35 +296,52 @@
             let t = t_start;
             const startTime = performance.now();
 
+            const MAX_CHART_POINTS = 2000;
+            const totalSteps = (t_end - t_start) / dt;
+            const decimateFactor = Math.max(1, Math.floor(totalSteps / MAX_CHART_POINTS));
+            let stepCount = 0;
+
             if (simMode === 'bulk') {
                 while (t <= t_end + (dt * 0.01)) {
-                    labels.push(t.toFixed(1));
-                    const statePtr = gssk._GSSK_GetState(currentKernel);
-                    const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
-                    for (let i = 0; i < node_count; i++) {
-                        datasets[i].data.push(stateArray[i]);
+                    if (stepCount % decimateFactor === 0) {
+                        labels.push(t.toFixed(1));
+                        const statePtr = gssk._GSSK_GetState(currentKernel);
+                        const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
+                        for (let i = 0; i < node_count; i++) {
+                            datasets[i].data.push(stateArray[i]);
+                        }
                     }
                     gssk._GSSK_Step(currentKernel, dt);
                     t += dt;
+                    stepCount++;
                 }
                 chart.update();
                 const endTime = performance.now();
                 document.getElementById('statPerf').innerText = `${(endTime - startTime).toFixed(2)} ms`;
                 stopSimulation();
             } else {
+                // Adaptive batching: try to finish within 10 seconds (600 frames)
+                const targetFrames = 600;
+                const stepsPerFrame = Math.max(1, Math.min(5000, Math.ceil(totalSteps / targetFrames)));
+
                 function step() {
                     if (!isRunning) return;
-                    for (let i = 0; i < 50; i++) {
+                    for (let i = 0; i < stepsPerFrame; i++) {
                         if (t > t_end + (dt * 0.01)) break;
-                        labels.push(t.toFixed(1));
-                        const statePtr = gssk._GSSK_GetState(currentKernel);
-                        const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
-                        for (let j = 0; j < node_count; j++) datasets[j].data.push(stateArray[j]);
+
+                        if (stepCount % decimateFactor === 0) {
+                            labels.push(t.toFixed(1));
+                            const statePtr = gssk._GSSK_GetState(currentKernel);
+                            const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
+                            for (let j = 0; j < node_count; j++) datasets[j].data.push(stateArray[j]);
+                        }
+
                         gssk._GSSK_Step(currentKernel, dt);
                         t += dt;
+                        stepCount++;
                     }
                     chart.update('none');
-                    document.getElementById('statPerf').innerText = `Streaming... t=${t.toFixed(1)}`;
+                    document.getElementById('statPerf').innerText = `Streaming (batch=${stepsPerFrame})... t=${t.toFixed(1)}`;
                     if (t <= t_end + (dt * 0.01)) {
                         animationId = requestAnimationFrame(step);
                     } else {
@@ -310,6 +353,40 @@
                 animationId = requestAnimationFrame(step);
             }
         }
+
+        function updateRecommendation() {
+            const t_start = parseFloat(document.getElementById('inputTStart').value);
+            const t_end = parseFloat(document.getElementById('inputTEnd').value);
+            const dt = parseFloat(document.getElementById('inputDt').value);
+            const totalSteps = (t_end - t_start) / dt;
+            const recEl = document.getElementById('recommendation');
+
+            if (totalSteps > 1000000) {
+                const suggestedDt = (t_end - t_start) / 100000;
+                recEl.innerText = `⚠️ Large simulation detected. Consider dt ≈ ${suggestedDt.toFixed(3)} for faster results.`;
+            } else {
+                recEl.innerText = "";
+            }
+        }
+
+        ['inputTStart', 'inputTEnd', 'inputDt'].forEach(id => {
+            document.getElementById(id).addEventListener('input', updateRecommendation);
+        });
+
+        // Update inputs when model changes
+        function syncInputsToModel() {
+            const modelName = document.getElementById('modelSelect').value;
+            const config = MODELS[modelName].config;
+            document.getElementById('inputTStart').value = config.t_start;
+            document.getElementById('inputTEnd').value = config.t_end;
+            document.getElementById('inputDt').value = config.dt;
+            updateRecommendation();
+        }
+
+        document.getElementById('modelSelect').onchange = syncInputsToModel;
+
+        // Initialize on load
+        syncInputsToModel();
 
         document.getElementById('runBtn').onclick = runSimulation;
     </script>

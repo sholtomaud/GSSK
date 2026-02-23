@@ -17,6 +17,7 @@ export default defineConfig({
           { text: 'Requirements', link: '/REQUIREMENTS' },
           { text: 'Technical Specification', link: '/SPECIFICATION' },
           { text: 'GPU Acceleration', link: '/DOCS_GPU' },
+          { text: 'Performance & Scaling', link: '/DOCS_PERFORMANCE' },
           { text: 'UI Specification', link: '/GSSK_UI_SPECIFICATION' }
         ]
       }
