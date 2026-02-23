@@ -5,7 +5,7 @@ dist/
 tests/results/
 
 # Temporary deployment folder
-public/
+/public/
 
 # Object files and libraries
 *.o
