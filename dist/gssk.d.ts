@@ -1,6 +1,7 @@
 export interface GSSKModule {
-  _GSSK_Init(jsonPtr: number): number;
-  _GSSK_Step(kernelPtr: number, dt: number): void;
+  _GSSK_Init(jsonPtr: number, outInstPtr: number): number;
+  _GSSK_GetErrorDescription(kernelPtr: number): number;
+  _GSSK_Step(kernelPtr: number, dt: number): number;
   _GSSK_GetState(kernelPtr: number): number;
   _GSSK_GetStateSize(kernelPtr: number): number;
   _GSSK_GetTStart(kernelPtr: number): number;

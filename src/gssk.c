@@ -31,6 +31,7 @@ typedef struct {
 
 // Internal Instance structure
 struct GSSK_Instance {
+  char error_msg[256];
   double *state;
   double *dQ;
 
@@ -91,33 +92,47 @@ static GSSK_LogicType parse_logic_type(const char *type_str) {
   return -1;
 }
 
-GSSK_Instance *GSSK_Init(const char *json_data) {
-  if (!json_data)
-    return NULL;
+GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
+  if (!out_inst)
+    return GSSK_ERR_UNKNOWN;
+
+  *out_inst = calloc(1, sizeof(GSSK_Instance));
+  GSSK_Instance *inst = *out_inst;
+  if (!inst)
+    return GSSK_ERR_MALLOC_FAILED;
+
+  if (!json_data) {
+    snprintf(inst->error_msg, sizeof(inst->error_msg), "JSON data is NULL");
+    return GSSK_ERR_INVALID_JSON;
+  }
 
   cJSON *root = cJSON_Parse(json_data);
   if (!root) {
-    fprintf(stderr, "JSON Parse Error: %s\n", cJSON_GetErrorPtr());
-    return NULL;
+    snprintf(inst->error_msg, sizeof(inst->error_msg), "JSON Parse Error: %s",
+             cJSON_GetErrorPtr());
+    return GSSK_ERR_INVALID_JSON;
   }
 
-  GSSK_Instance *inst = calloc(1, sizeof(GSSK_Instance));
-  if (!inst) {
-    cJSON_Delete(root);
-    return NULL;
-  }
+  GSSK_Status status = GSSK_SUCCESS;
 
   // 1. Parse Nodes
   cJSON *nodes_arr = cJSON_GetObjectItem(root, "nodes");
   if (!cJSON_IsArray(nodes_arr)) {
-    fprintf(stderr, "Schema Error: 'nodes' must be an array.\n");
-    goto error;
+    snprintf(inst->error_msg, sizeof(inst->error_msg),
+             "Schema Error: 'nodes' must be an array.");
+    status = GSSK_ERR_SCHEMA_VIOLATION;
+    goto cleanup;
   }
 
   inst->node_count = (size_t)cJSON_GetArraySize(nodes_arr);
   inst->nodes = calloc(inst->node_count, sizeof(GSSK_NodeInternal));
   inst->state = calloc(inst->node_count, sizeof(double));
   inst->dQ = calloc(inst->node_count, sizeof(double));
+
+  if (!inst->nodes || !inst->state || !inst->dQ) {
+    status = GSSK_ERR_MALLOC_FAILED;
+    goto cleanup;
+  }
 
   for (int i = 0; i < (int)inst->node_count; i++) {
     cJSON *node = cJSON_GetArrayItem(nodes_arr, i);
@@ -126,27 +141,23 @@ GSSK_Instance *GSSK_Init(const char *json_data) {
     cJSON *val = cJSON_GetObjectItem(node, "value");
 
     if (!cJSON_IsString(id) || !cJSON_IsString(type) || !cJSON_IsNumber(val)) {
-      fprintf(stderr,
-              "Schema Error: Node at index %d is missing required fields (id, "
-              "type, value).\n",
-              i);
-      goto error;
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "Schema Error: Node at index %d is missing required fields (id, "
+               "type, value).",
+               i);
+      status = GSSK_ERR_SCHEMA_VIOLATION;
+      goto cleanup;
     }
 
     // Check for duplicate IDs
-    // Note: find_node_idx will search the entire inst->nodes array.
-    // For the current node 'i', its ID is not yet stored in inst->nodes[i].id.
-    // However, if a previous node 'j < i' had the same ID, it would be found.
-    // This check is sufficient for detecting duplicates among already processed
-    // nodes. If the current node's ID is a duplicate of a node *after* it in
-    // the JSON, that will be caught when the later node is processed.
     for (int j = 0; j < i; ++j) {
       if (strcmp(inst->nodes[j].id, id->valuestring) == 0) {
-        fprintf(stderr,
-                "Schema Error: Duplicate node ID detected: '%s' (at index %d, "
-                "first seen at index %d).\n",
-                id->valuestring, i, j);
-        goto error;
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Schema Error: Duplicate node ID detected: '%s' (at index %d, "
+                 "first seen at index %d).",
+                 id->valuestring, i, j);
+        status = GSSK_ERR_SCHEMA_VIOLATION;
+        goto cleanup;
       }
     }
 
@@ -162,6 +173,10 @@ GSSK_Instance *GSSK_Init(const char *json_data) {
   if (cJSON_IsArray(edges_arr)) {
     inst->edge_count = (size_t)cJSON_GetArraySize(edges_arr);
     inst->edges = calloc(inst->edge_count, sizeof(GSSK_EdgeInternal));
+    if (!inst->edges && inst->edge_count > 0) {
+      status = GSSK_ERR_MALLOC_FAILED;
+      goto cleanup;
+    }
 
     for (int i = 0; i < (int)inst->edge_count; i++) {
       cJSON *edge = cJSON_GetArrayItem(edges_arr, i);
@@ -172,46 +187,52 @@ GSSK_Instance *GSSK_Init(const char *json_data) {
 
       if (!cJSON_IsString(origin) || !cJSON_IsString(target) ||
           !cJSON_IsString(logic_str) || !cJSON_IsObject(params)) {
-        fprintf(stderr,
-                "Schema Error: Edge at index %d is missing required fields "
-                "(origin, target, logic, params).\n",
-                i);
-        goto error;
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Schema Error: Edge at index %d is missing required fields "
+                 "(origin, target, logic, params).",
+                 i);
+        status = GSSK_ERR_SCHEMA_VIOLATION;
+        goto cleanup;
       }
 
       inst->edges[i].origin_idx = find_node_idx(inst, origin->valuestring);
       inst->edges[i].target_idx = find_node_idx(inst, target->valuestring);
 
       if (inst->edges[i].origin_idx == -1) {
-        fprintf(stderr,
-                "Linkage Error: Edge %d references non-existent origin node "
-                "'%s'.\n",
-                i, origin->valuestring);
-        goto error;
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Linkage Error: Edge %d references non-existent origin node "
+                 "'%s'.",
+                 i, origin->valuestring);
+        status = GSSK_ERR_SCHEMA_VIOLATION;
+        goto cleanup;
       }
       if (inst->edges[i].target_idx == -1) {
-        fprintf(stderr,
-                "Linkage Error: Edge %d references non-existent target node "
-                "'%s'.\n",
-                i, target->valuestring);
-        goto error;
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Linkage Error: Edge %d references non-existent target node "
+                 "'%s'.",
+                 i, target->valuestring);
+        status = GSSK_ERR_SCHEMA_VIOLATION;
+        goto cleanup;
       }
 
       int l_type = parse_logic_type(logic_str->valuestring);
       if (l_type == -1) {
-        fprintf(stderr, "Logic Error: Unknown logic type '%s' in edge %d.\n",
-                logic_str->valuestring, i);
-        goto error;
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Logic Error: Unknown logic type '%s' in edge %d.",
+                 logic_str->valuestring, i);
+        status = GSSK_ERR_SCHEMA_VIOLATION;
+        goto cleanup;
       }
       inst->edges[i].logic = (GSSK_LogicType)l_type;
 
       cJSON *k = cJSON_GetObjectItem(params, "k");
       if (!cJSON_IsNumber(k)) {
-        fprintf(stderr,
-                "Schema Error: Edge %d is missing required parameter 'k' or "
-                "it's not a number.\n",
-                i);
-        goto error;
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Schema Error: Edge %d is missing required parameter 'k' or "
+                 "it's not a number.",
+                 i);
+        status = GSSK_ERR_SCHEMA_VIOLATION;
+        goto cleanup;
       }
       inst->edges[i].k = k->valuedouble;
 
@@ -220,11 +241,12 @@ GSSK_Instance *GSSK_Init(const char *json_data) {
       if (cJSON_IsString(control)) {
         inst->edges[i].control_idx = find_node_idx(inst, control->valuestring);
         if (inst->edges[i].control_idx == -1) {
-          fprintf(stderr,
-                  "Linkage Error: Edge %d references non-existent control node "
-                  "'%s'.\n",
-                  i, control->valuestring);
-          goto error;
+          snprintf(inst->error_msg, sizeof(inst->error_msg),
+                   "Linkage Error: Edge %d references non-existent control "
+                   "node '%s'.",
+                   i, control->valuestring);
+          status = GSSK_ERR_SCHEMA_VIOLATION;
+          goto cleanup;
         }
       } else {
         inst->edges[i].control_idx = -1;
@@ -240,11 +262,12 @@ GSSK_Instance *GSSK_Init(const char *json_data) {
       if (inst->edges[i].logic == GSSK_LOGIC_INTERACTION ||
           inst->edges[i].logic == GSSK_LOGIC_LIMIT) {
         if (inst->edges[i].control_idx == -1) {
-          fprintf(stderr,
-                  "Logic Error: Edge %d (%s) requires 'control_node' in "
-                  "params.\n",
-                  i, logic_str->valuestring);
-          goto error;
+          snprintf(inst->error_msg, sizeof(inst->error_msg),
+                   "Logic Error: Edge %d (%s) requires 'control_node' in "
+                   "params.",
+                   i, logic_str->valuestring);
+          status = GSSK_ERR_SCHEMA_VIOLATION;
+          goto cleanup;
         }
       }
     }
@@ -274,16 +297,18 @@ GSSK_Instance *GSSK_Init(const char *json_data) {
 
     // Validation
     if (inst->config.t_end <= inst->config.t_start) {
-      fprintf(stderr,
-              "Config Error: t_end (%.2f) must be greater than t_start "
-              "(%.2f).\n",
-              inst->config.t_end, inst->config.t_start);
-      goto error;
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "Config Error: t_end (%.2f) must be greater than t_start "
+               "(%.2f).",
+               inst->config.t_end, inst->config.t_start);
+      status = GSSK_ERR_SCHEMA_VIOLATION;
+      goto cleanup;
     }
     if (inst->config.dt <= 0.0) {
-      fprintf(stderr, "Config Error: dt (%.4f) must be positive.\n",
-              inst->config.dt);
-      goto error;
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "Config Error: dt (%.4f) must be positive.", inst->config.dt);
+      status = GSSK_ERR_SCHEMA_VIOLATION;
+      goto cleanup;
     }
 
     cJSON *method = cJSON_GetObjectItem(config, "method");
@@ -309,17 +334,15 @@ GSSK_Instance *GSSK_Init(const char *json_data) {
     inst->k3 = calloc(inst->node_count, sizeof(double));
     inst->k4 = calloc(inst->node_count, sizeof(double));
     inst->tmp_state = calloc(inst->node_count, sizeof(double));
-    if (!inst->k2 || !inst->k3 || !inst->k4 || !inst->tmp_state)
-      goto error;
+    if (!inst->k2 || !inst->k3 || !inst->k4 || !inst->tmp_state) {
+      status = GSSK_ERR_MALLOC_FAILED;
+      goto cleanup;
+    }
   }
 
+cleanup:
   cJSON_Delete(root);
-  return inst;
-
-error:
-  GSSK_Free(inst);
-  cJSON_Delete(root);
-  return NULL;
+  return status;
 }
 
 static void compute_derivatives(GSSK_Instance *inst, const double *state,
@@ -423,6 +446,10 @@ GSSK_Status GSSK_Step(GSSK_Instance *inst, double dt) {
   }
 
   return GSSK_SUCCESS;
+}
+
+const char *GSSK_GetErrorDescription(GSSK_Instance *inst) {
+  return inst ? inst->error_msg : "Invalid Instance";
 }
 
 const double *GSSK_GetState(GSSK_Instance *inst) {
