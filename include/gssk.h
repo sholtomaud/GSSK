@@ -54,9 +54,22 @@ typedef enum {
  * @brief Initialize a GSSK instance from a JSON configuration string.
  *
  * @param json_data String containing the model topology and config.
- * @return GSSK_Instance* Pointer to initialized instance, or NULL on failure.
+ * @param out_inst Pointer to a GSSK_Instance pointer that will be populated.
+ * @return GSSK_Status Initialization status. If GSSK_ERR_SCHEMA_VIOLATION is
+ *         returned, out_inst will still contain an instance pointer that
+ *         can be used with GSSK_GetErrorDescription to see the specific error.
+ *         The caller must always call GSSK_Free on the returned instance if it
+ *         is not NULL.
  */
-GSSK_Instance *GSSK_Init(const char *json_data);
+GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst);
+
+/**
+ * @brief Get a detailed error description from the last operation.
+ *
+ * @param inst Pointer to the GSSK instance.
+ * @return const char* Error message string.
+ */
+const char *GSSK_GetErrorDescription(GSSK_Instance *inst);
 
 /**
  * @brief Perform one simulation step.

@@ -240,11 +240,25 @@
             const jsonPtr = gssk._malloc(jsonLen);
             gssk.stringToUTF8(modelJson, jsonPtr, jsonLen);
 
-            currentKernel = gssk._GSSK_Init(jsonPtr);
+            // Allocate space for the instance pointer (4 bytes for 32-bit WASM)
+            const outInstPtr = gssk._malloc(4);
+            const status = gssk._GSSK_Init(jsonPtr, outInstPtr);
+
+            // Read the returned pointer from WASM memory
+            currentKernel = gssk.HEAPU32[outInstPtr >> 2];
+
+            gssk._free(outInstPtr);
             gssk._free(jsonPtr);
 
-            if (!currentKernel) {
-                alert("Failed to initialize kernel.");
+            if (status !== 0) {
+                let errMsg = "Unknown Error";
+                if (currentKernel) {
+                    const errPtr = gssk._GSSK_GetErrorDescription(currentKernel);
+                    errMsg = gssk.UTF8ToString(errPtr);
+                    gssk._GSSK_Free(currentKernel);
+                    currentKernel = null;
+                }
+                alert("Failed to initialize kernel: " + errMsg);
                 return;
             }
 

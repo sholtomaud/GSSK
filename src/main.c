@@ -34,9 +34,13 @@ int main(int argc, char **argv) {
   data[length] = '\0';
 
   // Initialize Kernel
-  GSSK_Instance *kernel = GSSK_Init(data);
-  if (!kernel) {
-    fprintf(stderr, "Failed to initialize GSSK kernel.\n");
+  GSSK_Instance *kernel = NULL;
+  GSSK_Status status = GSSK_Init(data, &kernel);
+  if (status != GSSK_SUCCESS) {
+    fprintf(stderr, "Failed to initialize GSSK kernel: %s\n",
+            kernel ? GSSK_GetErrorDescription(kernel) : "Unknown Error");
+    if (kernel)
+      GSSK_Free(kernel);
     free(data);
     return EXIT_FAILURE;
   }
