@@ -395,6 +395,14 @@ static void compute_derivatives(GSSK_Instance *inst, const double *state,
 
 #include <math.h>
 
+void GSSK_Reset(GSSK_Instance *inst) {
+  if (!inst)
+    return;
+  for (size_t i = 0; i < inst->node_count; i++) {
+    inst->state[i] = inst->nodes[i].initial_value;
+  }
+}
+
 GSSK_Status GSSK_Step(GSSK_Instance *inst, double dt) {
   if (!inst)
     return GSSK_ERR_UNKNOWN;
@@ -466,6 +474,12 @@ const char *GSSK_GetNodeID(GSSK_Instance *inst, size_t index) {
   return inst->nodes[index].id;
 }
 
+int GSSK_FindNodeIdx(GSSK_Instance *inst, const char *id) {
+  if (!inst || !id)
+    return -1;
+  return find_node_idx(inst, id);
+}
+
 double GSSK_GetTStart(GSSK_Instance *inst) {
   return inst ? inst->config.t_start : 0.0;
 }
@@ -475,6 +489,22 @@ double GSSK_GetTEnd(GSSK_Instance *inst) {
 }
 
 double GSSK_GetDt(GSSK_Instance *inst) { return inst ? inst->config.dt : 0.0; }
+
+size_t GSSK_GetEdgeCount(GSSK_Instance *inst) {
+  return inst ? inst->edge_count : 0;
+}
+
+double GSSK_GetEdgeK(GSSK_Instance *inst, size_t index) {
+  if (!inst || index >= inst->edge_count)
+    return 0.0;
+  return inst->edges[index].k;
+}
+
+void GSSK_SetEdgeK(GSSK_Instance *inst, size_t index, double k) {
+  if (!inst || index >= inst->edge_count)
+    return;
+  inst->edges[index].k = k;
+}
 
 void GSSK_Free(GSSK_Instance *inst) {
   if (inst) {
