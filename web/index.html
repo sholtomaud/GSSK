@@ -77,6 +77,7 @@
                         <option value="oscillator">Predator-Prey Oscillator</option>
                         <option value="decay">Linear Decay</option>
                         <option value="saturation">Saturation (Limit Logic)</option>
+                        <option value="thermostat">Thermostat (Threshold Logic)</option>
                         <option value="economic">Economic Model (Market)</option>
                         <option value="atwood">Atwood Machine (Physics)</option>
                     </select>
@@ -87,9 +88,11 @@
                     <select id="simMode" class="w-full bg-vpsoft border-white/10 rounded-lg p-3 text-white/90 mb-4">
                         <option value="bulk">Bulk (Static)</option>
                         <option value="streaming" selected>Streaming (Real-time)</option>
+                        <option value="ensemble">Ensemble Forecasting</option>
+                        <option value="calibrate">Parameter Calibration</option>
                     </select>
 
-                    <div class="space-y-4 pt-4 border-t border-white/5">
+                    <div id="paramsSection" class="space-y-4 pt-4 border-t border-white/5">
                         <h3 class="text-xs font-bold text-white/30 uppercase tracking-widest">Override Parameters</h3>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
@@ -106,6 +109,36 @@
                             <input type="number" id="inputDt" value="0.1" step="0.01" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
                         </div>
                         <div id="recommendation" class="text-[10px] text-brand/60 italic"></div>
+                    </div>
+
+                    <div id="ensembleSettings" class="space-y-4 pt-4 border-t border-white/5 hidden">
+                        <h3 class="text-xs font-bold text-white/30 uppercase tracking-widest">Ensemble Settings</h3>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs text-white/40 mb-1">Runs</label>
+                                <input type="number" id="ensembleRuns" value="50" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-white/40 mb-1">Perturb %</label>
+                                <input type="number" id="ensemblePerturb" value="10" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="calibrationSettings" class="space-y-4 pt-4 border-t border-white/5 hidden">
+                        <h3 class="text-xs font-bold text-white/30 uppercase tracking-widest">Calibration Settings</h3>
+                        <div>
+                            <label class="block text-xs text-white/40 mb-1">Optimizer Iterations</label>
+                            <input type="number" id="calibIter" value="100" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                        </div>
+                        <div id="calibInfo" class="text-[10px] text-brand/60">Fits 'Linear Decay' model to synthetic data.</div>
+                    </div>
+                </div>
+
+                <div id="calibrationResults" class="glass p-6 rounded-2xl hidden">
+                    <h2 class="text-xl font-semibold mb-4 text-brand">Calibration Results</h2>
+                    <div id="resultsList" class="space-y-2 text-xs text-white/70">
+                        <!-- Populated by JS -->
                     </div>
                 </div>
 
@@ -178,7 +211,25 @@
                     { id: "displacement", origin: "source", target: "position", logic: "interaction", params: { k: 1.0, control_node: "velocity" } }
                 ],
                 config: { t_start: 0, t_end: 10, dt: 0.05, method: "rk4" }
+            },
+            thermostat: {
+                nodes: [
+                    { id: "room", type: "storage", value: 25 },
+                    { id: "ambient", type: "constant", value: 20 },
+                    { id: "fan", type: "sink", value: 0 }
+                ],
+                edges: [
+                    { id: "heat_loss", origin: "room", target: "ambient", logic: "linear", params: { k: 0.05 } },
+                    { id: "active_cooling", origin: "room", target: "fan", logic: "threshold", params: { k: 2.0, threshold: 22.0 } }
+                ],
+                config: { t_start: 0, t_end: 100, dt: 0.1, method: "rk4" }
             }
+        };
+
+        const CALIBRATION_DATA = {
+            decay: [
+                { node_id: "A", data: [{ t: 0, v: 100 }, { t: 10, v: 60.6 }, { t: 20, v: 36.8 }, { t: 30, v: 22.3 }, { t: 40, v: 13.5 }, { t: 50, v: 8.2 }] }
+            ]
         };
 
         let chart;
@@ -311,6 +362,206 @@
             let t = t_start;
             const startTime = performance.now();
 
+            if (simMode === 'ensemble') {
+                const runs = parseInt(document.getElementById('ensembleRuns').value);
+                const perturb = parseFloat(document.getElementById('ensemblePerturb').value) / 100.0;
+
+                const resPtr = gssk._GSSK_EnsembleForecast(currentKernel, runs, perturb);
+                if (resPtr === 0) {
+                    alert("Ensemble Forecast failed");
+                    stopSimulation();
+                    return;
+                }
+
+                // GSSK_EnsembleResult struct mapping
+                const minEnvPtr = gssk.HEAPU32[resPtr >> 2];
+                const maxEnvPtr = gssk.HEAPU32[(resPtr + 4) >> 2];
+                const meanEnvPtr = gssk.HEAPU32[(resPtr + 8) >> 2];
+                const resNodeCount = gssk.HEAPU32[(resPtr + 12) >> 2];
+                const resStepCount = gssk.HEAPU32[(resPtr + 16) >> 2];
+
+                const MAX_CHART_POINTS = 2000;
+                const decimateFactor = Math.max(1, Math.floor(resStepCount / MAX_CHART_POINTS));
+
+                const minArrays = [];
+                const maxArrays = [];
+                const meanArrays = [];
+
+                for (let i = 0; i < node_count; i++) {
+                    // For each node, we'll create a shaded area dataset and a mean line dataset
+                    // But to keep it clean, let's just do it for the first few nodes if many
+                    const color = `hsl(${(i * 137.5) % 360}, 70%, 60%)`;
+
+                    // The envelopes are stored as: [step0_node0, step0_node1, ..., step1_node0, step1_node1, ...]
+                    // Actually checking src/advanced.c: idx = s * node_count + n;
+
+                    const minData = [];
+                    const maxData = [];
+                    const meanData = [];
+
+                    for (let s = 0; s < resStepCount; s += decimateFactor) {
+                        if (i === 0) labels.push((t_start + s * dt).toFixed(1));
+
+                        const idx = s * node_count + i;
+                        const minVal = gssk.HEAPF64[(minEnvPtr >> 3) + idx];
+                        const maxVal = gssk.HEAPF64[(maxEnvPtr >> 3) + idx];
+                        const meanVal = gssk.HEAPF64[(meanEnvPtr >> 3) + idx];
+
+                        minData.push(minVal);
+                        maxData.push(maxVal);
+                        meanData.push(meanVal);
+                    }
+
+                    // Mean Line
+                    datasets[i].data = meanData;
+
+                    // Shaded Area (using Chart.js filler plugin)
+                    // We'll add a separate dataset for the "range"
+                    datasets.push({
+                        label: `${datasets[i].label} Range`,
+                        data: maxData,
+                        fill: {
+                            target: i, // Fill towards the mean dataset (index i)
+                            above: color.replace(')', ', 0.15)').replace('hsl', 'hsla'),
+                            below: color.replace(')', ', 0.15)').replace('hsl', 'hsla')
+                        },
+                        borderColor: 'transparent',
+                        pointRadius: 0,
+                        backgroundColor: color.replace(')', ', 0.15)').replace('hsl', 'hsla')
+                    });
+
+                    // We also need the "bottom" of the range
+                    datasets.push({
+                        label: `${datasets[i].label} Min`,
+                        data: minData,
+                        borderColor: 'transparent',
+                        pointRadius: 0,
+                        fill: false
+                    });
+
+                    // Update the range dataset to fill between min and max
+                    const rangeIdx = node_count + (i * 2);
+                    const minIdx = node_count + (i * 2) + 1;
+                    datasets[rangeIdx].fill = minIdx;
+                }
+
+                chart.update();
+                gssk._GSSK_FreeEnsembleResult(resPtr);
+                const endTime = performance.now();
+                document.getElementById('statPerf').innerText = `${(endTime - startTime).toFixed(2)} ms (Ensemble)`;
+                stopSimulation();
+                return;
+            }
+
+            if (simMode === 'calibrate') {
+                const iterations = parseInt(document.getElementById('calibIter').value);
+                const modelName = document.getElementById('modelSelect').value;
+                const obsData = CALIBRATION_DATA[modelName];
+
+                if (!obsData) {
+                    alert("No calibration data for this model");
+                    stopSimulation();
+                    return;
+                }
+
+                // Prepare GSSK_NodeObservations array
+                const obsPtr = gssk._malloc(obsData.length * 12); // sizeof(GSSK_NodeObservations) = 12 (ptr + ptr + size_t)
+                for (let i = 0; i < obsData.length; i++) {
+                    const nodeObs = obsData[i];
+                    const idLen = gssk.lengthBytesUTF8(nodeObs.node_id) + 1;
+                    const idPtr = gssk._malloc(idLen);
+                    gssk.stringToUTF8(nodeObs.node_id, idPtr, idLen);
+
+                    const dataLen = nodeObs.data.length * 16; // sizeof(GSSK_Observation) = 16 (double + double)
+                    const dataPtr = gssk._malloc(dataLen);
+                    for (let j = 0; j < nodeObs.data.length; j++) {
+                        gssk.HEAPF64[(dataPtr >> 3) + (j * 2)] = nodeObs.data[j].t;
+                        gssk.HEAPF64[(dataPtr >> 3) + (j * 2) + 1] = nodeObs.data[j].v;
+                    }
+
+                    const base = (obsPtr + (i * 12));
+                    gssk.HEAPU32[base >> 2] = idPtr;
+                    gssk.HEAPU32[(base + 4) >> 2] = dataPtr;
+                    gssk.HEAPU32[(base + 8) >> 2] = nodeObs.data.length;
+                }
+
+                const status = gssk._GSSK_Calibrate(currentKernel, obsPtr, obsData.length, iterations);
+
+                if (status === 0) {
+                    const edgeCount = gssk._GSSK_GetEdgeCount(currentKernel);
+                    const resultsList = document.getElementById('resultsList');
+                    resultsList.innerHTML = '';
+                    document.getElementById('calibrationResults').classList.remove('hidden');
+
+                    for (let i = 0; i < edgeCount; i++) {
+                        const k = gssk._GSSK_GetEdgeK(currentKernel, i);
+                        const div = document.createElement('div');
+                        div.className = 'flex justify-between border-b border-white/5 pb-1';
+                        div.innerHTML = `<span>Edge ${i} k:</span> <span class="text-brand font-mono">${k.toFixed(4)}</span>`;
+                        resultsList.appendChild(div);
+                    }
+
+                    // Run a normal simulation with the new parameters
+                    const node_count = gssk._GSSK_GetStateSize(currentKernel);
+                    const t_start = gssk._GSSK_GetTStart(currentKernel);
+                    const t_end = gssk._GSSK_GetTEnd(currentKernel);
+                    const dt = gssk._GSSK_GetDt(currentKernel);
+
+                    let t = t_start;
+                    const MAX_CHART_POINTS = 2000;
+                    const totalSteps = (t_end - t_start) / dt;
+                    const decimateFactor = Math.max(1, Math.floor(totalSteps / MAX_CHART_POINTS));
+                    let stepCount = 0;
+
+                    // Clear previous chart
+                    labels.length = 0;
+                    datasets.forEach(d => d.data = []);
+
+                    while (t <= t_end + (dt * 0.01)) {
+                        if (stepCount % decimateFactor === 0) {
+                            labels.push(t.toFixed(1));
+                            const statePtr = gssk._GSSK_GetState(currentKernel);
+                            const stateArray = new Float64Array(gssk.HEAPU8.buffer, statePtr, node_count);
+                            for (let i = 0; i < node_count; i++) datasets[i].data.push(stateArray[i]);
+                        }
+                        gssk._GSSK_Step(currentKernel, dt);
+                        t += dt;
+                        stepCount++;
+                    }
+
+                    // Add observations to chart
+                    obsData.forEach((no, idx) => {
+                        const obsDataset = {
+                            label: `${no.node_id} (Observed)`,
+                            data: no.data.map(d => ({ x: d.t, y: d.v })),
+                            showLine: false,
+                            pointStyle: 'crossRot',
+                            pointRadius: 6,
+                            borderColor: '#fbbf24',
+                            type: 'scatter'
+                        };
+                        datasets.push(obsDataset);
+                    });
+
+                    chart.update();
+                } else {
+                    alert("Calibration failed");
+                }
+
+                // Cleanup
+                for (let i = 0; i < obsData.length; i++) {
+                    const base = (obsPtr + (i * 12));
+                    gssk._free(gssk.HEAPU32[base >> 2]); // idPtr
+                    gssk._free(gssk.HEAPU32[(base + 4) >> 2]); // dataPtr
+                }
+                gssk._free(obsPtr);
+
+                const endTime = performance.now();
+                document.getElementById('statPerf').innerText = `${(endTime - startTime).toFixed(2)} ms (Calib)`;
+                stopSimulation();
+                return;
+            }
+
             const MAX_CHART_POINTS = 2000;
             const totalSteps = (t_end - t_start) / dt;
             const decimateFactor = Math.max(1, Math.floor(totalSteps / MAX_CHART_POINTS));
@@ -399,6 +650,18 @@
         }
 
         document.getElementById('modelSelect').onchange = syncInputsToModel;
+
+        document.getElementById('simMode').onchange = function() {
+            const mode = this.value;
+            document.getElementById('ensembleSettings').classList.toggle('hidden', mode !== 'ensemble');
+            document.getElementById('calibrationSettings').classList.toggle('hidden', mode !== 'calibrate');
+            document.getElementById('paramsSection').classList.toggle('hidden', mode === 'calibrate');
+
+            if (mode === 'calibrate') {
+                document.getElementById('modelSelect').value = 'decay';
+                syncInputsToModel();
+            }
+        };
 
         // Initialize on load
         syncInputsToModel();
