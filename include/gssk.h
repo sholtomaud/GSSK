@@ -81,6 +81,13 @@ const char *GSSK_GetErrorDescription(GSSK_Instance *inst);
 GSSK_Status GSSK_Step(GSSK_Instance *inst, double dt);
 
 /**
+ * @brief Reset the simulation instance to its initial state.
+ *
+ * @param inst Pointer to the GSSK instance.
+ */
+void GSSK_Reset(GSSK_Instance *inst);
+
+/**
  * @brief Access the internal state vector.
  *
  * @param inst Pointer to the GSSK instance.
@@ -96,6 +103,15 @@ const double *GSSK_GetState(GSSK_Instance *inst);
  * @return const char* ID of the node, or NULL if index is out of bounds.
  */
 const char *GSSK_GetNodeID(GSSK_Instance *inst, size_t index);
+
+/**
+ * @brief Find the index of a node by its ID.
+ *
+ * @param inst Pointer to the GSSK instance.
+ * @param id ID of the node.
+ * @return int Index of the node, or -1 if not found.
+ */
+int GSSK_FindNodeIdx(GSSK_Instance *inst, const char *id);
 
 /**
  * @brief Get the dimension of the state vector.
@@ -128,6 +144,77 @@ double GSSK_GetTEnd(GSSK_Instance *inst);
  * @return double Time step.
  */
 double GSSK_GetDt(GSSK_Instance *inst);
+
+/**
+ * @brief Get the number of edges in the model.
+ */
+size_t GSSK_GetEdgeCount(GSSK_Instance *inst);
+
+/**
+ * @brief Get the coefficient 'k' of an edge.
+ */
+double GSSK_GetEdgeK(GSSK_Instance *inst, size_t index);
+
+/**
+ * @brief Set the coefficient 'k' of an edge.
+ */
+void GSSK_SetEdgeK(GSSK_Instance *inst, size_t index, double k);
+
+/**
+ * @brief Single observation point for calibration.
+ */
+typedef struct {
+  double time;
+  double value;
+} GSSK_Observation;
+
+/**
+ * @brief Set of observations for a specific node.
+ */
+typedef struct {
+  const char *node_id;
+  GSSK_Observation *data;
+  size_t count;
+} GSSK_NodeObservations;
+
+/**
+ * @brief Result structure for ensemble forecasting.
+ */
+typedef struct {
+  double *min_envelope;  /**< Size: node_count * step_count */
+  double *max_envelope;  /**< Size: node_count * step_count */
+  double *mean_envelope; /**< Size: node_count * step_count */
+  size_t node_count;
+  size_t step_count;
+} GSSK_EnsembleResult;
+
+/**
+ * @brief Run ensemble forecasting.
+ *
+ * @param inst Base model instance.
+ * @param runs Number of simulation runs.
+ * @param perturbation Fractional perturbation (e.g., 0.1 for +/- 10%).
+ * @return GSSK_EnsembleResult* Result containing the envelopes. Caller must free.
+ */
+GSSK_EnsembleResult *GSSK_EnsembleForecast(GSSK_Instance *inst, size_t runs,
+                                           double perturbation);
+
+/**
+ * @brief Free ensemble results.
+ */
+void GSSK_FreeEnsembleResult(GSSK_EnsembleResult *res);
+
+/**
+ * @brief Run parameter calibration.
+ *
+ * @param inst Base model instance.
+ * @param obs Array of node observations.
+ * @param obs_count Number of nodes with observations.
+ * @param iterations Number of optimizer iterations.
+ * @return GSSK_Status Optimization status.
+ */
+GSSK_Status GSSK_Calibrate(GSSK_Instance *inst, GSSK_NodeObservations *obs,
+                           size_t obs_count, int iterations);
 
 /**
  * @brief Free all memory associated with an instance.

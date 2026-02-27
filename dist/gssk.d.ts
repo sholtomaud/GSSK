@@ -8,6 +8,14 @@ export interface GSSKModule {
   _GSSK_GetTEnd(kernelPtr: number): number;
   _GSSK_GetDt(kernelPtr: number): number;
   _GSSK_GetNodeID(kernelPtr: number, index: number): number;
+  _GSSK_FindNodeIdx(kernelPtr: number, idPtr: number): number;
+  _GSSK_Reset(kernelPtr: number): void;
+  _GSSK_GetEdgeCount(kernelPtr: number): number;
+  _GSSK_GetEdgeK(kernelPtr: number, index: number): number;
+  _GSSK_SetEdgeK(kernelPtr: number, index: number, k: number): void;
+  _GSSK_EnsembleForecast(kernelPtr: number, runs: number, perturbation: number): number;
+  _GSSK_FreeEnsembleResult(resPtr: number): void;
+  _GSSK_Calibrate(kernelPtr: number, obsPtr: number, obsCount: number, iterations: number): number;
   _GSSK_Free(kernelPtr: number): void;
   _malloc(size: number): number;
   _free(ptr: number): void;

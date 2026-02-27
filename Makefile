@@ -19,8 +19,8 @@ DIST_DIR = dist
 TEST_DIR = tests
 
 # Files
-SOURCES = $(SRC_DIR)/gssk.c $(SRC_DIR)/cJSON.c
-OBJECTS = $(LIB_DIR)/gssk.o $(LIB_DIR)/cJSON.o
+SOURCES = $(SRC_DIR)/gssk.c $(SRC_DIR)/advanced.c $(SRC_DIR)/cJSON.c
+OBJECTS = $(LIB_DIR)/gssk.o $(LIB_DIR)/advanced.o $(LIB_DIR)/cJSON.o
 TARGET_LIB = $(LIB_DIR)/libgssk.a
 TARGET_CLI = $(BIN_DIR)/gssk
 TARGET_COMPARE = $(BIN_DIR)/csv_compare
@@ -83,8 +83,8 @@ clean:
 wasm: directories
 	cp $(SRC_DIR)/gssk.d.ts $(DIST_DIR)/gssk.d.ts
 	cp gssk.schema.json $(DIST_DIR)/gssk.schema.json
-	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \
+	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/advanced.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \
 	-s MODULARIZE=1 -s EXPORT_NAME='createGSSK' \
-	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_GetErrorDescription", "_GSSK_Free", "_malloc", "_free"]' \
+	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_Reset", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_FindNodeIdx", "_GSSK_GetEdgeCount", "_GSSK_GetEdgeK", "_GSSK_SetEdgeK", "_GSSK_EnsembleForecast", "_GSSK_FreeEnsembleResult", "_GSSK_Calibrate", "_GSSK_GetErrorDescription", "_GSSK_Free", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "stringToUTF8", "UTF8ToString", "lengthBytesUTF8", "allocate", "ALLOC_NORMAL", "HEAPU8", "HEAPF64", "HEAPU32"]' \
 	-o $(DIST_DIR)/gssk.js
