@@ -25,7 +25,7 @@ TARGET_LIB = $(LIB_DIR)/libgssk.a
 TARGET_CLI = $(BIN_DIR)/gssk
 TARGET_COMPARE = $(BIN_DIR)/csv_compare
 
-.PHONY: all clean test test-update directories
+.PHONY: all clean test test-update directories swift-build swift-test swift-clean
 
 all: directories $(TARGET_LIB) $(TARGET_CLI) $(TARGET_COMPARE)
 
@@ -76,7 +76,7 @@ test-update: all
 		./bin/gssk $$model tests/expected/$$name.csv; \
 	done
 
-clean:
+clean: swift-clean
 	rm -rf $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results
 
 # WASM Build (Requires emscripten)
@@ -88,3 +88,21 @@ wasm: directories
 	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_Reset", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_FindNodeIdx", "_GSSK_GetEdgeCount", "_GSSK_GetEdgeK", "_GSSK_SetEdgeK", "_GSSK_EnsembleForecast", "_GSSK_FreeEnsembleResult", "_GSSK_Calibrate", "_GSSK_GetErrorDescription", "_GSSK_Free", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "stringToUTF8", "UTF8ToString", "lengthBytesUTF8", "allocate", "ALLOC_NORMAL", "HEAPU8", "HEAPF64", "HEAPU32"]' \
 	-o $(DIST_DIR)/gssk.js
+
+# ──────────────────────────────────────────────────────────────
+# Swift Package (Requires Swift toolchain)
+# ──────────────────────────────────────────────────────────────
+
+# Build the Swift package (CGSSK + GSSK wrapper)
+swift-build:
+	@command -v swift >/dev/null 2>&1 || { echo "swift not found — install Xcode or swift.org toolchain"; exit 1; }
+	swift build
+
+# Run the Swift test suite
+swift-test:
+	@command -v swift >/dev/null 2>&1 || { echo "swift not found — install Xcode or swift.org toolchain"; exit 1; }
+	swift test
+
+# Remove Swift build artefacts (.build/ directory)
+swift-clean:
+	@command -v swift >/dev/null 2>&1 && swift package clean || rm -rf .build

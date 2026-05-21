@@ -34,6 +34,17 @@ jobs:
       - name: Build Native
         run: make
 
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "5.10"
+
+      - name: Build Swift Package
+        run: make swift-build
+
+      - name: Test Swift Package
+        run: make swift-test
+
       - name: Build WASM
         run: make wasm
 
@@ -58,6 +69,8 @@ jobs:
             docs/.vitepress/dist/
             README.md
             package.json
+            Package.swift
+            Sources/
 
   deploy:
     needs: build

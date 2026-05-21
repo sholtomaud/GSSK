@@ -28,5 +28,9 @@ bin/*.wasm
 node_modules/
 docs/.vitepress/dist/
 
+# Swift Package Manager
+.build/
+.swiftpm/
+
 # Ensure dist/ artifacts are tracked
 !dist/
