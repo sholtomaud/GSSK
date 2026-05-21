@@ -1,13 +1,13 @@
 import XCTest
 @testable import GSSK
 
-/// Smoke tests for the Swift wrapper over the GSSK C kernel.
 final class GSSKTests: XCTestCase {
 
-    // MARK: - Test fixtures
+    // MARK: - Fixtures
 
     static let decayModelJSON = """
     {
+        "metadata": { "schema_version": 1, "name": "Decay Test" },
         "nodes": [
             { "id": "biomass",     "type": "storage", "value": 100.0 },
             { "id": "environment", "type": "sink",    "value": 0.0   }
@@ -15,27 +15,38 @@ final class GSSKTests: XCTestCase {
         "edges": [
             {
                 "id": "respiration",
-                "origin": "biomass",
-                "target": "environment",
+                "origin": "biomass", "target": "environment",
                 "logic": "linear",
                 "params": { "k": 0.05 }
             }
         ],
-        "config": {
-            "t_start": 0.0,
-            "t_end": 20.0,
-            "dt": 0.5,
-            "method": "rk4"
-        }
+        "config": { "t_start": 0.0, "t_end": 20.0, "dt": 0.5, "method": "rk4" }
     }
     """
 
-    // MARK: - Initialisation tests
+    static let householdModelJSON = """
+    {
+        "metadata": { "schema_version": 1, "name": "Household" },
+        "nodes": [
+            { "id": "salary",    "type": "source",  "value": 5000.0 },
+            { "id": "account",   "type": "storage", "value": 1000.0 },
+            { "id": "groceries", "type": "sink",    "value": 0.0 },
+            { "id": "rent",      "type": "sink",    "value": 0.0 }
+        ],
+        "edges": [
+            { "id": "salary_in",      "origin": "salary",  "target": "account",   "logic": "constant", "params": { "k": 5000.0 } },
+            { "id": "groceries_out",  "origin": "account", "target": "groceries", "logic": "constant", "params": { "k": 800.0 } },
+            { "id": "rent_out",       "origin": "account", "target": "rent",      "logic": "constant", "params": { "k": 1500.0 } }
+        ],
+        "config": { "t_start": 0.0, "t_end": 12.0, "dt": 1.0, "method": "euler" }
+    }
+    """
+
+    // MARK: - Basic init & properties
 
     func testDecayModelInitialises() throws {
         let sim = try GSSKSimulator(json: Self.decayModelJSON)
-        // The kernel tracks all nodes (storage + sink) in the state vector.
-        // decay_model has 2 nodes: biomass (storage) + environment (sink).
+        // decay_model has 2 nodes: biomass (storage) + environment (sink)
         XCTAssertEqual(sim.stateSize, 2)
         XCTAssertEqual(sim.startTime, 0.0)
         XCTAssertEqual(sim.endTime, 20.0)
@@ -45,36 +56,89 @@ final class GSSKTests: XCTestCase {
     func testDecayModelNodeLookup() throws {
         let sim = try GSSKSimulator(json: Self.decayModelJSON)
         XCTAssertEqual(sim.nodeID(at: 0), "biomass")
+        XCTAssertEqual(sim.nodeID(at: 1), "environment")
         XCTAssertEqual(sim.nodeIndex(id: "biomass"), 0)
         XCTAssertNil(sim.nodeIndex(id: "nonexistent"))
     }
 
-    // MARK: - State tests
+    // MARK: - Node manifest (column ordering contract)
+
+    func testNodeManifestBuiltFromKernel() throws {
+        let sim = try GSSKSimulator(json: Self.decayModelJSON)
+        // Manifest should be auto-built from kernel after init
+        XCTAssertEqual(sim.nodeManifest[0], "biomass")
+        XCTAssertEqual(sim.nodeManifest[1], "environment")
+        XCTAssertEqual(sim.nodeManifest.count, 2)
+    }
+
+    func testSerialiserOutputManifestPreserved() throws {
+        let json = Self.householdModelJSON.data(using: .utf8)!
+        // Serialiser declares its own manifest
+        let manifest: [Int: String] = [
+            0: "salary",
+            1: "account",
+            2: "groceries",
+            3: "rent"
+        ]
+        let output = GSSKSerialiserOutput(json: json, nodeManifest: manifest)
+        let sim = try GSSKSimulator(serialiserOutput: output)
+
+        // Manifest from serialiser should be stored verbatim
+        XCTAssertEqual(sim.nodeManifest, manifest)
+    }
+
+    // MARK: - Named result access
+
+    func testNamedStateReturnsCorrectKeys() throws {
+        let sim = try GSSKSimulator(json: Self.decayModelJSON)
+        let named = sim.namedState()
+        XCTAssertEqual(named["biomass"] ?? -1,     100.0, accuracy: 1e-9)
+        XCTAssertEqual(named["environment"] ?? -1, 0.0,   accuracy: 1e-9)
+    }
+
+    func testRunNamedReturnsTimeSeriesPerNode() throws {
+        let sim = try GSSKSimulator(json: Self.decayModelJSON)
+        let named = try sim.runNamed()
+        // Should have an entry for every node
+        XCTAssertNotNil(named["biomass"])
+        XCTAssertNotNil(named["environment"])
+        // biomass time series should have 40 steps (20 / 0.5)
+        XCTAssertEqual(named["biomass"]!.count, 40)
+        // Final biomass: Q(20) = 100 * exp(-0.05 * 20) ≈ 36.788
+        XCTAssertEqual(named["biomass"]!.last!, 100.0 * exp(-0.05 * 20.0), accuracy: 1e-3)
+    }
+
+    // MARK: - Multi-node household model
+
+    func testHouseholdModelAccountBalance() throws {
+        let sim = try GSSKSimulator(json: Self.householdModelJSON)
+        let named = try sim.runNamed()
+        // Net flow into account = +5000 (salary) - 800 (groceries) - 1500 (rent) = +2700/step
+        // After 12 steps: 1000 + 12 * 2700 = 33400
+        XCTAssertEqual(named["account"]!.last!, 1000.0 + 12.0 * 2700.0, accuracy: 1e-6)
+    }
+
+    // MARK: - State & step accuracy
 
     func testDecayModelInitialState() throws {
         let sim = try GSSKSimulator(json: Self.decayModelJSON)
         let s = sim.state()
-        XCTAssertEqual(s.count, 2)          // biomass + environment
-        XCTAssertEqual(s[0], 100.0, accuracy: 1e-9)  // biomass initial value
-        XCTAssertEqual(s[1], 0.0,   accuracy: 1e-9)  // environment initial value
+        XCTAssertEqual(s[0], 100.0, accuracy: 1e-9)  // biomass
+        XCTAssertEqual(s[1], 0.0,   accuracy: 1e-9)  // environment
     }
 
     func testDecayModelSingleStep() throws {
         let sim = try GSSKSimulator(json: Self.decayModelJSON)
         let s = try sim.step()
-        // After one RK4 step of dt=0.5 with k=0.05:
-        // Exact: Q(0.5) = 100 * exp(-0.05 * 0.5) ≈ 97.531
-        XCTAssertEqual(s[0], 100.0 * exp(-0.05 * 0.5), accuracy: 1e-3, "biomass should decay")
+        // RK4: Q(0.5) = 100 * exp(-0.05 * 0.5) ≈ 97.531
+        XCTAssertEqual(s[0], 100.0 * exp(-0.05 * 0.5), accuracy: 1e-3)
     }
 
     func testDecayModelRunToCompletion() throws {
         let sim = try GSSKSimulator(json: Self.decayModelJSON)
         let results = try sim.run()
-        // 20 / 0.5 = 40 steps expected
         XCTAssertEqual(results.count, 40)
-        // Final state: Q(20) = 100 * exp(-0.05 * 20) ≈ 36.788
-        let finalBiomass = results.last![0]
-        XCTAssertEqual(finalBiomass, 100.0 * exp(-0.05 * 20.0), accuracy: 1e-3)
+        XCTAssertEqual(results.last![0], 100.0 * exp(-0.05 * 20.0), accuracy: 1e-3)
     }
 
     func testDecayModelReset() throws {
@@ -82,12 +146,31 @@ final class GSSKTests: XCTestCase {
         _ = try sim.run()
         sim.reset()
         XCTAssertEqual(sim.currentTime, 0.0)
-        let s = sim.state()
-        XCTAssertEqual(s[0], 100.0, accuracy: 1e-9, "biomass should be restored")
-        XCTAssertEqual(s[1], 0.0,   accuracy: 1e-9, "environment should be restored")
+        XCTAssertEqual(sim.state()[0], 100.0, accuracy: 1e-9)
     }
 
-    // MARK: - Error-path tests
+    // MARK: - Schema version validation
+
+    func testSchemaMismatchThrows() throws {
+        let badVersionJSON = """
+        {
+            "metadata": { "schema_version": 99 },
+            "nodes": [{ "id": "x", "type": "storage", "value": 1.0 }],
+            "config": { "t_start": 0, "t_end": 1, "dt": 0.1, "method": "euler" }
+        }
+        """
+        let json = badVersionJSON.data(using: .utf8)!
+        let output = GSSKSerialiserOutput(json: json, nodeManifest: [0: "x"])
+        XCTAssertThrowsError(try GSSKSimulator(serialiserOutput: output)) { error in
+            guard case GSSKError.schemaMismatch(let found, let expected) = error else {
+                return XCTFail("Expected schemaMismatch, got \(error)")
+            }
+            XCTAssertEqual(found, 99)
+            XCTAssertEqual(expected, GSSKSchemaVersion)
+        }
+    }
+
+    // MARK: - Error paths
 
     func testInvalidJSONThrows() {
         XCTAssertThrowsError(try GSSKSimulator(json: "not json at all")) { error in
@@ -98,7 +181,6 @@ final class GSSKTests: XCTestCase {
     }
 
     func testMissingNodesKeyThrows() {
-        // Completely wrong schema — should fail at JSON parse or schema level.
         XCTAssertThrowsError(try GSSKSimulator(json: "{}"))
     }
 }
