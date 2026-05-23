@@ -241,6 +241,6 @@ final class GSSKTests: XCTestCase {
         // plant Tr should be same as sun Tr (1.0) because it's a single input
         XCTAssertEqual(tr["plant"]!, 1.0, accuracy: 1e-9)
 
-        XCTAssertEqual(sim.solverConfidence, GSSK_CONFIDENCE_HIGH)
+        XCTAssertEqual(sim.solverConfidence, .high)
     }
 }
