@@ -17,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y build-essential
@@ -83,6 +85,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -105,13 +108,13 @@ jobs:
           git config user.name "GitHub Action"
           git add .
           git commit -m "chore: distribution build [skip ci]"
-          git remote add origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git push origin dist --force
+          # Use authenticated URL for push to avoid terminal prompts
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git dist --force
 
           # If this is a tag, also tag the dist branch
           if [[ ${{ github.ref }} == refs/tags/* ]]; then
             git tag ${{ github.ref_name }}
-            git push origin ${{ github.ref_name }} --force
+            git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git ${{ github.ref_name }} --force
           fi
 
       - name: Prepare Pages Deployment Artifact
