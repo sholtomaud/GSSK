@@ -21,33 +21,38 @@ Flow rates ($F$) are calculated based on the `logic` attribute of an edge.
 
 ---
 
-## 2. JSON Schema Specification (v1.0)
+## 2. JSON Schema Specification (v2.0)
 
-Models MUST be provided as a single JSON object.
+Models MUST be provided as a single JSON object. v2.0 introduces support for Odum's four-position inter-block array.
 
 ### 2.1 The `nodes` Array
 Each node represents a state variable or a boundary condition.
 ```json
 {
-  "id": "string (unique)",
+  "id": "string (unique, max 63 chars)",
   "type": "storage | source | sink | constant",
-  "value": "float64 (initial state or constant value)"
+  "value": "float64 (initial state or constant value)",
+  "quality_input": "float64 (optional, Odum Position 4 - boundary Transformity)",
+  "output_mode": "partition | replicate (optional, default: partition)"
 }
 ```
 
 ### 2.2 The `edges` Array
-Each edge represents a flow of energy/matter between nodes.
+Each edge represents a flow between nodes, implementing the full Odum connector.
 ```json
 {
-  "id": "string (unique)",
+  "id": "string (optional, stable identifier)",
   "origin": "string (source node id)",
   "target": "string (destination node id)",
+  "carrier": "string (optional, Odum Position 1 - substance type)",
   "logic": "string (constant | linear | interaction | limit | threshold)",
   "params": {
     "k": "float64 (conductivity)",
     "control_node": "string (optional, for interaction/limit logic)",
     "threshold": "float64 (optional, for threshold logic)"
-  }
+  },
+  "output_mode": "partition | replicate (optional, overrides node mode)",
+  "coupled_edge": "string (optional, ID of paired counter-flow edge)"
 }
 ```
 
@@ -57,7 +62,8 @@ Each edge represents a flow of energy/matter between nodes.
   "t_start": 0.0,
   "t_end": 100.0,
   "dt": 0.1,
-  "method": "euler | rk4"
+  "method": "auto | euler | rk4 | incipient",
+  "solver_tolerance": 1e-6
 }
 ```
 
@@ -65,25 +71,31 @@ Each edge represents a flow of energy/matter between nodes.
 
 ## 3. C API & Lifecycle (ABI)
 
-The kernel is implemented in C99, exposing the following interface for host environments (WASM/CLI).
+The kernel is implemented in C99, exposing the following interface.
 
-### 3.1 Data Structures
-```c
-typedef struct {
-    double* state;      // Current Q vector
-    double* dQ;         // Rate of change vector
-    int node_count;
-    // ... internal topology pointers ...
-} GSSK_Instance;
-```
-
-### 3.2 Functions
+### 3.1 Lifecycle
 | Function | Signature | Description |
 | :--- | :--- | :--- |
-| `GSSK_Init` | `GSSK_Instance* GSSK_Init(const char* json_data)` | Parses JSON and allocates all internal memory. Returns NULL on schema failure. |
-| `GSSK_Step` | `void GSSK_Step(GSSK_Instance* inst, double dt)` | Performs one integration step (Euler/RK4). |
-| `GSSK_GetState` | `const double* GSSK_GetState(GSSK_Instance* inst)` | Returns pointer to the internal state buffer for reading. |
-| `GSSK_Free` | `void GSSK_Free(GSSK_Instance* inst)` | Safely deallocates all instance memory. |
+| `GSSK_Init` | `GSSK_Status GSSK_Init(const char* json, GSSK_Instance** out)` | Initialises instance from JSON. |
+| `GSSK_Step` | `GSSK_Status GSSK_Step(GSSK_Instance* inst, double dt)` | Performs one step with dual-solver cross-validation in `auto` mode. |
+| `GSSK_Reset` | `void GSSK_Reset(GSSK_Instance* inst)` | Resets state to initial conditions. |
+| `GSSK_Free` | `void GSSK_Free(GSSK_Instance* inst)` | Deallocates all memory. |
+
+### 3.2 State & Quality Accessors
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `GSSK_GetState` | `const double* GSSK_GetState(GSSK_Instance* inst)` | Current state vector $Q$. |
+| `GSSK_GetTransformationRatio` | `const double* GSSK_GetTransformationRatio(GSSK_Instance* inst)` | Current node transformities ($Tr$). |
+| `GSSK_GetQualityFlow` | `const double* GSSK_GetQualityFlow(GSSK_Instance* inst)` | Node inflow emPower ($Tr \cdot F$). |
+| `GSSK_GetSolverConfidence` | `GSSK_SolverConfidence GSSK_GetSolverConfidence(GSSK_Instance* inst)` | Returns HIGH or DEGRADED. |
+
+### 3.3 Topology Mutation
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `GSSK_AddNode` | `GSSK_Status GSSK_AddNode(GSSK_Instance* inst, const char* json)` | Adds node at runtime. |
+| `GSSK_AddEdge` | `GSSK_Status GSSK_AddEdge(GSSK_Instance* inst, const char* json)` | Adds edge at runtime. |
+| `GSSK_DeactivateNode` | `GSSK_Status GSSK_DeactivateNode(GSSK_Instance* inst, const char* id)` | Soft-removes node. |
+| `GSSK_DeactivateEdge` | `GSSK_Status GSSK_DeactivateEdge(GSSK_Instance* inst, const char* id)` | Soft-removes edge. |
 
 ---
 
