@@ -375,7 +375,10 @@ static void compute_quality_pass(GSSK_Instance *inst, const double *state) {
     case GSSK_LOGIC_CONSTANT:    f = e->k; break;
     case GSSK_LOGIC_LINEAR:      f = e->k * Q; break;
     case GSSK_LOGIC_INTERACTION:
-      if (e->control_idx != -1) f = e->k * Q * state[e->control_idx]; break;
+      if (e->control_idx != -1) {
+        f = e->k * Q * state[e->control_idx];
+      }
+      break;
     case GSSK_LOGIC_LIMIT:
       if (e->control_idx != -1) {
         double C = state[e->control_idx];

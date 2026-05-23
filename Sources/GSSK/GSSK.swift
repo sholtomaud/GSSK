@@ -7,7 +7,10 @@ import Foundation
 /// A serialiser must embed this in the JSON `metadata.schema_version` field.
 /// The kernel does not currently enforce this at the C level, but
 /// `GSSKSimulator.init(json:)` will reject mismatches to catch drift early.
-public let GSSKSchemaVersion: Int = 1
+public let GSSKSchemaVersion: Int = 2
+
+/// Programmatic access to the current schema version.
+public let GSSKCurrentSchemaVersion: Int = GSSKSchemaVersion
 
 // MARK: - Serialiser contract
 
@@ -31,6 +34,16 @@ public struct GSSKSerialiserOutput {
         self.json = json
         self.nodeManifest = nodeManifest
     }
+}
+
+// MARK: - Solver Confidence
+
+/// Dual-solver confidence level (AUTO mode).
+public enum GSSKSolverConfidence {
+    /// IDC and RK4 agree within tolerance.
+    case high
+    /// Solvers have diverged — RK4 result was used.
+    case degraded
 }
 
 // MARK: - Error type
@@ -133,6 +146,13 @@ public final class GSSKSimulator {
     /// Current simulation time (advances with each call to `step()`).
     public private(set) var currentTime: Double = 0
 
+    /// Current dual-solver confidence level (AUTO mode).
+    /// Always `.high` in EULER/RK4/INCIPIENT modes.
+    public var solverConfidence: GSSKSolverConfidence {
+        guard let p = instPtr else { return .high }
+        return GSSK_GetSolverConfidence(p) == GSSK_CONFIDENCE_HIGH ? .high : .degraded
+    }
+
     // MARK: - Initialisation
 
     /// Preferred initialiser — accepts the structured output of a domain serialiser.
@@ -213,7 +233,9 @@ public final class GSSKSimulator {
         guard let p = instPtr else { throw GSSKError.noInstance }
         let stepDt = dt ?? defaultDt
         let status = GSSK_Step(p, stepDt)
-        guard status == GSSK_SUCCESS else {
+        // WARN_SOLVER_DIVERGENCE is handled as success because the kernel
+        // automatically falls back to RK4 and continues.
+        guard status == GSSK_SUCCESS || status == GSSK_WARN_SOLVER_DIVERGENCE else {
             throw Self.map(status: status, message: "")
         }
         currentTime += stepDt
@@ -320,6 +342,7 @@ public final class GSSKSimulator {
         case GSSK_ERR_MALLOC_FAILED:    return .mallocFailed
         case GSSK_ERR_SCHEMA_VIOLATION: return .schemaViolation(message)
         case GSSK_ERR_DIVERGENCE:       return .divergence
+        case GSSK_WARN_SOLVER_DIVERGENCE: return .unknown // Should not be reached from step()
         default:                        return .unknown
         }
     }
