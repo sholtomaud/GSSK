@@ -336,12 +336,6 @@ public final class GSSKSimulator {
         return Array(UnsafeBufferPointer(start: ptr, count: stateSize))
     }
 
-    /// Current dual-solver confidence (HIGH or DEGRADED).
-    public var solverConfidence: GSSK_SolverConfidence {
-        guard let p = instPtr else { return GSSK_CONFIDENCE_HIGH }
-        return GSSK_GetSolverConfidence(p)
-    }
-
     // MARK: - Node access
 
     /// Return the ID string for the node at `index` (kernel ordering).
