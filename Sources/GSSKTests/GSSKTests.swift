@@ -7,7 +7,7 @@ final class GSSKTests: XCTestCase {
 
     static let decayModelJSON = """
     {
-        "metadata": { "schema_version": 1, "name": "Decay Test" },
+        "metadata": { "schema_version": 2, "name": "Decay Test" },
         "nodes": [
             { "id": "biomass",     "type": "storage", "value": 100.0 },
             { "id": "environment", "type": "sink",    "value": 0.0   }
@@ -26,7 +26,7 @@ final class GSSKTests: XCTestCase {
 
     static let householdModelJSON = """
     {
-        "metadata": { "schema_version": 1, "name": "Household" },
+        "metadata": { "schema_version": 2, "name": "Household" },
         "nodes": [
             { "id": "salary",    "type": "source",  "value": 5000.0 },
             { "id": "account",   "type": "storage", "value": 1000.0 },
@@ -182,5 +182,64 @@ final class GSSKTests: XCTestCase {
 
     func testMissingNodesKeyThrows() {
         XCTAssertThrowsError(try GSSKSimulator(json: "{}"))
+    }
+
+    // MARK: - Topology Mutation Tests
+
+    func testAddNodeAtRuntime() throws {
+        let sim = try GSSKSimulator(json: Self.decayModelJSON)
+        XCTAssertEqual(sim.stateSize, 2)
+
+        try sim.addNode(json: "{\"id\":\"new_node\",\"type\":\"storage\",\"value\":50.0}")
+        XCTAssertEqual(sim.stateSize, 3)
+        XCTAssertEqual(sim.nodeID(at: 2), "new_node")
+        XCTAssertEqual(sim.state()[2], 50.0, accuracy: 1e-9)
+        XCTAssertEqual(sim.nodeManifest[2], "new_node")
+    }
+
+    func testAddEdgeAtRuntime() throws {
+        let sim = try GSSKSimulator(json: Self.decayModelJSON)
+        XCTAssertEqual(sim.edgeCount, 1)
+
+        try sim.addEdge(json: "{\"id\":\"new_edge\",\"origin\":\"biomass\",\"target\":\"biomass\",\"logic\":\"linear\",\"params\":{\"k\":0.1}}")
+        XCTAssertEqual(sim.edgeCount, 2)
+        XCTAssertEqual(sim.edgeID(at: 1), "new_edge")
+    }
+
+    func testDeactivateEdge() throws {
+        let sim = try GSSKSimulator(json: Self.decayModelJSON)
+        XCTAssertEqual(sim.edgeK(at: 0), 0.05, accuracy: 1e-9)
+
+        try sim.deactivateEdge(id: "respiration")
+        XCTAssertEqual(sim.edgeK(at: 0), 0.0, accuracy: 1e-9)
+    }
+
+    // MARK: - Quality Accounting Tests
+
+    func testQualityAccounting() throws {
+        let qualityModelJSON = """
+        {
+            "metadata": { "schema_version": 2, "name": "Quality Test" },
+            "nodes": [
+                { "id": "sun", "type": "source", "value": 1000.0, "quality_input": 1.0 },
+                { "id": "plant", "type": "storage", "value": 10.0 }
+            ],
+            "edges": [
+                { "id": "photosynthesis", "origin": "sun", "target": "plant", "logic": "linear", "params": { "k": 0.1 } }
+            ],
+            "config": { "t_start": 0.0, "t_end": 10.0, "dt": 1.0, "method": "auto" }
+        }
+        """
+        let sim = try GSSKSimulator(json: qualityModelJSON)
+        _ = try sim.step()
+
+        let tr = sim.namedTransformationRatios()
+        XCTAssertNotNil(tr["sun"])
+        XCTAssertEqual(tr["sun"]!, 1.0, accuracy: 1e-9)
+        XCTAssertNotNil(tr["plant"])
+        // plant Tr should be same as sun Tr (1.0) because it's a single input
+        XCTAssertEqual(tr["plant"]!, 1.0, accuracy: 1e-9)
+
+        XCTAssertEqual(sim.solverConfidence, GSSK_CONFIDENCE_HIGH)
     }
 }
