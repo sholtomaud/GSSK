@@ -7,7 +7,7 @@ final class GSSKTests: XCTestCase {
 
     static let decayModelJSON = """
     {
-        "metadata": { "schema_version": 1, "name": "Decay Test" },
+        "metadata": { "schema_version": 2, "name": "Decay Test" },
         "nodes": [
             { "id": "biomass",     "type": "storage", "value": 100.0 },
             { "id": "environment", "type": "sink",    "value": 0.0   }
@@ -26,7 +26,7 @@ final class GSSKTests: XCTestCase {
 
     static let householdModelJSON = """
     {
-        "metadata": { "schema_version": 1, "name": "Household" },
+        "metadata": { "schema_version": 2, "name": "Household" },
         "nodes": [
             { "id": "salary",    "type": "source",  "value": 5000.0 },
             { "id": "account",   "type": "storage", "value": 1000.0 },
