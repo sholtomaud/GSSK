@@ -85,7 +85,7 @@ wasm: directories
 	cp gssk.schema.json $(DIST_DIR)/gssk.schema.json
 	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/advanced.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \
 	-s MODULARIZE=1 -s EXPORT_NAME='createGSSK' \
-	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_Reset", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_FindNodeIdx", "_GSSK_GetEdgeCount", "_GSSK_GetEdgeK", "_GSSK_SetEdgeK", "_GSSK_EnsembleForecast", "_GSSK_FreeEnsembleResult", "_GSSK_Calibrate", "_GSSK_GetErrorDescription", "_GSSK_Free", "_malloc", "_free"]' \
+	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_Reset", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_FindNodeIdx", "_GSSK_GetEdgeID", "_GSSK_FindEdgeIdx", "_GSSK_GetEdgeCount", "_GSSK_GetEdgeK", "_GSSK_SetEdgeK", "_GSSK_GetTransformationRatio", "_GSSK_GetQualityFlow", "_GSSK_GetEdgeQualityFlow", "_GSSK_GetSolverConfidence", "_GSSK_AddNode", "_GSSK_AddEdge", "_GSSK_DeactivateEdge", "_GSSK_DeactivateNode", "_GSSK_ReclassifyNetwork", "_GSSK_EnsembleForecast", "_GSSK_FreeEnsembleResult", "_GSSK_Calibrate", "_GSSK_GetErrorDescription", "_GSSK_Free", "_malloc", "_free"]' \
 	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "stringToUTF8", "UTF8ToString", "lengthBytesUTF8", "allocate", "ALLOC_NORMAL", "HEAPU8", "HEAPF64", "HEAPU32"]' \
 	-o $(DIST_DIR)/gssk.js
 

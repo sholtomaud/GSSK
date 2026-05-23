@@ -386,7 +386,8 @@ static void compute_quality_pass(GSSK_Instance *inst, const double *state) {
       }
       break;
     case GSSK_LOGIC_THRESHOLD:
-      f = (Q > e->threshold) ? e->k : 0.0; break;
+      f = (Q > e->threshold) ? e->k : 0.0;
+      break;
     }
     flow[i] = (f > 0.0) ? f : 0.0;
     outsum[e->origin_idx] += flow[i];

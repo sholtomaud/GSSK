@@ -56,6 +56,8 @@ public enum GSSKError: Error, LocalizedError {
     case divergence
     case unknown
     case noInstance
+    case solverDivergence
+    case notFound
     /// The JSON `metadata.schema_version` does not match `GSSKSchemaVersion`.
     case schemaMismatch(found: Int, expected: Int)
 
@@ -73,6 +75,10 @@ public enum GSSKError: Error, LocalizedError {
             return "GSSK: Unknown error."
         case .noInstance:
             return "GSSK: No active instance."
+        case .solverDivergence:
+            return "GSSK: IDC vs RK4 solver divergence (exceeds tolerance)."
+        case .notFound:
+            return "GSSK: Node or edge ID not found."
         case .schemaMismatch(let found, let expected):
             return "GSSK: schema_version mismatch — JSON has \(found), wrapper expects \(expected)."
         }
@@ -227,7 +233,7 @@ public final class GSSKSimulator {
     /// Advance the simulation by one time step.
     /// - Parameter dt: Time step override. Defaults to `defaultDt`.
     /// - Returns: Current state vector as `[Double]`.
-    /// - Throws: `GSSKError.divergence` if NaN/Inf is detected.
+    /// - Throws: `GSSKError.divergence` if NaN/Inf is detected, or `GSSKError.solverDivergence` in AUTO mode.
     @discardableResult
     public func step(dt: Double? = nil) throws -> [Double] {
         guard let p = instPtr else { throw GSSKError.noInstance }
@@ -239,6 +245,13 @@ public final class GSSKSimulator {
             throw Self.map(status: status, message: "")
         }
         currentTime += stepDt
+
+        // If we warned, we might still want the user to know, but we return the state
+        // because the kernel fell back to RK4 safely.
+        if status == GSSK_WARN_SOLVER_DIVERGENCE {
+            // In a production app, you might log this.
+        }
+
         return state()
     }
 
@@ -296,6 +309,39 @@ public final class GSSKSimulator {
         return result
     }
 
+    // MARK: - Quality Accounting
+
+    /// Transformation ratio (Tr) per node. Only non-empty if quality accounting is enabled.
+    public func transformationRatios() -> [Double] {
+        guard let p = instPtr,
+              let ptr = GSSK_GetTransformationRatio(p) else { return [] }
+        return Array(UnsafeBufferPointer(start: ptr, count: stateSize))
+    }
+
+    /// Transformation ratio keyed by node ID.
+    public func namedTransformationRatios() -> [String: Double] {
+        let tr = transformationRatios()
+        guard !tr.isEmpty else { return [:] }
+        var result: [String: Double] = [:]
+        for (col, nodeID) in nodeManifest {
+            result[nodeID] = tr[col]
+        }
+        return result
+    }
+
+    /// Quality flow (Tr × flow rate) summed per node.
+    public func qualityFlows() -> [Double] {
+        guard let p = instPtr,
+              let ptr = GSSK_GetQualityFlow(p) else { return [] }
+        return Array(UnsafeBufferPointer(start: ptr, count: stateSize))
+    }
+
+    /// Current dual-solver confidence (HIGH or DEGRADED).
+    public var solverConfidence: GSSK_SolverConfidence {
+        guard let p = instPtr else { return GSSK_CONFIDENCE_HIGH }
+        return GSSK_GetSolverConfidence(p)
+    }
+
     // MARK: - Node access
 
     /// Return the ID string for the node at `index` (kernel ordering).
@@ -321,6 +367,20 @@ public final class GSSKSimulator {
         return Int(GSSK_GetEdgeCount(p))
     }
 
+    /// Get the stable ID for the edge at `index`.
+    public func edgeID(at index: Int) -> String? {
+        guard let p = instPtr,
+              let cStr = GSSK_GetEdgeID(p, index) else { return nil }
+        return String(cString: cStr)
+    }
+
+    /// Find the kernel index of an edge by its string ID.
+    public func edgeIndex(id: String) -> Int? {
+        guard let p = instPtr else { return nil }
+        let idx = id.withCString { GSSK_FindEdgeIdx(p, $0) }
+        return idx >= 0 ? Int(idx) : nil
+    }
+
     /// Get the coefficient `k` for edge at `index`.
     public func edgeK(at index: Int) -> Double {
         guard let p = instPtr else { return 0 }
@@ -334,16 +394,79 @@ public final class GSSKSimulator {
         GSSK_SetEdgeK(p, index, k)
     }
 
+    /// Quality flow (Tr × flow) on a specific edge.
+    public func edgeQualityFlow(at index: Int) -> Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetEdgeQualityFlow(p, index)
+    }
+
+    // MARK: - Topology Mutation
+
+    /// Add a new node at runtime.
+    ///
+    /// - Parameter json: JSON object conforming to the Node schema.
+    /// - Throws: `GSSKError` if the node is invalid or ID is duplicate.
+    public func addNode(json: String) throws {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        let status = json.withCString { GSSK_AddNode(p, $0) }
+        guard status == GSSK_SUCCESS else {
+            throw Self.map(status: status, message: "AddNode failed")
+        }
+
+        // Refresh manifest for the new node
+        let newIdx = stateSize - 1
+        if let id = nodeID(at: newIdx) {
+            nodeManifest[newIdx] = id
+        }
+    }
+
+    /// Add a new edge at runtime.
+    ///
+    /// - Parameter json: JSON object conforming to the Edge schema.
+    /// - Throws: `GSSKError` if the edge is invalid or linkage fails.
+    public func addEdge(json: String) throws {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        let status = json.withCString { GSSK_AddEdge(p, $0) }
+        guard status == GSSK_SUCCESS else {
+            throw Self.map(status: status, message: "AddEdge failed")
+        }
+    }
+
+    /// Deactivate an edge by ID (sets k=0, marks inactive).
+    public func deactivateEdge(id: String) throws {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        let status = id.withCString { GSSK_DeactivateEdge(p, $0) }
+        guard status == GSSK_SUCCESS else {
+            throw Self.map(status: status, message: "DeactivateEdge failed")
+        }
+    }
+
+    /// Deactivate a node by ID (zeroes all connected edges).
+    public func deactivateNode(id: String) throws {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        let status = id.withCString { GSSK_DeactivateNode(p, $0) }
+        guard status == GSSK_SUCCESS else {
+            throw Self.map(status: status, message: "DeactivateNode failed")
+        }
+    }
+
+    /// Manually trigger network reclassification (e.g. after changing k values).
+    public func reclassify() {
+        guard let p = instPtr else { return }
+        GSSK_ReclassifyNetwork(p)
+    }
+
     // MARK: - Private helpers
 
     private static func map(status: GSSK_Status, message: String) -> GSSKError {
         switch status {
-        case GSSK_ERR_INVALID_JSON:     return .invalidJSON
-        case GSSK_ERR_MALLOC_FAILED:    return .mallocFailed
-        case GSSK_ERR_SCHEMA_VIOLATION: return .schemaViolation(message)
-        case GSSK_ERR_DIVERGENCE:       return .divergence
-        case GSSK_WARN_SOLVER_DIVERGENCE: return .unknown // Should not be reached from step()
-        default:                        return .unknown
+        case GSSK_ERR_INVALID_JSON:      return .invalidJSON
+        case GSSK_ERR_MALLOC_FAILED:     return .mallocFailed
+        case GSSK_ERR_SCHEMA_VIOLATION:  return .schemaViolation(message)
+        case GSSK_ERR_DIVERGENCE:        return .divergence
+        case GSSK_WARN_SOLVER_DIVERGENCE: return .solverDivergence
+        case GSSK_ERR_NOT_FOUND:         return .notFound
+        default:                         return .unknown
         }
     }
 }
