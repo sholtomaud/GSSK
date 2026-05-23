@@ -77,7 +77,6 @@ GSSK_EnsembleResult *GSSK_EnsembleForecast(GSSK_Instance *inst, size_t runs,
     }
 
     GSSK_Reset(inst);
-    double t = t_start;
     for (size_t s = 0; s < step_count; s++) {
       const double *state = GSSK_GetState(inst);
       for (size_t n = 0; n < node_count; n++) {
@@ -90,7 +89,6 @@ GSSK_EnsembleResult *GSSK_EnsembleForecast(GSSK_Instance *inst, size_t runs,
         res->mean_envelope[idx] += val;
       }
       GSSK_Step(inst, dt);
-      t += dt;
     }
   }
 
