@@ -1,4 +1,5 @@
 import XCTest
+import CGSSK
 @testable import GSSK
 
 final class GSSKTests: XCTestCase {
