@@ -1,4 +1,10 @@
 {
+    "metadata": {
+        "schema_version": 3,
+        "name": "Simple Model",
+        "description": "Minimal linear flow from a source into a storage node.",
+        "kernel_version": "3.0.0"
+    },
     "nodes": [
         {
             "id": "sun",

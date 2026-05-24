@@ -1,4 +1,10 @@
 {
+    "metadata": {
+        "schema_version": 3,
+        "name": "Economic Model",
+        "description": "Supply-demand interaction model with price and inventory dynamics.",
+        "kernel_version": "3.0.0"
+    },
     "nodes": [
         { "id": "inventory", "type": "storage", "value": 50.0 },
         { "id": "price", "type": "storage", "value": 10.0 },

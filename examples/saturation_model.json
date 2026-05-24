@@ -1,4 +1,10 @@
 {
+    "metadata": {
+        "schema_version": 3,
+        "name": "Saturation Model",
+        "description": "Michaelis-Menten saturation (limit logic) — enzyme kinetics example.",
+        "kernel_version": "3.0.0"
+    },
     "nodes": [
         {
             "id": "sugar",

@@ -1,4 +1,10 @@
 {
+    "metadata": {
+        "schema_version": 3,
+        "name": "Oscillator Model",
+        "description": "Lotka-Volterra predator-prey oscillator using interaction edges.",
+        "kernel_version": "3.0.0"
+    },
     "nodes": [
         {
             "id": "resource",

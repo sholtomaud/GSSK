@@ -1,15 +1,15 @@
 /**
  * @file gssk.h
- * @brief General Systems Simulation Kernel (GSSK) Core API — v2
+ * @brief General Systems Kernel (GSK) Core API — v3
  *
- * This file defines the public interface for the GSSK numerical engine.
+ * This file defines the public interface for the GSK numerical engine.
  * The kernel is designed for high-performance simulation of complex systems
  * based on General Systems Theory and Odum's Energy Systems Language.
  *
  * Odum's inter-block four-position array (Modelling for All Scales, App. A):
  *   Position 1 — Code        → edge.carrier field (what is flowing)
  *   Position 2 — Force       → implicit in logic type + origin node Q
- *   Position 3 — Flow        → computed by GSSK_Step() per logic type
+ *   Position 3 — Flow        → computed by GSK_Step() per logic type
  *   Position 4 — Transformity → computed by quality accounting pass
  */
 
@@ -22,6 +22,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* =========================================================================
  * Enumerations
@@ -81,9 +82,23 @@ typedef enum {
   GSSK_ERR_SCHEMA_VIOLATION,
   GSSK_ERR_DIVERGENCE,           /**< Numerical instability: NaN/Inf detected */
   GSSK_ERR_NOT_FOUND,            /**< Node or edge ID not found */
+  GSSK_ERR_UNSUPPORTED_SCHEMA_VERSION, /**< Schema version not supported */
   GSSK_ERR_UNKNOWN,
   GSSK_WARN_SOLVER_DIVERGENCE    /**< AUTO mode: IDC vs RK4 error > tolerance */
 } GSSK_Status;
+
+/* =========================================================================
+ * Version information
+ * ========================================================================= */
+
+#define GSK_VERSION_MAJOR 3
+#define GSK_VERSION_MINOR 0
+#define GSK_VERSION_PATCH 0
+#define GSK_VERSION_STRING "3.0.0"
+
+/* Numeric version for comparison: (major << 16) | (minor << 8) | patch */
+#define GSK_VERSION_CODE(major, minor, patch) \
+  (((major) << 16) | ((minor) << 8) | (patch))
 
 /* =========================================================================
  * Opaque instance handle
@@ -186,6 +201,52 @@ double GSSK_GetEdgeQualityFlow(GSSK_Instance *inst, size_t edge_idx);
  *        Always GSSK_CONFIDENCE_HIGH in EULER/RK4/INCIPIENT modes.
  */
 GSSK_SolverConfidence GSSK_GetSolverConfidence(GSSK_Instance *inst);
+
+/* =========================================================================
+ * Metadata accessors
+ * ========================================================================= */
+
+/**
+ * @brief Get the schema version of the loaded model (2 or 3).
+ */
+int GSSK_GetSchemaVersion(GSSK_Instance *inst);
+
+/**
+ * @brief Get model name from metadata.
+ * @return const char*  Model name, or empty string if not set. Never NULL.
+ */
+const char *GSSK_GetModelName(GSSK_Instance *inst);
+
+/**
+ * @brief Get model description from metadata.
+ * @return const char*  Model description, or empty string if not set. Never NULL.
+ */
+const char *GSSK_GetModelDescription(GSSK_Instance *inst);
+
+/**
+ * @brief Get kernel version that created this model.
+ * @return const char*  Kernel version string (e.g. "3.0.0"), or empty if not set.
+ */
+const char *GSSK_GetModelKernelVersion(GSSK_Instance *inst);
+
+/**
+ * @brief Get model hash (SHA256) from metadata.
+ * @return const char*  SHA256 hex string, or empty if not set.
+ */
+const char *GSSK_GetModelHash(GSSK_Instance *inst);
+
+/**
+ * @brief Get the current GSK kernel version.
+ * @return const char*  Kernel version string (e.g. "3.0.0").
+ */
+const char *GSSK_GetVersionString(void);
+
+/**
+ * @brief Get the current GSK kernel version as an integer code.
+ * Format: (major << 16) | (minor << 8) | patch.
+ * For example, 3.0.0 = 0x030000, 3.1.2 = 0x030102.
+ */
+uint32_t GSSK_GetVersionCode(void);
 
 /* =========================================================================
  * Node/Edge lookup

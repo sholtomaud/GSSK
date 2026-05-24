@@ -1,4 +1,10 @@
 {
+    "metadata": {
+        "schema_version": 3,
+        "name": "Decay Model",
+        "description": "First-order exponential decay of biomass via linear respiration.",
+        "kernel_version": "3.0.0"
+    },
     "nodes": [
         {
             "id": "biomass",

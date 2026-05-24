@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gssk.io/schema/v2/model.json",
-  "title": "GSSK Model",
-  "description": "Schema for General Systems Simulation Kernel (GSSK) models. Based on Odum's Energy Systems Language. Each inter-block connection carries four channels (Odum 2000, Appendix A): Code (carrier), Force (driving potential, implicit in logic+Q), Flow (rate, computed by logic), and Transformity (quality ratio, computed from quality_input).",
+  "$id": "https://gssk.io/schema/v3/model.json",
+  "title": "GSK Model (Schema v3)",
+  "description": "Schema for General Systems Kernel (GSK) models. Based on Odum's Energy Systems Language. Each inter-block connection carries four channels (Odum 2000, Appendix A): Code (carrier), Force (driving potential, implicit in logic+Q), Flow (rate, computed by logic), and Transformity (quality ratio, computed from quality_input). Schema v3 adds metadata versioning, snapshot support for deterministic replay, topology mutation logging, and multi-carrier declarations.",
   "type": "object",
   "required": ["nodes"],
   "additionalProperties": false,
@@ -13,33 +13,65 @@
       "type": "array",
       "items": { "$ref": "#/$defs/Node" },
       "minItems": 1,
-      "description": "Ordered array of compartments. The index of each node here is its column index in GSSK_GetState()."
+      "description": "Ordered array of compartments. The index of each node here is its column index in GSK_GetState()."
     },
     "edges":    {
       "type": "array",
       "items": { "$ref": "#/$defs/Edge" },
       "description": "Directed flows between nodes. Omit for a single isolated storage."
     },
-    "config":   { "$ref": "#/$defs/Config" }
+    "config":   { "$ref": "#/$defs/Config" },
+    "snapshot": { "$ref": "#/$defs/Snapshot" },
+    "mutation_log": { "$ref": "#/$defs/MutationLog" },
+    "carriers": { "$ref": "#/$defs/Carriers" }
   },
 
   "$defs": {
 
     "Metadata": {
       "type": "object",
-      "description": "Model provenance and versioning. schema_version is required in production.",
+      "description": "Model provenance, versioning, and identity. schema_version is required in v3.",
       "required": ["schema_version"],
       "additionalProperties": false,
       "properties": {
         "schema_version": {
           "type": "integer",
-          "const": 2,
-          "description": "Schema version. Kernel rejects models with unsupported versions."
+          "const": 3,
+          "description": "Schema version. v3 supports snapshot/mutation_log/carriers blocks and metadata extensions. v2 models will auto-migrate with warning."
         },
-        "name":        { "type": "string" },
-        "description": { "type": "string" },
-        "author":      { "type": "string", "description": "Serialiser or author name." },
-        "created_at":  { "type": "string", "format": "date-time" }
+        "name":            { "type": "string", "description": "Friendly model name." },
+        "description":     { "type": "string", "description": "Prose model description." },
+        "author":          { "type": "string", "description": "Serialiser or author name." },
+        "created_at":      { "type": "string", "format": "date-time", "description": "ISO8601 creation timestamp. Auto-generated if not provided." },
+        "kernel_version":  { "type": "string", "description": "Semver of GSK kernel that created this model. Defaults to current kernel version at init time." },
+        "model_hash":      { "type": "string", "description": "SHA256 hex hash of the topology (nodes+edges) for reproducibility check. Auto-computed if not provided." }
+      }
+    },
+
+    "Snapshot": {
+      "type": "object",
+      "description": "State snapshot for deterministic replay (implemented in Phase 0.3). Contains full state vector, solver state, and RNG seed.",
+      "additionalProperties": false
+    },
+
+    "MutationLog": {
+      "type": "array",
+      "description": "Topology mutation history (implemented in Phase 4). Each entry records a successful AddNode/AddEdge/SetEdgeK operation with causality.",
+      "items": { "type": "object" }
+    },
+
+    "Carriers": {
+      "type": "array",
+      "description": "Multi-carrier type definitions (implemented in Phase 5). Each carrier can be conserved independently.",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id":        { "type": "string", "description": "Unique carrier identifier (e.g. 'money', 'energy', 'material')." },
+          "unit":      { "type": "string", "description": "Physical unit (e.g. 'AUD', 'kWh', 'kg')." },
+          "conserved": { "type": "boolean", "default": true, "description": "Whether this carrier obeys conservation law within isolated sub-systems." }
+        }
       }
     },
 

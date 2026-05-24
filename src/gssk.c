@@ -1,6 +1,6 @@
 /**
  * @file gssk.c
- * @brief General Systems Simulation Kernel — Core Implementation (v2)
+ * @brief General Systems Kernel — Core Implementation (v3)
  *
  * Implements:
  * - Euler / RK4 / AUTO integration modes
@@ -9,6 +9,7 @@
  * - Topology mutation API (AddNode, AddEdge, Deactivate, Reclassify)
  * - Odum four-position inter-block channel support (carrier, output_mode,
  *   coupled_edge, quality_input)
+ * - Metadata versioning and schema v3 support
  *
  * For IDC (Incipient Calculus) in AUTO/INCIPIENT modes:
  *   Eligible networks (all-constant/linear/interaction edges) use a one-step
@@ -26,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 /* =========================================================================
  * Internal types
@@ -92,6 +94,15 @@ struct GSSK_Instance {
     GSSK_Method  method;
     double       solver_tolerance;
   } config;
+
+  /* Metadata (v3) */
+  int         schema_version;
+  char        created_at[32];
+  char        kernel_version[16];
+  char        model_hash[65];
+  char        model_name[256];
+  char        model_description[1024];
+  char        model_author[128];
 };
 
 /* =========================================================================
@@ -520,6 +531,62 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
   }
 
   GSSK_Status status = GSSK_SUCCESS;
+
+  /* ---- 0. Metadata (v3) ---- */
+  inst->schema_version = 3;  /* default to v3 */
+  strncpy(inst->kernel_version, GSK_VERSION_STRING, sizeof(inst->kernel_version) - 1);
+  strncpy(inst->created_at, "2000-01-01T00:00:00Z", sizeof(inst->created_at) - 1);
+
+  cJSON *metadata = cJSON_GetObjectItem(root, "metadata");
+  if (cJSON_IsObject(metadata)) {
+    cJSON *schema_ver = cJSON_GetObjectItem(metadata, "schema_version");
+    if (cJSON_IsNumber(schema_ver)) {
+      inst->schema_version = schema_ver->valueint;
+      if (inst->schema_version != 2 && inst->schema_version != 3) {
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Unsupported schema_version: %d. Supported: 2, 3.", inst->schema_version);
+        status = GSSK_ERR_UNSUPPORTED_SCHEMA_VERSION;
+        goto cleanup;
+      }
+    }
+
+    /* Extract optional metadata fields */
+    cJSON *name = cJSON_GetObjectItem(metadata, "name");
+    if (cJSON_IsString(name)) {
+      strncpy(inst->model_name, name->valuestring, sizeof(inst->model_name) - 1);
+    }
+
+    cJSON *desc = cJSON_GetObjectItem(metadata, "description");
+    if (cJSON_IsString(desc)) {
+      strncpy(inst->model_description, desc->valuestring, sizeof(inst->model_description) - 1);
+    }
+
+    cJSON *author = cJSON_GetObjectItem(metadata, "author");
+    if (cJSON_IsString(author)) {
+      strncpy(inst->model_author, author->valuestring, sizeof(inst->model_author) - 1);
+    }
+
+    cJSON *created = cJSON_GetObjectItem(metadata, "created_at");
+    if (cJSON_IsString(created)) {
+      strncpy(inst->created_at, created->valuestring, sizeof(inst->created_at) - 1);
+    }
+
+    cJSON *kv = cJSON_GetObjectItem(metadata, "kernel_version");
+    if (cJSON_IsString(kv)) {
+      strncpy(inst->kernel_version, kv->valuestring, sizeof(inst->kernel_version) - 1);
+    }
+
+    cJSON *hash = cJSON_GetObjectItem(metadata, "model_hash");
+    if (cJSON_IsString(hash)) {
+      strncpy(inst->model_hash, hash->valuestring, sizeof(inst->model_hash) - 1);
+    }
+  } else if (inst->schema_version == 2) {
+    /* v2 model without metadata → warn and upgrade to v3 */
+    fprintf(stderr, "WARNING: v2 model detected (no metadata block). Auto-upgrading to v3. "
+                    "Consider migration with: gsk migrate --from 2 <your-model.json>\n");
+    inst->schema_version = 3;
+  }
+  /* If schema_version is 3 but no metadata present, use auto-generated defaults */
 
   /* ---- 1. Nodes ---- */
   cJSON *nodes_arr = cJSON_GetObjectItem(root, "nodes");
@@ -1165,6 +1232,36 @@ void GSSK_SetEdgeK(GSSK_Instance *inst, size_t index, double k) {
 double GSSK_GetTStart(GSSK_Instance *inst) { return inst ? inst->config.t_start : 0.0; }
 double GSSK_GetTEnd(GSSK_Instance *inst)   { return inst ? inst->config.t_end   : 0.0; }
 double GSSK_GetDt(GSSK_Instance *inst)     { return inst ? inst->config.dt      : 0.0; }
+
+/* Metadata accessors */
+int GSSK_GetSchemaVersion(GSSK_Instance *inst) {
+  return inst ? inst->schema_version : 0;
+}
+
+const char *GSSK_GetModelName(GSSK_Instance *inst) {
+  return inst ? inst->model_name : "";
+}
+
+const char *GSSK_GetModelDescription(GSSK_Instance *inst) {
+  return inst ? inst->model_description : "";
+}
+
+const char *GSSK_GetModelKernelVersion(GSSK_Instance *inst) {
+  return inst ? inst->kernel_version : "";
+}
+
+const char *GSSK_GetModelHash(GSSK_Instance *inst) {
+  return inst ? inst->model_hash : "";
+}
+
+/* Version functions */
+const char *GSSK_GetVersionString(void) {
+  return GSK_VERSION_STRING;
+}
+
+uint32_t GSSK_GetVersionCode(void) {
+  return GSK_VERSION_CODE(GSK_VERSION_MAJOR, GSK_VERSION_MINOR, GSK_VERSION_PATCH);
+}
 
 void GSSK_Free(GSSK_Instance *inst) {
   if (!inst) return;

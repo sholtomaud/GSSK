@@ -1,4 +1,10 @@
 {
+    "metadata": {
+        "schema_version": 3,
+        "name": "Supply Chain 30",
+        "description": "30-node supply chain benchmark network for performance testing.",
+        "kernel_version": "3.0.0"
+    },
     "nodes": [
         {
             "id": "global_source",

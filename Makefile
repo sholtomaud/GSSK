@@ -25,7 +25,7 @@ TARGET_LIB = $(LIB_DIR)/libgssk.a
 TARGET_CLI = $(BIN_DIR)/gssk
 TARGET_COMPARE = $(BIN_DIR)/csv_compare
 
-.PHONY: all clean test test-update directories swift-build swift-test swift-clean
+.PHONY: all clean test test-update directories swift-build swift-test swift-clean dist
 
 all: directories $(TARGET_LIB) $(TARGET_CLI) $(TARGET_COMPARE)
 
@@ -79,14 +79,28 @@ test-update: all
 clean: swift-clean
 	rm -rf $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results
 
-# WASM Build (Requires emscripten)
-wasm: directories
+# Sync dist/ without requiring emscripten (schema + TypeScript declarations)
+dist: directories
 	cp $(SRC_DIR)/gssk.d.ts $(DIST_DIR)/gssk.d.ts
 	cp gssk.schema.json $(DIST_DIR)/gssk.schema.json
+
+# WASM Build (Requires emscripten)
+WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_GetStateSize",\
+"_GSSK_GetTStart","_GSSK_GetTEnd","_GSSK_GetDt","_GSSK_GetNodeID","_GSSK_FindNodeIdx",\
+"_GSSK_GetEdgeID","_GSSK_FindEdgeIdx","_GSSK_GetEdgeCount","_GSSK_GetEdgeK","_GSSK_SetEdgeK",\
+"_GSSK_GetTransformationRatio","_GSSK_GetQualityFlow","_GSSK_GetEdgeQualityFlow",\
+"_GSSK_GetSolverConfidence","_GSSK_AddNode","_GSSK_AddEdge","_GSSK_DeactivateEdge",\
+"_GSSK_DeactivateNode","_GSSK_ReclassifyNetwork",\
+"_GSSK_GetSchemaVersion","_GSSK_GetModelName","_GSSK_GetModelDescription",\
+"_GSSK_GetModelKernelVersion","_GSSK_GetModelHash","_GSSK_GetVersionString","_GSSK_GetVersionCode",\
+"_GSSK_EnsembleForecast","_GSSK_FreeEnsembleResult","_GSSK_Calibrate",\
+"_GSSK_GetErrorDescription","_GSSK_Free","_malloc","_free"]
+
+wasm: dist
 	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/advanced.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \
 	-s MODULARIZE=1 -s EXPORT_NAME='createGSSK' \
-	-s EXPORTED_FUNCTIONS='["_GSSK_Init", "_GSSK_Step", "_GSSK_Reset", "_GSSK_GetState", "_GSSK_GetStateSize", "_GSSK_GetTStart", "_GSSK_GetTEnd", "_GSSK_GetDt", "_GSSK_GetNodeID", "_GSSK_FindNodeIdx", "_GSSK_GetEdgeID", "_GSSK_FindEdgeIdx", "_GSSK_GetEdgeCount", "_GSSK_GetEdgeK", "_GSSK_SetEdgeK", "_GSSK_GetTransformationRatio", "_GSSK_GetQualityFlow", "_GSSK_GetEdgeQualityFlow", "_GSSK_GetSolverConfidence", "_GSSK_AddNode", "_GSSK_AddEdge", "_GSSK_DeactivateEdge", "_GSSK_DeactivateNode", "_GSSK_ReclassifyNetwork", "_GSSK_EnsembleForecast", "_GSSK_FreeEnsembleResult", "_GSSK_Calibrate", "_GSSK_GetErrorDescription", "_GSSK_Free", "_malloc", "_free"]' \
-	-s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "stringToUTF8", "UTF8ToString", "lengthBytesUTF8", "allocate", "ALLOC_NORMAL", "HEAPU8", "HEAPF64", "HEAPU32"]' \
+	-s EXPORTED_FUNCTIONS='$(WASM_EXPORTS)' \
+	-s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","stringToUTF8","UTF8ToString","lengthBytesUTF8","allocate","ALLOC_NORMAL","HEAPU8","HEAPF64","HEAPU32"]' \
 	-o $(DIST_DIR)/gssk.js
 
 # ──────────────────────────────────────────────────────────────

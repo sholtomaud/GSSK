@@ -1,4 +1,10 @@
 {
+    "metadata": {
+        "schema_version": 3,
+        "name": "Atwood Machine",
+        "description": "Atwood machine dynamics modelled as coupled storage nodes.",
+        "kernel_version": "3.0.0"
+    },
     "nodes": [
         { "id": "velocity", "type": "storage", "value": 0.0 },
         { "id": "position", "type": "storage", "value": 0.0 },

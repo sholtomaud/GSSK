@@ -48,3 +48,7 @@ Before submitting any changes, you MUST ensure:
 - `lib/`: Compiled libraries.
 - `tests/expected/`: "Gold Standard" results for regression.
 - `examples/`: Reference JSON models.
+
+## UPDATES PRE-COMMIT CHECK
+
+- update the TODO.md to check off any completed items ythat are complete and tested.

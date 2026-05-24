@@ -5,9 +5,8 @@ import Foundation
 
 /// The schema version this wrapper was built against.
 /// A serialiser must embed this in the JSON `metadata.schema_version` field.
-/// The kernel does not currently enforce this at the C level, but
-/// `GSSKSimulator.init(json:)` will reject mismatches to catch drift early.
-public let GSSKSchemaVersion: Int = 2
+/// The kernel accepts v2 (with a deprecation warning) and v3 (current).
+public let GSSKSchemaVersion: Int = 3
 
 /// Programmatic access to the current schema version.
 public let GSSKCurrentSchemaVersion: Int = GSSKSchemaVersion
@@ -159,6 +158,44 @@ public final class GSSKSimulator {
         return GSSK_GetSolverConfidence(p) == GSSK_CONFIDENCE_HIGH ? .high : .degraded
     }
 
+    // MARK: - Metadata (v3)
+
+    /// Schema version of the loaded model (2 or 3).
+    public var schemaVersion: Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetSchemaVersion(p))
+    }
+
+    /// Model name from the `metadata.name` field.
+    public var modelName: String {
+        guard let p = instPtr, let cStr = GSSK_GetModelName(p) else { return "" }
+        return String(cString: cStr)
+    }
+
+    /// Model description from `metadata.description`.
+    public var modelDescription: String {
+        guard let p = instPtr, let cStr = GSSK_GetModelDescription(p) else { return "" }
+        return String(cString: cStr)
+    }
+
+    /// Kernel version string that created this model (e.g. "3.0.0").
+    public var modelKernelVersion: String {
+        guard let p = instPtr, let cStr = GSSK_GetModelKernelVersion(p) else { return "" }
+        return String(cString: cStr)
+    }
+
+    /// SHA256 model hash from `metadata.model_hash`.
+    public var modelHash: String {
+        guard let p = instPtr, let cStr = GSSK_GetModelHash(p) else { return "" }
+        return String(cString: cStr)
+    }
+
+    /// Current GSK kernel version string (e.g. "3.0.0").
+    public static var kernelVersion: String {
+        guard let cStr = GSSK_GetVersionString() else { return "" }
+        return String(cString: cStr)
+    }
+
     // MARK: - Initialisation
 
     /// Preferred initialiser — accepts the structured output of a domain serialiser.
@@ -174,7 +211,8 @@ public final class GSSKSimulator {
         if let jsonObject = try? JSONSerialization.jsonObject(with: output.json) as? [String: Any],
            let metadata = jsonObject["metadata"] as? [String: Any],
            let version = metadata["schema_version"] as? Int {
-            guard version == GSSKSchemaVersion else {
+            // Accept v2 (kernel auto-migrates with warning) and v3. Reject anything else.
+            guard version == 2 || version == GSSKSchemaVersion else {
                 throw GSSKError.schemaMismatch(found: version, expected: GSSKSchemaVersion)
             }
         }
