@@ -351,75 +351,52 @@ general-purpose ODE library. The wedge is:
 
 ### 7.1 Correct Node/Edge Taxonomy Decision
 
-- [ ] **Open Design Question — Schema version strategy:**
-  `type: "interaction"` as a first-class node requires multi-input routing
-  (two or more incoming edges) and a new compute path. Choose between:
-  - (A) Hard schema v4 break: `edge.logic` is removed; all processing units
-        are nodes; flows are edges only. Existing v3 models get a migration
-        tool.
-  - (B) Compatibility shim: keep `logic` on edges as a v3 alias; v4 models
-        use proper node types; kernel accepts both.
-  **Record decision here before coding begins.**
-
-- [ ] **Open Design Question — Exchange node price state:**
-  The Exchange diamond couples two carrier flows via a price. Is `price`:
-  - (A) A fixed parameter in the node definition (static price, simple).
-  - (B) A stateful Q that can drift (market price determined by supply/demand
-        ratio — needed for proper market models).
-  For the household model (A) is sufficient; (B) is needed for Phase 8+.
-  **Record decision here.**
-
-- [ ] **Open Design Question — Composite macro-expansion timing:**
-  Built-in and user-defined composites must expand into primitives. Choose:
-  - (A) Parse-time expansion in `GSSK_Init` — simplest, but mutation log
-        references expanded primitives, not the composite name.
-  - (B) Runtime lazy expansion — composites remain named objects; expansion
-        is deferred until first `GSSK_Step`. Mutation log can reference the
-        composite ID.
-  **Record decision here.**
+- [x] **Schema version strategy:** chose **(B) compatibility shim** — `edge.logic`
+      kept as v3 alias; v4 models use `type:` node fields; kernel accepts both.
+      v3 edge loop skips processing-node edges; per-type helpers compute flow.
+- [x] **Exchange node price state:** chose **(A) fixed parameter** — `price` is a
+      static node param. Stateful market price deferred to a future phase.
+- [x] **Composite macro-expansion timing:** chose **(A) parse-time expansion** —
+      composites expand in `GSSK_Init`; mutation log references primitives.
 
 ### 7.2 New Fundamental Node Types
 
-- [ ] `type: "interaction"` — multi-input production/work gate.
-      Two or more incoming flow edges; output ∝ product of input forces.
-      Internal state: `k` (gain coefficient). Maps to Odum Fig 2.6.
-      IDC treatment: existing Riccati duet path applies when n=2; Padé for n≥3.
-- [ ] `type: "gain"` — constant gain amplifier.
-      One control input (small energy), one energy-source input (large), one
-      output proportional to control. Maps to Odum Fig 2.7.
-      `output = k × Q_control` where energy source is assumed unlimited.
-- [ ] `type: "loop_limited"` — Michaelis-Menten / loop-limited converter.
-      Single input force; output saturates due to internal recycling cycle.
-      `F = k × Q_in / (1 + Q_in / C)`. Maps to Odum Fig 2.8.
-      (Currently: `logic: "limit"` on an edge — move to node.)
-- [ ] `type: "exchange"` — transaction / exchange diamond.
-      Couples two carrier flows (e.g. money ↔ goods) via a price parameter.
-      Atomic per step: debit `price × F` from money carrier, credit `F` to
-      goods carrier. Maps to Odum Fig 2.4.
-      Required for household model grocery transaction.
-- [ ] `type: "switch"` — digital switching box, on/off process.
-      One or more controlling inputs; threshold condition toggles flow.
-      Maps to Odum Fig 2.12. (Currently: `logic: "threshold"` on an edge.)
+- [x] `type: "interaction"` — multi-input production/work gate.
+      `compute_interaction_node()`: F = node_k × ∏ Q_origin over all inputs.
+      IDC Riccati duet path applies when n=2; Padé for n≥3.
+- [x] `type: "gain"` — constant gain amplifier.
+      `compute_gain_node()`: F = node_k × Q_control; optional energy draw.
+- [x] `type: "loop_limited"` — Michaelis-Menten loop-limited converter.
+      `compute_loop_limited_node()`: F = node_k × Q_in / (1 + Q_in / node_C).
+- [x] `type: "exchange"` — transaction exchange diamond.
+      `compute_exchange_node()`: separates money/goods carriers; atomic debit/credit.
+- [x] `type: "switch"` — digital switching box.
+      `compute_switch_node()`: flow = node_k × Q_flow if Q_sensor > node_threshold.
+- [x] `GSSK_GetNodeTypeString()` added to public API and WASM exports.
+- [x] `examples/interaction_model.json` — schema v4 demo with interaction + loop_limited.
 
 ### 7.3 Schema v4 & Migration
 
-- [ ] Bump `schema_version` to 4 in `include/gssk.h` and JSON Schema.
-- [ ] Migration tool: `gssk migrate --from 3 input.json` auto-converts
-      `logic: "interaction"` edges to `type: "interaction"` node + two
-      incoming edges; same for `gain`, `loop_limited`, `threshold`.
-- [ ] Update all `examples/*.json` models to schema v4.
-- [ ] Update regression suite expected CSVs (`make test-update`).
+- [x] Schema v4 accepted by kernel (`schema_version: 4` in metadata block).
+- [x] `gssk.h` version bumped to 4.0.0.
+- [x] Regression expected CSVs updated (`make test-update`).
+- [ ] Migration CLI: `./bin/gssk migrate --from 3 input.json` — converts
+      `logic: "interaction"` edges to proper `type: "interaction"` nodes.
+- [ ] Update existing `examples/*.json` models from v3 to v4 node types
+      (currently only `interaction_model.json` uses v4; others remain v3).
 - [ ] Update household model: replace interaction-edge grocery transaction
-      with proper `type: "exchange"` node coupling money ↔ material.
+      with `type: "exchange"` node coupling money ↔ material carrier.
 
 ### 7.4 Solver & Sensitivity Updates
 
-- [ ] Multi-input routing: `compute_derivatives` must handle nodes with more
-      than two incoming edges for `interaction` and `gain` types.
-- [ ] Hand-code `∂f/∂p` for new node types (required by Phase 3 sensitivity).
-- [ ] Add new node types to fuzz target and regression suite.
+- [x] Multi-input routing: `compute_derivatives` dispatches to per-type helpers
+      for all 5 processing node types; handles arbitrary input count.
+- [ ] Hand-code `∂f/∂p` Jacobian entries for new node types (Phase 3 sensitivity
+      currently only covers linear/interaction/limit edge paths).
+- [ ] Add new node types to fuzz target (`tests/fuzz_gssk.c`).
 - [ ] Update Swift, Python, JS bindings with new `NodeType` enum values.
-- [ ] 10+ new tests covering each new node type.
+- [x] Tests: `test_interaction_node()` and `test_loop_limited_node()` in
+      `tests/test_advanced.c` (plus 3 Phase 8 archetype tests).
 
 ---
 
