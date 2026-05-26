@@ -1,0 +1,1 @@
+{"metadata":{"schema_version":4,"name":"fuzz-loop-limited"},"nodes":[{"id":"src","type":"source","value":20.0},{"id":"conv","type":"loop_limited","value":0.0,"params":{"k":2.0,"C":5.0}},{"id":"out","type":"storage","value":0.0}],"edges":[{"id":"e1","origin":"src","target":"conv"},{"id":"e2","origin":"conv","target":"out"}],"config":{"t_start":0,"t_end":1,"dt":0.1,"method":"rk4"}}

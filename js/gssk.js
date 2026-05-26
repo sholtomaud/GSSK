@@ -270,6 +270,27 @@ export class GSSKSimulator {
 
   clearMutationLog() { this.#mod._GSSK_ClearMutationLog(this.#inst); }
 
+  // ── Node type / archetype / composite ──────────────────────────────────────
+
+  nodeTypeString(index) {
+    const ptr = this.#mod._GSSK_GetNodeTypeString(this.#inst, index);
+    return ptr ? readString(this.#mod, ptr) : '';
+  }
+
+  get archetypeCount() { return this.#mod._GSSK_GetArchetypeCount(this.#inst); }
+
+  archetypeName(index) {
+    const ptr = this.#mod._GSSK_GetArchetypeName(this.#inst, index);
+    return ptr ? readString(this.#mod, ptr) : null;
+  }
+
+  get compositeCount() { return this.#mod._GSSK_GetCompositeCount(this.#inst); }
+
+  compositeID(index) {
+    const ptr = this.#mod._GSSK_GetCompositeID(this.#inst, index);
+    return ptr ? readString(this.#mod, ptr) : null;
+  }
+
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   /** Release kernel memory. Call when done — not called automatically. */

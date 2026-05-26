@@ -1,50 +1,87 @@
 {
-    "metadata": {
-        "schema_version": 3,
-        "name": "Economic Model",
-        "description": "Supply-demand interaction model with price and inventory dynamics.",
-        "kernel_version": "3.0.0"
-    },
-    "nodes": [
-        { "id": "inventory", "type": "storage", "value": 50.0 },
-        { "id": "price", "type": "storage", "value": 10.0 },
-        { "id": "source", "type": "source", "value": 1.0 },
-        { "id": "sink", "type": "sink", "value": 0.0 }
-    ],
-    "edges": [
-        {
-            "id": "production",
-            "origin": "source",
-            "target": "inventory",
-            "logic": "interaction",
-            "params": { "k": 0.1, "control_node": "price" }
-        },
-        {
-            "id": "consumption",
-            "origin": "inventory",
-            "target": "sink",
-            "logic": "constant",
-            "params": { "k": 1.0 }
-        },
-        {
-            "id": "price_up",
-            "origin": "source",
-            "target": "price",
-            "logic": "constant",
-            "params": { "k": 0.5 }
-        },
-        {
-            "id": "price_down",
-            "origin": "price",
-            "target": "sink",
-            "logic": "interaction",
-            "params": { "k": 0.01, "control_node": "inventory" }
-        }
-    ],
-    "config": {
-        "t_start": 0.0,
-        "t_end": 100.0,
-        "dt": 0.1,
-        "method": "rk4"
-    }
+	"metadata":	{
+		"schema_version":	4,
+		"name":	"Economic Model",
+		"description":	"Supply-demand interaction model with price and inventory dynamics.",
+		"kernel_version":	"3.0.0",
+		"created_at":	"2026-05-26T20:17:08Z"
+	},
+	"nodes":	[{
+			"id":	"inventory",
+			"type":	"storage",
+			"value":	50
+		}, {
+			"id":	"price",
+			"type":	"storage",
+			"value":	10
+		}, {
+			"id":	"source",
+			"type":	"source",
+			"value":	1
+		}, {
+			"id":	"sink",
+			"type":	"sink",
+			"value":	0
+		}, {
+			"id":	"production",
+			"type":	"interaction",
+			"value":	0,
+			"params":	{
+				"k":	0.1
+			}
+		}, {
+			"id":	"price_down",
+			"type":	"interaction",
+			"value":	0,
+			"params":	{
+				"k":	0.01
+			}
+		}],
+	"edges":	[{
+			"id":	"consumption",
+			"origin":	"inventory",
+			"target":	"sink",
+			"logic":	"constant",
+			"params":	{
+				"k":	1
+			}
+		}, {
+			"id":	"price_up",
+			"origin":	"source",
+			"target":	"price",
+			"logic":	"constant",
+			"params":	{
+				"k":	0.5
+			}
+		}, {
+			"id":	"production__feed",
+			"origin":	"source",
+			"target":	"production"
+		}, {
+			"id":	"production__ctrl",
+			"origin":	"price",
+			"target":	"production"
+		}, {
+			"id":	"production__out",
+			"origin":	"production",
+			"target":	"inventory"
+		}, {
+			"id":	"price_down__feed",
+			"origin":	"price",
+			"target":	"price_down"
+		}, {
+			"id":	"price_down__ctrl",
+			"origin":	"inventory",
+			"target":	"price_down"
+		}, {
+			"id":	"price_down__out",
+			"origin":	"price_down",
+			"target":	"sink"
+		}],
+	"config":	{
+		"t_start":	0,
+		"t_end":	100,
+		"dt":	0.1,
+		"method":	"rk4"
+	}
 }

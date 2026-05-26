@@ -1,6 +1,6 @@
 {
     "metadata": {
-        "schema_version": 3,
+        "schema_version": 4,
         "name": "Household Ecological-Economy",
         "description": "Multi-carrier household model demonstrating money, energy, material and information flows. Reference example for Phase 5 — all five edge logic types, quality accounting (emergy), and cross-carrier coupling.",
         "author": "GSSK reference examples",
@@ -29,6 +29,8 @@
         { "id": "heat_loss",          "type": "sink",    "value": 0.0,     "carrier": "energy" },
 
         { "id": "grocery_market",     "type": "source",  "value": 1.0,     "carrier": "material" },
+        { "id": "grocery_exchange",   "type": "exchange","value": 0.0,     "carrier": "material",
+          "params": { "k": 0.001, "price": 100.0 } },
         { "id": "mains_water",        "type": "source",  "value": 1.0,     "carrier": "material" },
         { "id": "pantry",             "type": "storage", "value": 10.0,    "carrier": "material" },
         { "id": "fridge",             "type": "storage", "value": 5.0,     "carrier": "material" },
@@ -69,12 +71,6 @@
             "params": { "k": 600.0 }
         },
         {
-            "id": "grocery_payment",
-            "origin": "bank_account", "target": "tax",
-            "carrier": "money",       "logic": "linear",
-            "params": { "k": 0.1 }
-        },
-        {
             "id": "credit_payment",
             "origin": "credit_card_debt", "target": "bank_account",
             "carrier": "money",           "logic": "threshold",
@@ -112,12 +108,10 @@
             "params": { "k": 0.03 }
         },
 
-        {
-            "id": "grocery_receive",
-            "origin": "grocery_market", "target": "pantry",
-            "carrier": "material",      "logic": "interaction",
-            "params": { "k": 0.001, "control_node": "bank_account" }
-        },
+        { "id": "grocery_goods_in",  "origin": "grocery_market",  "target": "grocery_exchange", "carrier": "material" },
+        { "id": "grocery_money_in",  "origin": "bank_account",    "target": "grocery_exchange", "carrier": "money" },
+        { "id": "grocery_goods_out", "origin": "grocery_exchange", "target": "pantry",           "carrier": "material" },
+        { "id": "grocery_money_out", "origin": "grocery_exchange", "target": "tax",              "carrier": "money" },
         {
             "id": "water_fill",
             "origin": "mains_water",   "target": "pantry",

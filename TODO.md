@@ -380,21 +380,25 @@ general-purpose ODE library. The wedge is:
 - [x] Schema v4 accepted by kernel (`schema_version: 4` in metadata block).
 - [x] `gssk.h` version bumped to 4.0.0.
 - [x] Regression expected CSVs updated (`make test-update`).
-- [ ] Migration CLI: `./bin/gssk migrate --from 3 input.json` — converts
-      `logic: "interaction"` edges to proper `type: "interaction"` nodes.
-- [ ] Update existing `examples/*.json` models from v3 to v4 node types
-      (currently only `interaction_model.json` uses v4; others remain v3).
-- [ ] Update household model: replace interaction-edge grocery transaction
+- [x] Migration CLI: `./bin/gssk migrate --from 3 input.json` — converts
+      `logic: "interaction"` edges to proper `type: "interaction"` nodes;
+      `logic: "limit"` → `type: "loop_limited"`; threshold edges skipped
+      (semantic incompatibility: v3 constant flow, v4 proportional flow).
+- [x] Update existing `examples/*.json` models from v3 to v4 node types
+      (oscillator, economic, atwood, saturation migrated; simple/decay bumped).
+- [x] Update household model: replaced interaction-edge grocery transaction
       with `type: "exchange"` node coupling money ↔ material carrier.
 
 ### 7.4 Solver & Sensitivity Updates
 
 - [x] Multi-input routing: `compute_derivatives` dispatches to per-type helpers
       for all 5 processing node types; handles arbitrary input count.
-- [ ] Hand-code `∂f/∂p` Jacobian entries for new node types (Phase 3 sensitivity
-      currently only covers linear/interaction/limit edge paths).
-- [ ] Add new node types to fuzz target (`tests/fuzz_gssk.c`).
-- [ ] Update Swift, Python, JS bindings with new `NodeType` enum values.
+- [x] Hand-code `∂f/∂p` Jacobian entries for new node types (interaction,
+      gain, loop_limited, switch, exchange — added to `build_jacobian`).
+- [x] Add new node types to fuzz target: 4 new v4 seeds in
+      `tests/fuzz_corpus/` (interaction, loop_limited, exchange, composite).
+- [x] Update Swift, Python, JS bindings: `nodeTypeString`, `archetypeCount`,
+      `archetypeName`, `compositeCount`, `compositeID`; `GSSKSchemaVersion` → 4.
 - [x] Tests: `test_interaction_node()` and `test_loop_limited_node()` in
       `tests/test_advanced.c` (plus 3 Phase 8 archetype tests).
 

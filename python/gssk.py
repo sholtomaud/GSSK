@@ -172,6 +172,21 @@ _lib.GSSK_EnableForwardSensitivity.restype  = ctypes.c_int
 _lib.GSSK_DisableForwardSensitivity.argtypes = [ctypes.c_void_p]
 _lib.GSSK_DisableForwardSensitivity.restype  = None
 
+_lib.GSSK_GetNodeTypeString.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_GetNodeTypeString.restype  = ctypes.c_char_p
+
+_lib.GSSK_GetArchetypeCount.argtypes = [ctypes.c_void_p]
+_lib.GSSK_GetArchetypeCount.restype  = ctypes.c_size_t
+
+_lib.GSSK_GetArchetypeName.argtypes  = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_GetArchetypeName.restype   = ctypes.c_char_p
+
+_lib.GSSK_GetCompositeCount.argtypes = [ctypes.c_void_p]
+_lib.GSSK_GetCompositeCount.restype  = ctypes.c_size_t
+
+_lib.GSSK_GetCompositeID.argtypes    = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_GetCompositeID.restype     = ctypes.c_char_p
+
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
 class GSSKError(Exception):
@@ -377,6 +392,28 @@ class GSSKSimulator:
 
     def get_sensitivity(self, node_idx: int, param_idx: int) -> float:
         return _lib.GSSK_GetSensitivity(self._inst, node_idx, param_idx)
+
+    # ── Node type / archetype / composite ────────────────────────────────────
+
+    def node_type_string(self, node_index: int) -> str:
+        cstr = _lib.GSSK_GetNodeTypeString(self._inst, node_index)
+        return cstr.decode() if cstr else ""
+
+    @property
+    def archetype_count(self) -> int:
+        return int(_lib.GSSK_GetArchetypeCount(self._inst))
+
+    def archetype_name(self, index: int) -> str | None:
+        cstr = _lib.GSSK_GetArchetypeName(self._inst, index)
+        return cstr.decode() if cstr else None
+
+    @property
+    def composite_count(self) -> int:
+        return int(_lib.GSSK_GetCompositeCount(self._inst))
+
+    def composite_id(self, index: int) -> str | None:
+        cstr = _lib.GSSK_GetCompositeID(self._inst, index)
+        return cstr.decode() if cstr else None
 
     # ── Serialisation ────────────────────────────────────────────────────────
 

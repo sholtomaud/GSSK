@@ -5,8 +5,8 @@ import Foundation
 
 /// The schema version this wrapper was built against.
 /// A serialiser must embed this in the JSON `metadata.schema_version` field.
-/// The kernel accepts v2 (with a deprecation warning) and v3 (current).
-public let GSSKSchemaVersion: Int = 3
+/// The kernel accepts v3 and v4 (current).
+public let GSSKSchemaVersion: Int = 4
 
 /// Programmatic access to the current schema version.
 public let GSSKCurrentSchemaVersion: Int = GSSKSchemaVersion
@@ -388,6 +388,41 @@ public final class GSSKSimulator {
         guard let p = instPtr else { return nil }
         let idx = id.withCString { GSSK_FindNodeIdx(p, $0) }
         return idx >= 0 ? Int(idx) : nil
+    }
+
+    /// Return the node type name string (e.g. "source", "storage", "interaction") for node at `index`.
+    public func nodeTypeString(at index: Int) -> String {
+        guard let p = instPtr,
+              let cStr = GSSK_GetNodeTypeString(p, index) else { return "" }
+        return String(cString: cStr)
+    }
+
+    // MARK: - Archetype / composite access
+
+    /// Number of named archetypes registered in this instance.
+    public var archetypeCount: Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetArchetypeCount(p))
+    }
+
+    /// Name of the archetype at `index`, or `nil` if out of range.
+    public func archetypeName(at index: Int) -> String? {
+        guard let p = instPtr,
+              let cStr = GSSK_GetArchetypeName(p, index) else { return nil }
+        return String(cString: cStr)
+    }
+
+    /// Number of composite nodes expanded by the archetype system.
+    public var compositeCount: Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetCompositeCount(p))
+    }
+
+    /// ID of the composite node at `index`, or `nil` if out of range.
+    public func compositeID(at index: Int) -> String? {
+        guard let p = instPtr,
+              let cStr = GSSK_GetCompositeID(p, index) else { return nil }
+        return String(cString: cStr)
     }
 
     // MARK: - Edge access

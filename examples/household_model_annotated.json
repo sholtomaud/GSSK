@@ -2,7 +2,7 @@
     "_note": "Annotated version of household_model.json. The GSSK kernel ignores all fields prefixed with '_'. Edit household_model.json for simulation; use this file for documentation and onboarding.",
 
     "metadata": {
-        "schema_version": 3,
+        "schema_version": 4,
         "name": "Household Ecological-Economy",
         "description": "Multi-carrier household model demonstrating money, energy, material and information flows. Reference example for Phase 5 — all five edge logic types, quality accounting (emergy), and cross-carrier coupling.",
         "author": "GSSK reference examples",
@@ -76,8 +76,13 @@
         },
 
         {
-            "_note": "Idealised grocery market — essentially infinite supply. Normalised to 1.0. Real flow rate is determined by the interaction edge (grocery_receive) controlled by bank_account.",
+            "_note": "Idealised grocery market — essentially infinite supply. Normalised to 1.0. Real flow rate is determined by the exchange node (grocery_exchange) jointly by goods availability and bank_account.",
             "id": "grocery_market", "type": "source", "value": 1.0, "carrier": "material"
+        },
+        {
+            "_note": "EXCHANGE node (schema v4) — atomic grocery transaction. Goods flow in from grocery_market; money flows in from bank_account. F_goods = k × Q_market × Q_bank; F_money = price × F_goods. price=100 gives 0.1 × Q_bank AUD/month outflow.",
+            "id": "grocery_exchange", "type": "exchange", "value": 0.0, "carrier": "material",
+            "params": { "k": 0.001, "price": 100.0 }
         },
         {
             "_note": "Municipal water supply. Constant 1.5 kg/month into pantry (water_fill edge). Treated as unlimited in this model.",
@@ -156,13 +161,6 @@
             "params": { "k": 600.0 }
         },
         {
-            "_note": "LINEAR — discretionary spending at 10% of account balance per month. F = 0.1 × Q_bank. Models Keynesian consumption: wealthier households spend more. Key parameter for cross-carrier sensitivity.",
-            "id": "grocery_payment",
-            "origin": "bank_account", "target": "tax",
-            "carrier": "money", "logic": "linear",
-            "params": { "k": 0.1 }
-        },
-        {
             "_note": "THRESHOLD — credit card minimum repayment. F = 300 AUD/month only when Q_credit > 500 AUD. The kernel's Illinois event detector locates the exact crossing time. Currently always 0 since debt starts at 0 and no credit-spending edge exists.",
             "id": "credit_payment",
             "origin": "credit_card_debt", "target": "bank_account",
@@ -206,13 +204,10 @@
             "params": { "k": 0.03 }
         },
 
-        {
-            "_note": "INTERACTION — cross-carrier work gate. F = 0.001 × Q_market × Q_bank. Grocery material flow is controlled by bank_account (money carrier). This is the primary cross-carrier coupling in the model. Doubling k doubles pantry steady-state.",
-            "id": "grocery_receive",
-            "origin": "grocery_market", "target": "pantry",
-            "carrier": "material", "logic": "interaction",
-            "params": { "k": 0.001, "control_node": "bank_account" }
-        },
+        { "_note": "Goods flow in: grocery_market supplies the exchange node.", "id": "grocery_goods_in",  "origin": "grocery_market",  "target": "grocery_exchange", "carrier": "material" },
+        { "_note": "Money flow in: bank_account funds the purchase.",          "id": "grocery_money_in",  "origin": "bank_account",    "target": "grocery_exchange", "carrier": "money" },
+        { "_note": "Goods flow out: pantry receives the groceries.",           "id": "grocery_goods_out", "origin": "grocery_exchange", "target": "pantry",          "carrier": "material" },
+        { "_note": "Money flow out: payment leaves household (external sink).", "id": "grocery_money_out", "origin": "grocery_exchange", "target": "tax",             "carrier": "money" },
         {
             "_note": "CONSTANT — mains water input to pantry. 1.5 kg/month (cooking, drinking water stored before use). Independent of financial state.",
             "id": "water_fill",

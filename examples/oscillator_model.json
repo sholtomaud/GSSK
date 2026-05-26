@@ -1,66 +1,68 @@
 {
-    "metadata": {
-        "schema_version": 3,
-        "name": "Oscillator Model",
-        "description": "Lotka-Volterra predator-prey oscillator using interaction edges.",
-        "kernel_version": "3.0.0"
-    },
-    "nodes": [
-        {
-            "id": "resource",
-            "type": "source",
-            "value": 1.0
-        },
-        {
-            "id": "prey",
-            "type": "storage",
-            "value": 10.0
-        },
-        {
-            "id": "predator",
-            "type": "storage",
-            "value": 5.0
-        },
-        {
-            "id": "env",
-            "type": "sink",
-            "value": 0.0
-        }
-    ],
-    "edges": [
-        {
-            "id": "growth",
-            "origin": "resource",
-            "target": "prey",
-            "logic": "linear",
-            "params": {
-                "k": 0.5
-            }
-        },
-        {
-            "id": "consumption",
-            "origin": "prey",
-            "target": "predator",
-            "logic": "interaction",
-            "params": {
-                "k": 0.1,
-                "control_node": "predator"
-            }
-        },
-        {
-            "id": "predator_death",
-            "origin": "predator",
-            "target": "env",
-            "logic": "linear",
-            "params": {
-                "k": 0.2
-            }
-        }
-    ],
-    "config": {
-        "t_start": 0.0,
-        "t_end": 100.0,
-        "dt": 0.1,
-        "method": "rk4"
-    }
+	"metadata":	{
+		"schema_version":	4,
+		"name":	"Oscillator Model",
+		"description":	"Lotka-Volterra predator-prey oscillator using interaction edges.",
+		"kernel_version":	"3.0.0",
+		"created_at":	"2026-05-26T20:17:08Z"
+	},
+	"nodes":	[{
+			"id":	"resource",
+			"type":	"source",
+			"value":	1
+		}, {
+			"id":	"prey",
+			"type":	"storage",
+			"value":	10
+		}, {
+			"id":	"predator",
+			"type":	"storage",
+			"value":	5
+		}, {
+			"id":	"env",
+			"type":	"sink",
+			"value":	0
+		}, {
+			"id":	"consumption",
+			"type":	"interaction",
+			"value":	0,
+			"params":	{
+				"k":	0.1
+			}
+		}],
+	"edges":	[{
+			"id":	"growth",
+			"origin":	"resource",
+			"target":	"prey",
+			"logic":	"linear",
+			"params":	{
+				"k":	0.5
+			}
+		}, {
+			"id":	"predator_death",
+			"origin":	"predator",
+			"target":	"env",
+			"logic":	"linear",
+			"params":	{
+				"k":	0.2
+			}
+		}, {
+			"id":	"consumption__feed",
+			"origin":	"prey",
+			"target":	"consumption"
+		}, {
+			"id":	"consumption__ctrl",
+			"origin":	"predator",
+			"target":	"consumption"
+		}, {
+			"id":	"consumption__out",
+			"origin":	"consumption",
+			"target":	"predator"
+		}],
+	"config":	{
+		"t_start":	0,
+		"t_end":	100,
+		"dt":	0.1,
+		"method":	"rk4"
+	}
 }

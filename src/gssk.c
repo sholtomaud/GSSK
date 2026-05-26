@@ -1694,6 +1694,155 @@ static void build_jacobian(GSSK_Instance *inst, const double *state, double *J) 
     }
   }
 
+  /* Phase 7 — processing node Jacobian contributions.
+   * Each helper mirrors the flow computation in compute_*_node(). */
+  for (size_t ni = 0; ni < n; ni++) {
+    if (!inst->nodes[ni].active || !is_processing_node(inst->nodes[ni].type))
+      continue;
+
+    /* Count outputs once (shared by all per-type cases) */
+    size_t out_count = 0;
+    for (size_t ei = 0; ei < inst->edge_count; ei++) {
+      GSSK_EdgeInternal *e = &inst->edges[ei];
+      if (e->active && (size_t)e->origin_idx == ni) out_count++;
+    }
+    if (out_count == 0) continue;
+
+    switch (inst->nodes[ni].type) {
+
+    case NODE_INTERACTION: {
+      /* F = node_k × ∏ Q_j over all inputs; energy_orig = first input */
+      int in_orig[GSSK_MAX_ARCH_NODES]; size_t in_n = 0;
+      int energy_orig = -1;
+      double F = inst->nodes[ni].node_k;
+      for (size_t ei = 0; ei < inst->edge_count && in_n < GSSK_MAX_ARCH_NODES; ei++) {
+        GSSK_EdgeInternal *e = &inst->edges[ei];
+        if (!e->active || (size_t)e->target_idx != ni) continue;
+        if (in_n == 0) energy_orig = e->origin_idx;
+        in_orig[in_n++] = e->origin_idx;
+        F *= state[e->origin_idx];
+      }
+      if (in_n == 0) break;
+      for (size_t ji = 0; ji < in_n; ji++) {
+        int j = in_orig[ji];
+        double dF_dQj = (fabs(state[j]) > 1e-12) ? F / state[j] : 0.0;
+        if (energy_orig >= 0)
+          J[(size_t)energy_orig * n + (size_t)j] -= dF_dQj;
+        for (size_t ei = 0; ei < inst->edge_count; ei++) {
+          GSSK_EdgeInternal *e = &inst->edges[ei];
+          if (!e->active || (size_t)e->origin_idx != ni) continue;
+          J[(size_t)e->target_idx * n + (size_t)j] += dF_dQj / (double)out_count;
+        }
+      }
+      break;
+    }
+
+    case NODE_GAIN: {
+      /* F = node_k × Q_control; optionally draws from energy source */
+      int ctrl = -1, esrc = -1; size_t seen = 0;
+      for (size_t ei = 0; ei < inst->edge_count; ei++) {
+        GSSK_EdgeInternal *e = &inst->edges[ei];
+        if (!e->active || (size_t)e->target_idx != ni) continue;
+        if (seen == 0) ctrl = e->origin_idx;
+        else if (seen == 1) esrc = e->origin_idx;
+        seen++;
+      }
+      if (ctrl < 0) break;
+      double dF = inst->nodes[ni].node_k;
+      if (esrc >= 0 && inst->nodes[esrc].type == NODE_STORAGE)
+        J[(size_t)esrc * n + (size_t)ctrl] -= dF;
+      for (size_t ei = 0; ei < inst->edge_count; ei++) {
+        GSSK_EdgeInternal *e = &inst->edges[ei];
+        if (!e->active || (size_t)e->origin_idx != ni) continue;
+        J[(size_t)e->target_idx * n + (size_t)ctrl] += dF / (double)out_count;
+      }
+      break;
+    }
+
+    case NODE_LOOP_LIMITED: {
+      /* F = node_k × Q_in × C / (C + Q_in) */
+      int in_orig = -1;
+      for (size_t ei = 0; ei < inst->edge_count; ei++) {
+        GSSK_EdgeInternal *e = &inst->edges[ei];
+        if (!e->active || (size_t)e->target_idx != ni) continue;
+        in_orig = e->origin_idx; break;
+      }
+      if (in_orig < 0) break;
+      double Q_in = state[in_orig];
+      double C = inst->nodes[ni].node_C > 1e-9 ? inst->nodes[ni].node_C : 1.0;
+      double d = C + Q_in;
+      double dF = inst->nodes[ni].node_k * C * C / (d * d);
+      J[(size_t)in_orig * n + (size_t)in_orig] -= dF;
+      for (size_t ei = 0; ei < inst->edge_count; ei++) {
+        GSSK_EdgeInternal *e = &inst->edges[ei];
+        if (!e->active || (size_t)e->origin_idx != ni) continue;
+        J[(size_t)e->target_idx * n + (size_t)in_orig] += dF / (double)out_count;
+      }
+      break;
+    }
+
+    case NODE_SWITCH: {
+      /* F = node_k × Q_flow when Q_sensor > threshold */
+      int flow_o = -1, sens_o = -1; size_t seen = 0;
+      for (size_t ei = 0; ei < inst->edge_count; ei++) {
+        GSSK_EdgeInternal *e = &inst->edges[ei];
+        if (!e->active || (size_t)e->target_idx != ni) continue;
+        if (seen == 0) flow_o = e->origin_idx;
+        else if (seen == 1) sens_o = e->origin_idx;
+        seen++;
+      }
+      if (flow_o < 0) break;
+      if (sens_o < 0) sens_o = flow_o;
+      if (state[sens_o] <= inst->nodes[ni].node_threshold) break;
+      double dF = inst->nodes[ni].node_k;
+      J[(size_t)flow_o * n + (size_t)flow_o] -= dF;
+      for (size_t ei = 0; ei < inst->edge_count; ei++) {
+        GSSK_EdgeInternal *e = &inst->edges[ei];
+        if (!e->active || (size_t)e->origin_idx != ni) continue;
+        J[(size_t)e->target_idx * n + (size_t)flow_o] += dF / (double)out_count;
+      }
+      break;
+    }
+
+    case NODE_EXCHANGE: {
+      /* F_goods = node_k × Q_goods_in (× Q_money_in if present) */
+      int gi = -1, mi = -1, go = -1, mo = -1;
+      for (size_t ei = 0; ei < inst->edge_count; ei++) {
+        GSSK_EdgeInternal *e = &inst->edges[ei];
+        if (!e->active) continue;
+        bool is_m = (strcmp(e->carrier, "money") == 0);
+        if ((size_t)e->target_idx == ni) {
+          if (is_m) mi = e->origin_idx; else gi = e->origin_idx;
+        } else if ((size_t)e->origin_idx == ni) {
+          if (is_m) mo = e->target_idx; else go = e->target_idx;
+        }
+      }
+      if (gi < 0) break;
+      double Qg = state[gi];
+      double Qm = (mi >= 0) ? state[mi] : 1.0;
+      double k  = inst->nodes[ni].node_k;
+      double p  = inst->nodes[ni].node_price;
+      /* ∂/∂Q_goods_in */
+      double dFg_dQg = k * Qm;
+      J[(size_t)gi * n + (size_t)gi] -= dFg_dQg;
+      if (go >= 0) J[(size_t)go * n + (size_t)gi] += dFg_dQg;
+      if (mi >= 0) J[(size_t)mi * n + (size_t)gi] -= p * dFg_dQg;
+      if (mo >= 0) J[(size_t)mo * n + (size_t)gi] += p * dFg_dQg;
+      /* ∂/∂Q_money_in */
+      if (mi >= 0) {
+        double dFg_dQm = k * Qg;
+        J[(size_t)gi * n + (size_t)mi] -= dFg_dQm;
+        if (go >= 0) J[(size_t)go * n + (size_t)mi] += dFg_dQm;
+        J[(size_t)mi * n + (size_t)mi]  -= p * dFg_dQm;
+        if (mo >= 0) J[(size_t)mo * n + (size_t)mi] += p * dFg_dQm;
+      }
+      break;
+    }
+
+    default: break;
+    }
+  }
+
   for (size_t i = 0; i < n; i++) {
     if (inst->nodes[i].type == NODE_SOURCE ||
         inst->nodes[i].type == NODE_CONSTANT)

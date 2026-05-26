@@ -1,36 +1,60 @@
 {
-    "metadata": {
-        "schema_version": 3,
-        "name": "Atwood Machine",
-        "description": "Atwood machine dynamics modelled as coupled storage nodes.",
-        "kernel_version": "3.0.0"
-    },
-    "nodes": [
-        { "id": "velocity", "type": "storage", "value": 0.0 },
-        { "id": "position", "type": "storage", "value": 0.0 },
-        { "id": "source", "type": "source", "value": 1.0 },
-        { "id": "env", "type": "sink", "value": 0.0 }
-    ],
-    "edges": [
-        {
-            "id": "acceleration",
-            "origin": "source",
-            "target": "velocity",
-            "logic": "constant",
-            "params": { "k": 3.333 }
-        },
-        {
-            "id": "displacement",
-            "origin": "source",
-            "target": "position",
-            "logic": "interaction",
-            "params": { "k": 1.0, "control_node": "velocity" }
-        }
-    ],
-    "config": {
-        "t_start": 0.0,
-        "t_end": 10.0,
-        "dt": 0.05,
-        "method": "rk4"
-    }
+	"metadata":	{
+		"schema_version":	4,
+		"name":	"Atwood Machine",
+		"description":	"Atwood machine dynamics modelled as coupled storage nodes.",
+		"kernel_version":	"3.0.0",
+		"created_at":	"2026-05-26T20:17:08Z"
+	},
+	"nodes":	[{
+			"id":	"velocity",
+			"type":	"storage",
+			"value":	0
+		}, {
+			"id":	"position",
+			"type":	"storage",
+			"value":	0
+		}, {
+			"id":	"source",
+			"type":	"source",
+			"value":	1
+		}, {
+			"id":	"env",
+			"type":	"sink",
+			"value":	0
+		}, {
+			"id":	"displacement",
+			"type":	"interaction",
+			"value":	0,
+			"params":	{
+				"k":	1
+			}
+		}],
+	"edges":	[{
+			"id":	"acceleration",
+			"origin":	"source",
+			"target":	"velocity",
+			"logic":	"constant",
+			"params":	{
+				"k":	3.333
+			}
+		}, {
+			"id":	"displacement__feed",
+			"origin":	"source",
+			"target":	"displacement"
+		}, {
+			"id":	"displacement__ctrl",
+			"origin":	"velocity",
+			"target":	"displacement"
+		}, {
+			"id":	"displacement__out",
+			"origin":	"displacement",
+			"target":	"position"
+		}],
+	"config":	{
+		"t_start":	0,
+		"t_end":	10,
+		"dt":	0.05,
+		"method":	"rk4"
+	}
 }

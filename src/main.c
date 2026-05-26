@@ -118,8 +118,8 @@ static int cmd_migrate(int argc, char **argv) {
     return EXIT_FAILURE;
   }
 
-  if (from_ver != 2) {
-    fprintf(stderr, "migrate: only --from 2 is supported (migrates v2 → v3)\n");
+  if (from_ver != 2 && from_ver != 3) {
+    fprintf(stderr, "migrate: supported versions: --from 2 (v2→v3), --from 3 (v3→v4)\n");
     return EXIT_FAILURE;
   }
 
@@ -162,6 +162,165 @@ static int cmd_migrate(int argc, char **argv) {
     cJSON_AddStringToObject(meta, "created_at", ts);
   }
 
+  /* ── v3 → v4: promote interaction/limit edges to processing nodes ─────── */
+  if (from_ver == 3) {
+    /* Update schema_version to 4 */
+    cJSON *sv3 = cJSON_GetObjectItem(meta, "schema_version");
+    if (sv3) cJSON_SetNumberValue(sv3, 4);
+    else cJSON_AddNumberToObject(meta, "schema_version", 4);
+
+    cJSON *nodes_arr = cJSON_GetObjectItem(root, "nodes");
+    cJSON *edges_arr = cJSON_GetObjectItem(root, "edges");
+    if (!cJSON_IsArray(nodes_arr) || !cJSON_IsArray(edges_arr)) {
+      fprintf(stderr, "migrate: model missing nodes/edges arrays\n");
+      cJSON_Delete(root);
+      return EXIT_FAILURE;
+    }
+
+    /* Collect edges that need promotion */
+    cJSON *edge = NULL;
+    cJSON *edges_to_remove = cJSON_CreateArray();
+    cJSON *new_edges = cJSON_CreateArray();
+
+    cJSON_ArrayForEach(edge, edges_arr) {
+      cJSON *logic = cJSON_GetObjectItem(edge, "logic");
+      if (!cJSON_IsString(logic)) continue;
+      const char *lstr = logic->valuestring;
+
+      int is_interaction = (strcmp(lstr, "interaction") == 0);
+      int is_limit       = (strcmp(lstr, "limit")       == 0);
+      if (!is_interaction && !is_limit) continue;
+
+      cJSON *eid    = cJSON_GetObjectItem(edge, "id");
+      cJSON *origin = cJSON_GetObjectItem(edge, "origin");
+      cJSON *target = cJSON_GetObjectItem(edge, "target");
+      cJSON *params = cJSON_GetObjectItem(edge, "params");
+      cJSON *carrier = cJSON_GetObjectItem(edge, "carrier");
+      if (!cJSON_IsString(origin) || !cJSON_IsString(target)) continue;
+
+      const char *edge_id = cJSON_IsString(eid) ? eid->valuestring : "gate";
+      double k = 1.0;
+      cJSON *pk = params ? cJSON_GetObjectItem(params, "k") : NULL;
+      if (cJSON_IsNumber(pk)) k = pk->valuedouble;
+
+      if (is_interaction) {
+        /* interaction edge → interaction node + 3 edges */
+        cJSON *ctrl_item = params ? cJSON_GetObjectItem(params, "control_node") : NULL;
+        const char *ctrl = cJSON_IsString(ctrl_item) ? ctrl_item->valuestring
+                                                      : target->valuestring;
+
+        /* New node: {id: edge_id, type: "interaction", value: 0, params: {k}} */
+        cJSON *n = cJSON_CreateObject();
+        cJSON_AddStringToObject(n, "id", edge_id);
+        cJSON_AddStringToObject(n, "type", "interaction");
+        cJSON_AddNumberToObject(n, "value", 0.0);
+        cJSON *np = cJSON_CreateObject();
+        cJSON_AddNumberToObject(np, "k", k);
+        cJSON_AddItemToObject(n, "params", np);
+        if (cJSON_IsString(carrier)) cJSON_AddStringToObject(n, "carrier", carrier->valuestring);
+        cJSON_AddItemToArray(nodes_arr, n);
+
+        /* feed: origin → gate */
+        char feed_id[128]; snprintf(feed_id, sizeof(feed_id), "%.60s__feed", edge_id);
+        cJSON *e1 = cJSON_CreateObject();
+        cJSON_AddStringToObject(e1, "id",     feed_id);
+        cJSON_AddStringToObject(e1, "origin", origin->valuestring);
+        cJSON_AddStringToObject(e1, "target", edge_id);
+        if (cJSON_IsString(carrier)) cJSON_AddStringToObject(e1, "carrier", carrier->valuestring);
+        cJSON_AddItemToArray(new_edges, e1);
+
+        /* ctrl: control_node → gate (skip if same as feed) */
+        if (strcmp(ctrl, origin->valuestring) != 0) {
+          char ctrl_id[128]; snprintf(ctrl_id, sizeof(ctrl_id), "%.60s__ctrl", edge_id);
+          cJSON *e2 = cJSON_CreateObject();
+          cJSON_AddStringToObject(e2, "id",     ctrl_id);
+          cJSON_AddStringToObject(e2, "origin", ctrl);
+          cJSON_AddStringToObject(e2, "target", edge_id);
+          if (cJSON_IsString(carrier)) cJSON_AddStringToObject(e2, "carrier", carrier->valuestring);
+          cJSON_AddItemToArray(new_edges, e2);
+        }
+
+        /* out: gate → original target */
+        char out_id[128]; snprintf(out_id, sizeof(out_id), "%.60s__out", edge_id);
+        cJSON *e3 = cJSON_CreateObject();
+        cJSON_AddStringToObject(e3, "id",     out_id);
+        cJSON_AddStringToObject(e3, "origin", edge_id);
+        cJSON_AddStringToObject(e3, "target", target->valuestring);
+        if (cJSON_IsString(carrier)) cJSON_AddStringToObject(e3, "carrier", carrier->valuestring);
+        cJSON_AddItemToArray(new_edges, e3);
+
+      } else { /* is_limit */
+        /* limit edge → loop_limited node + 2 edges */
+        double C = 1.0;
+        cJSON *pt = params ? cJSON_GetObjectItem(params, "threshold") : NULL;
+        cJSON *pc = params ? cJSON_GetObjectItem(params, "C")         : NULL;
+        if (cJSON_IsNumber(pt)) C = pt->valuedouble;
+        else if (cJSON_IsNumber(pc)) C = pc->valuedouble;
+
+        /* New node */
+        cJSON *n = cJSON_CreateObject();
+        cJSON_AddStringToObject(n, "id", edge_id);
+        cJSON_AddStringToObject(n, "type", "loop_limited");
+        cJSON_AddNumberToObject(n, "value", 0.0);
+        cJSON *np = cJSON_CreateObject();
+        cJSON_AddNumberToObject(np, "k", k);
+        cJSON_AddNumberToObject(np, "C", C);
+        cJSON_AddItemToObject(n, "params", np);
+        if (cJSON_IsString(carrier)) cJSON_AddStringToObject(n, "carrier", carrier->valuestring);
+        cJSON_AddItemToArray(nodes_arr, n);
+
+        /* feed: origin → node */
+        char feed_id[128]; snprintf(feed_id, sizeof(feed_id), "%.60s__feed", edge_id);
+        cJSON *e1 = cJSON_CreateObject();
+        cJSON_AddStringToObject(e1, "id",     feed_id);
+        cJSON_AddStringToObject(e1, "origin", origin->valuestring);
+        cJSON_AddStringToObject(e1, "target", edge_id);
+        if (cJSON_IsString(carrier)) cJSON_AddStringToObject(e1, "carrier", carrier->valuestring);
+        cJSON_AddItemToArray(new_edges, e1);
+
+        /* out: node → target */
+        char out_id[128]; snprintf(out_id, sizeof(out_id), "%.60s__out", edge_id);
+        cJSON *e2 = cJSON_CreateObject();
+        cJSON_AddStringToObject(e2, "id",     out_id);
+        cJSON_AddStringToObject(e2, "origin", edge_id);
+        cJSON_AddStringToObject(e2, "target", target->valuestring);
+        if (cJSON_IsString(carrier)) cJSON_AddStringToObject(e2, "carrier", carrier->valuestring);
+        cJSON_AddItemToArray(new_edges, e2);
+      }
+
+      /* Mark original edge for removal */
+      cJSON_AddItemToArray(edges_to_remove, cJSON_CreateString(
+          cJSON_IsString(eid) ? eid->valuestring : ""));
+    }
+
+    /* Remove promoted edges */
+    int rm_count = cJSON_GetArraySize(edges_to_remove);
+    for (int ri = rm_count - 1; ri >= 0; ri--) {
+      cJSON *rid = cJSON_GetArrayItem(edges_to_remove, ri);
+      if (!cJSON_IsString(rid) || rid->valuestring[0] == '\0') continue;
+      int idx = 0;
+      cJSON *e2 = NULL;
+      cJSON_ArrayForEach(e2, edges_arr) {
+        cJSON *eid2 = cJSON_GetObjectItem(e2, "id");
+        if (cJSON_IsString(eid2) && strcmp(eid2->valuestring, rid->valuestring) == 0) {
+          cJSON_DeleteItemFromArray(edges_arr, idx);
+          break;
+        }
+        idx++;
+      }
+    }
+    cJSON_Delete(edges_to_remove);
+
+    /* Append new edges */
+    cJSON *ne = NULL;
+    cJSON_ArrayForEach(ne, new_edges) {
+      cJSON_AddItemToArray(edges_arr, cJSON_Duplicate(ne, 1));
+    }
+    cJSON_Delete(new_edges);
+
+    fprintf(stderr, "migrate: upgraded to schema v4 (interaction/limit edges → nodes)\n");
+  }
+
   char *out_json = cJSON_Print(root);
   cJSON_Delete(root);
 
@@ -179,7 +338,8 @@ static int cmd_migrate(int argc, char **argv) {
     }
     fputs(out_json, f);
     fclose(f);
-    fprintf(stderr, "migrate: wrote v3 model to %s\n", output_path);
+    fprintf(stderr, "migrate: wrote %s model to %s\n",
+            from_ver == 3 ? "v4" : "v3", output_path);
   } else {
     puts(out_json);
   }
@@ -189,7 +349,7 @@ static int cmd_migrate(int argc, char **argv) {
 }
 
 static int cmd_version(void) {
-  printf("gssk %s (schema v3)\n", GSSK_GetVersionString());
+  printf("gssk %s (schema v4)\n", GSSK_GetVersionString());
   return EXIT_SUCCESS;
 }
 
@@ -364,6 +524,7 @@ int main(int argc, char **argv) {
       "  gssk <model.json> [output.csv]                     Run simulation\n"
       "  gssk run <model.json> [output.csv]                 Run simulation\n"
       "  gssk migrate --from 2 <input.json> [out.json]      Upgrade v2 → v3 schema\n"
+      "  gssk migrate --from 3 <input.json> [out.json]      Upgrade v3 → v4 schema\n"
       "  gssk diff <snap_a.json> <snap_b.json>              Diff two snapshots\n"
       "  gssk replay <model.json> [muts.json] [--until <t>] Replay with mutations\n"
       "  gssk version                                       Print kernel version\n");
