@@ -521,10 +521,15 @@ static void rk4_step_alloc(GSSK_Instance *inst, const double *Q_in,
   double *k2  = malloc(n * sizeof(double));
   double *k3  = malloc(n * sizeof(double));
   double *k4  = malloc(n * sizeof(double));
-  double *tmp = malloc(n * sizeof(double));
-  if (!k1 || !k2 || !k3 || !k4 || !tmp) {
+  if (!k1 || !k2 || !k3 || !k4) {
     memcpy(Q_out, Q_in, n * sizeof(double));
-    free(k1); free(k2); free(k3); free(k4); free(tmp);
+    free(k1); free(k2); free(k3); free(k4);
+    return;
+  }
+  double *tmp = malloc(n * sizeof(double));
+  if (!tmp) {
+    memcpy(Q_out, Q_in, n * sizeof(double));
+    free(k1); free(k2); free(k3); free(k4);
     return;
   }
   compute_derivatives(inst, Q_in, k1);
@@ -2193,9 +2198,9 @@ static void append_mutation(GSSK_Instance *inst, GSSK_MutationOp op,
   if (target_id) { strncpy(r->target_id, target_id, 63); r->target_id[63] = '\0'; }
   if (payload)   { strncpy(r->payload,   payload,   255); r->payload[255]  = '\0'; }
   if (inst->pending_cause[0])
-    strncpy(r->cause, inst->pending_cause, 63);
+    snprintf(r->cause, sizeof(r->cause), "%s", inst->pending_cause);
   else
-    strncpy(r->cause, "user", 63);
+    snprintf(r->cause, sizeof(r->cause), "%s", "user");
   inst->pending_cause[0] = '\0';
 
   if (inst->diag_hooks.on_mutation)

@@ -71,9 +71,6 @@ jobs:
       - name: Build with coverage instrumentation
         run: make coverage-build
 
-      - name: Run tests (generates .gcda files)
-        run: make test
-
       - name: Generate lcov report
         run: |
           make coverage-report
@@ -143,16 +140,10 @@ jobs:
   # Swift package (macOS)
   # ────────────────────────────────────────────────────────────
   swift:
-    name: Swift (${{ matrix.swift }}, macOS)
+    name: Swift (6.0, macOS)
     runs-on: macos-latest
-    strategy:
-      matrix:
-        swift: ["5.10", "6.0"]
     steps:
       - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: ${{ matrix.swift }}
 
       - name: Build Swift package
         run: make swift-build

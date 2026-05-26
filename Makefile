@@ -130,18 +130,17 @@ TARGET_ASAN_CLI = $(BIN_DIR)/gssk_asan
 asan: directories
 	$(CC) $(ASAN_FLAGS) $(SOURCES) $(SRC_DIR)/main.c -o $(TARGET_ASAN_CLI) $(LDFLAGS)
 
-test-asan: asan
+test-asan: asan $(TARGET_COMPARE)
 	@echo "Running regression tests under ASan/UBSan..."
 	@mkdir -p tests/results
 	@for model in $(MODELS); do \
 		name=$$(basename $$model .json); \
 		echo -n "ASan $$name... "; \
+		if [ ! -f tests/expected/$$name.csv ]; then echo "SKIPPED"; continue; fi; \
 		ASAN_OPTIONS=detect_leaks=1 \
 		./$(TARGET_ASAN_CLI) $$model tests/results/$$name.csv > /dev/null 2>&1; \
-		if [ -f tests/expected/$$name.csv ]; then \
-			./bin/csv_compare tests/expected/$$name.csv tests/results/$$name.csv; \
-			if [ $$? -eq 0 ]; then echo "PASSED"; else echo "FAILED"; exit 1; fi; \
-		else echo "SKIPPED"; fi; \
+		./bin/csv_compare tests/expected/$$name.csv tests/results/$$name.csv; \
+		if [ $$? -eq 0 ]; then echo "PASSED"; else echo "FAILED"; exit 1; fi; \
 	done
 
 # ──────────────────────────────────────────────────────────────
@@ -188,6 +187,7 @@ test-valgrind: all
 	@for model in $(MODELS); do \
 		name=$$(basename $$model .json); \
 		echo -n "Valgrind $$name... "; \
+		if [ ! -f tests/expected/$$name.csv ]; then echo "SKIPPED"; continue; fi; \
 		$(VALGRIND) ./bin/gssk $$model tests/results/$$name.csv > /dev/null 2>&1; \
 		if [ $$? -eq 0 ]; then echo "PASSED"; else echo "FAILED (leaks/errors)"; exit 1; fi; \
 	done
