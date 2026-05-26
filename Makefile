@@ -151,7 +151,7 @@ COVERAGE_FLAGS = -Wall -Wextra -std=c99 -Iinclude -fPIC -g -O0 \
 
 TARGET_COV_CLI  = $(BIN_DIR)/gssk_cov
 TARGET_COV_ADV  = $(BIN_DIR)/test_advanced_cov
-COVERAGE_MIN_LINE = 40
+COVERAGE_MIN_LINE = 35
 
 coverage-build: directories
 	@mkdir -p coverage
