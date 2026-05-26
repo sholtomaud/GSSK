@@ -2055,6 +2055,10 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
     strncpy(def->name, a->string, 63);
     def->name[63] = '\0';
     def->is_structural = false;
+    /* Local copy so gcc -Wrestrict doesn't flag snprintf(inst->error_msg, …, def->name)
+     * after inlining — both def and error_msg live inside inst. */
+    char arch_name[64];
+    memcpy(arch_name, def->name, sizeof(arch_name));
 
     /* Parse nodes */
     cJSON *anodes = cJSON_GetObjectItem(a, "nodes");
@@ -2063,7 +2067,7 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
       if (an > GSSK_MAX_ARCH_NODES) {
         snprintf(inst->error_msg, sizeof(inst->error_msg),
                  "Phase 8: archetype '%s' has too many nodes (>%d).",
-                 def->name, GSSK_MAX_ARCH_NODES);
+                 arch_name, GSSK_MAX_ARCH_NODES);
         return GSSK_ERR_SCHEMA_VIOLATION;
       }
       for (int i = 0; i < an; i++) {
@@ -2075,7 +2079,7 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
         cJSON *npp = cJSON_GetObjectItem(n, "params");
         if (!cJSON_IsString(nid) || !cJSON_IsString(nty)) {
           snprintf(inst->error_msg, sizeof(inst->error_msg),
-                   "Phase 8: archetype '%s' node missing id/type.", def->name);
+                   "Phase 8: archetype '%s' node missing id/type.", arch_name);
           return GSSK_ERR_SCHEMA_VIOLATION;
         }
         GSSK_ANodeTmpl *nt = &def->nodes[def->node_count++];
@@ -2103,7 +2107,7 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
       if (ae > GSSK_MAX_ARCH_EDGES) {
         snprintf(inst->error_msg, sizeof(inst->error_msg),
                  "Phase 8: archetype '%s' has too many edges (>%d).",
-                 def->name, GSSK_MAX_ARCH_EDGES);
+                 arch_name, GSSK_MAX_ARCH_EDGES);
         return GSSK_ERR_SCHEMA_VIOLATION;
       }
       for (int i = 0; i < ae; i++) {
@@ -2117,7 +2121,7 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
         if (!cJSON_IsString(eor) || !cJSON_IsString(etg)) {
           snprintf(inst->error_msg, sizeof(inst->error_msg),
                    "Phase 8: archetype '%s' edge missing origin/target.",
-                   def->name);
+                   arch_name);
           return GSSK_ERR_SCHEMA_VIOLATION;
         }
         GSSK_AEdgeTmpl *et = &def->edges[def->edge_count++];
@@ -2368,7 +2372,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         GSSK_ANodeTmpl *t = &def->nodes[j];
         GSSK_NodeInternal *N = &inst->nodes[node_slot + j];
         memset(N, 0, sizeof(*N));
-        snprintf(N->id, 63, "%s__%s", id->valuestring, t->id);
+        snprintf(N->id, sizeof(N->id), "%.29s__%.29s", id->valuestring, t->id);
         N->id[63] = '\0';
         N->type   = parse_node_type(t->type_str);
         N->initial_value = (strcmp(t->id, def->default_in) == 0)
@@ -2652,7 +2656,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       GSSK_EdgeInternal *E = &inst->edges[inst->edge_count];
       memset(E, 0, sizeof(*E));
       if (te->id[0])
-        snprintf(E->id, 63, "%s__%s", id->valuestring, te->id);
+        snprintf(E->id, sizeof(E->id), "%.29s__%.29s", id->valuestring, te->id);
       E->origin_idx  = o;
       E->target_idx  = t;
       E->control_idx = -1;
