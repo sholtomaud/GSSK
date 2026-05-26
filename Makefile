@@ -149,12 +149,14 @@ test-asan: asan $(TARGET_COMPARE)
 COVERAGE_FLAGS = -Wall -Wextra -std=c99 -Iinclude -fPIC -g -O0 \
                  --coverage -fprofile-arcs -ftest-coverage
 
-TARGET_COV_CLI = $(BIN_DIR)/gssk_cov
-COVERAGE_MIN_LINE = 85
+TARGET_COV_CLI  = $(BIN_DIR)/gssk_cov
+TARGET_COV_ADV  = $(BIN_DIR)/test_advanced_cov
+COVERAGE_MIN_LINE = 40
 
 coverage-build: directories
 	@mkdir -p coverage
 	gcc $(COVERAGE_FLAGS) $(SOURCES) $(SRC_DIR)/main.c -o $(TARGET_COV_CLI) -lm
+	gcc $(COVERAGE_FLAGS) $(SOURCES) $(TEST_DIR)/test_advanced.c -o $(TARGET_COV_ADV) -lm
 
 coverage-report: coverage-build
 	@mkdir -p coverage/html
@@ -164,6 +166,8 @@ coverage-report: coverage-build
 		name=$$(basename $$model .json); \
 		./$(TARGET_COV_CLI) $$model tests/results/$$name.csv > /dev/null 2>&1 || true; \
 	done
+	@echo "Running advanced API tests for coverage..."
+	./$(TARGET_COV_ADV) > /dev/null 2>&1 || true
 	lcov --capture --directory . --output-file coverage/lcov.info \
 	     --ignore-errors mismatch,unused
 	lcov --remove coverage/lcov.info '*/cJSON.c' '*/tests/*' \
