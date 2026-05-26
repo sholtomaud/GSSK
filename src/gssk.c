@@ -517,21 +517,13 @@ static void rk4_step_ex(GSSK_Instance *inst, const double *Q_in,
 static void rk4_step_alloc(GSSK_Instance *inst, const double *Q_in,
                             double *Q_out, double dt) {
   size_t n = inst->node_count;
-  double *k1  = malloc(n * sizeof(double));
-  double *k2  = malloc(n * sizeof(double));
-  double *k3  = malloc(n * sizeof(double));
-  double *k4  = malloc(n * sizeof(double));
-  if (!k1 || !k2 || !k3 || !k4) {
-    memcpy(Q_out, Q_in, n * sizeof(double));
-    free(k1); free(k2); free(k3); free(k4);
-    return;
-  }
-  double *tmp = malloc(n * sizeof(double));
-  if (!tmp) {
-    memcpy(Q_out, Q_in, n * sizeof(double));
-    free(k1); free(k2); free(k3); free(k4);
-    return;
-  }
+  double *buf = malloc(5 * n * sizeof(double));
+  if (!buf) { memcpy(Q_out, Q_in, n * sizeof(double)); return; }
+  double *k1  = buf;
+  double *k2  = buf +     n;
+  double *k3  = buf + 2 * n;
+  double *k4  = buf + 3 * n;
+  double *tmp = buf + 4 * n;
   compute_derivatives(inst, Q_in, k1);
   for (size_t i = 0; i < n; i++) tmp[i] = Q_in[i] + 0.5 * dt * k1[i];
   compute_derivatives(inst, tmp, k2);
@@ -541,7 +533,7 @@ static void rk4_step_alloc(GSSK_Instance *inst, const double *Q_in,
   compute_derivatives(inst, tmp, k4);
   for (size_t i = 0; i < n; i++)
     Q_out[i] = Q_in[i] + (dt / 6.0) * (k1[i] + 2.0*k2[i] + 2.0*k3[i] + k4[i]);
-  free(k1); free(k2); free(k3); free(k4); free(tmp);
+  free(buf);
 }
 
 /**
