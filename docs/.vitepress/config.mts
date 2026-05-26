@@ -39,7 +39,6 @@ export default defineConfig({
         text: 'Examples',
         items: [
           { text: 'Household Model', link: '/examples/household/' },
-          { text: 'Interactive Demo', link: '/examples/household/demo', target: '_blank' },
         ]
       }
     ],

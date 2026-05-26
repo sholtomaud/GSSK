@@ -195,7 +195,7 @@ See `GSSK_GetTransformationRatio` and `GSSK_GetEdgeQualityFlow` for the API.
 **CLI:**
 ```bash
 make all
-./bin/gssk examples/household_model.json output.csv
+make demo
 ```
 
 The output CSV has one column per node and one row per time step (dt = 0.1 month,
@@ -262,8 +262,8 @@ With `k_grocery = 0.001`: `Q_pantry* ≈ 0.001 × 26000 / 0.23 ≈ 113 kg`
 With `k_grocery = 0.002`: `Q_pantry* ≈ 0.002 × 26000 / 0.23 ≈ 226 kg`
 
 A 2× increase in grocery spend rate produces a 2× pantry steady-state,
-as expected from the linear scaling of the interaction term. See the
-[companion notebook](notebook.ipynb) for a simulation-validated version.
+as expected from the linear scaling of the interaction term. See
+`examples/household_notebook.ipynb` for a simulation-validated version.
 
 ---
 
@@ -271,7 +271,7 @@ as expected from the linear scaling of the interaction term. See the
 
 | File | Description |
 |------|-------------|
-| [`examples/household_model.json`](../../../examples/household_model.json) | Canonical model (used by `make test`) |
-| [`examples/household_model_annotated.json`](../../../examples/household_model_annotated.json) | Same model with `_note` fields on each node and edge |
-| [`examples/household_notebook.ipynb`](../../../examples/household_notebook.ipynb) | Jupyter notebook: run, plot, sensitivity analysis |
-| [`docs/examples/household/demo.html`](demo.html) | Browser demo with interactive sliders |
+| `examples/household_model.json` | Canonical model (used by `make test`) |
+| `examples/household_model_annotated.json` | Same model with `_note` fields on each node and edge |
+| `examples/household_notebook.ipynb` | Jupyter notebook: run, plot, sensitivity analysis |
+| [Interactive WASM Demo](/GSSK/demo/) | Browser demo with live simulation and interactive sliders |
