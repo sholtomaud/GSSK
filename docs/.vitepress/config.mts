@@ -11,7 +11,7 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Spec', link: '/SPECIFICATION' },
-      { text: 'WASM Demo', link: '/demo/', target: '_blank' }
+      { text: 'WASM Demo', link: 'https://sholtomaud.github.io/GSSK/demo/', target: '_blank' }
     ],
     sidebar: [
       {

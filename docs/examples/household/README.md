@@ -274,4 +274,4 @@ as expected from the linear scaling of the interaction term. See
 | `examples/household_model.json` | Canonical model (used by `make test`) |
 | `examples/household_model_annotated.json` | Same model with `_note` fields on each node and edge |
 | `examples/household_notebook.ipynb` | Jupyter notebook: run, plot, sensitivity analysis |
-| [Interactive WASM Demo](/GSSK/demo/) | Browser demo with live simulation and interactive sliders |
+| [Interactive WASM Demo](https://sholtomaud.github.io/GSSK/demo/) | Browser demo with live simulation and interactive sliders |
