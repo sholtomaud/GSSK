@@ -1,4 +1,4 @@
-name: Build, Test, and Deploy
+name: CI and Deploy
 
 on:
   push:
@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pages: write
@@ -14,14 +18,133 @@ permissions:
   actions: read
 
 jobs:
-  build:
+  # ────────────────────────────────────────────────────────────
+  # Build matrix: gcc + clang × Linux + macOS
+  # Parallel across compiler/OS combinations.
+  # ────────────────────────────────────────────────────────────
+  build-native:
+    name: Build & test (${{ matrix.cc }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, cc: gcc   }
+          - { os: ubuntu-latest, cc: clang }
+          - { os: macos-latest,  cc: clang }
+    env:
+      CC: ${{ matrix.cc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang
+
+      - name: Build
+        run: make all
+
+      - name: Run regression tests
+        run: make test
+
+  # ────────────────────────────────────────────────────────────
+  # Quality gate — all Linux-only checks as serial steps.
+  # One checkout, one apt-get, one runner.
+  # ────────────────────────────────────────────────────────────
+  quality:
+    name: Quality gate (Linux)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang valgrind lcov python3
+
+      - name: ASan + UBSan — build
+        env:
+          CC: clang
+        run: make asan
+
+      - name: ASan + UBSan — run tests
+        env:
+          CC: clang
+        run: make test-asan
+
+      - name: Coverage — build
+        run: make coverage-build
+
+      - name: Coverage — generate report
+        run: |
+          make coverage-report
+          echo "## Coverage summary" >> $GITHUB_STEP_SUMMARY
+          lcov --summary coverage/lcov.info >> $GITHUB_STEP_SUMMARY 2>&1 || true
+
+      - name: Coverage — enforce ≥ 85% line
+        run: make coverage-check
+
+      - name: Coverage — upload HTML report
+        uses: actions/upload-artifact@v4
         with:
+          name: coverage-report
+          path: coverage/html/
+
+      - name: Valgrind — build (debug)
+        run: make DEBUG=1 all
+
+      - name: Valgrind — run tests
+        run: make test-valgrind
+
+      - name: Fuzz — build target
+        env:
+          CC: clang
+        run: make fuzz-build
+
+      - name: Fuzz — short run (30 seconds)
+        env:
+          CC: clang
+        run: make fuzz-run FUZZ_TIMEOUT=30
+
+      - name: Perf — build (optimised)
+        run: make all
+
+      - name: Perf — benchmark regression check
+        run: make bench-check
+
+  # ────────────────────────────────────────────────────────────
+  # Swift package (macOS) — separate job, different OS.
+  # ────────────────────────────────────────────────────────────
+  swift:
+    name: Swift (6.0, macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Swift package
+        run: make swift-build
+
+      - name: Run Swift tests
+        run: make swift-test
+
+  # ────────────────────────────────────────────────────────────
+  # Deploy — only on push to main or version tags.
+  # Requires all test jobs to pass first.
+  # ────────────────────────────────────────────────────────────
+  deploy:
+    needs: [ build-native, quality, swift ]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
+      - name: Install build tools
         run: sudo apt-get update && sudo apt-get install -y build-essential
 
       - name: Setup Node
@@ -34,91 +157,37 @@ jobs:
         with:
           version: 3.1.64
 
-      - name: Build Native
-        run: make
-
-      - name: Setup Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "5.10"
-
-      - name: Build Swift Package
-        run: make swift-build
-
-      - name: Test Swift Package
-        run: make swift-test
+      - name: Build native
+        run: make all
 
       - name: Build WASM
         run: make wasm
 
-      - name: Run Tests
-        run: make test
-
-      - name: Build Documentation
+      - name: Build documentation
         run: |
           npm install
           npm run docs:build
 
-      - name: Archive build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-artifacts
-          path: |
-            bin/
-            lib/
-            dist/
-            include/
-            web/
-            docs/.vitepress/dist/
-            README.md
-            package.json
-            Package.swift
-            Sources/
-
-  deploy:
-    needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: build-artifacts
-
-      - name: Deploy to Distribution Branch (Option B)
+      - name: Deploy to distribution branch
         run: |
-          # Create temporary directory for dist branch content
           mkdir -p tmp_dist
           cp -r dist tmp_dist/
           cp -r include tmp_dist/
           cp README.md tmp_dist/
           cp package.json tmp_dist/
-
-          # Initialize new repo in tmp_dist and push to dist branch
           cd tmp_dist
           git init -b dist
           git config user.email "action@github.com"
           git config user.name "GitHub Action"
           git add .
           git commit -m "chore: distribution build [skip ci]"
-          # Use authenticated URL for push to avoid terminal prompts
           git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git dist --force
-
-          # If this is a tag, also tag the dist branch
           if [[ ${{ github.ref }} == refs/tags/* ]]; then
             git tag ${{ github.ref_name }}
             git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git ${{ github.ref_name }} --force
           fi
 
-      - name: Prepare Pages Deployment Artifact
+      - name: Prepare Pages artifact
         run: |
           mkdir -p public/demo
           cp -r docs/.vitepress/dist/* public/
@@ -127,13 +196,12 @@ jobs:
           cp dist/gssk.js public/demo/
           cp dist/gssk.wasm public/demo/
           touch public/.nojekyll
-          # Adjust paths for flat structure in public/demo/
           sed -i 's|../dist/gssk.js|gssk.js|' public/demo/index.html
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
-      - name: Upload Pages Artifact
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: 'public'
@@ -142,7 +210,7 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v5
 
-      - name: Create Release
+      - name: Create release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
