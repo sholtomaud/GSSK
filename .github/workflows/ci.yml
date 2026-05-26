@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Cancel in-flight runs for the same branch on new push
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ────────────────────────────────────────────────────────────
+  # Build matrix: gcc + clang × Linux (ubuntu) × native arch
+  # ────────────────────────────────────────────────────────────
+  build-native:
+    name: Build & test (${{ matrix.cc }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  cc: gcc   }
+          - { os: ubuntu-latest,  cc: clang }
+          - { os: macos-latest,   cc: clang }
+    env:
+      CC: ${{ matrix.cc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang
+
+      - name: Build
+        run: make all
+
+      - name: Run regression tests
+        run: make test
+
+  # ────────────────────────────────────────────────────────────
+  # AddressSanitizer + UndefinedBehaviorSanitizer
+  # ────────────────────────────────────────────────────────────
+  sanitizers:
+    name: ASan + UBSan
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Build with ASan + UBSan
+        run: make asan
+
+      - name: Run tests under sanitisers
+        run: make test-asan
+
+  # ────────────────────────────────────────────────────────────
+  # gcov line/branch coverage gate
+  # ────────────────────────────────────────────────────────────
+  coverage:
+    name: Coverage gate (≥ 85% line)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gcc lcov
+
+      - name: Build with coverage instrumentation
+        run: make coverage-build
+
+      - name: Run tests (generates .gcda files)
+        run: make test
+
+      - name: Generate lcov report
+        run: |
+          make coverage-report
+          echo "## Coverage summary" >> $GITHUB_STEP_SUMMARY
+          lcov --summary coverage/lcov.info >> $GITHUB_STEP_SUMMARY 2>&1 || true
+
+      - name: Enforce line coverage ≥ 85%
+        run: make coverage-check
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/html/
+
+  # ────────────────────────────────────────────────────────────
+  # Valgrind memory-error check (Linux only)
+  # ────────────────────────────────────────────────────────────
+  valgrind:
+    name: Valgrind (zero leaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y build-essential valgrind
+
+      - name: Build (debug)
+        run: make DEBUG=1 all
+
+      - name: Run tests under Valgrind
+        run: make test-valgrind
+
+  # ────────────────────────────────────────────────────────────
+  # LibFuzzer fuzz target (build-only on CI; full run in nightly)
+  # ────────────────────────────────────────────────────────────
+  fuzz-build:
+    name: Fuzz target (build + short run)
+    runs-on: ubuntu-latest
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y clang
+
+      - name: Build fuzz target
+        run: make fuzz-build
+
+      - name: Short fuzz run (30 seconds)
+        run: make fuzz-run FUZZ_TIMEOUT=30
+
+  # ────────────────────────────────────────────────────────────
+  # Performance regression: supply_chain_30 must stay within 10%
+  # ────────────────────────────────────────────────────────────
+  perf-regression:
+    name: Performance regression
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Build (optimised)
+        run: make all
+
+      - name: Run benchmark and check regression
+        run: make bench-check
+
+  # ────────────────────────────────────────────────────────────
+  # Swift package (macOS)
+  # ────────────────────────────────────────────────────────────
+  swift:
+    name: Swift (${{ matrix.swift }}, macOS)
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        swift: ["5.10", "6.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: ${{ matrix.swift }}
+
+      - name: Build Swift package
+        run: make swift-build
+
+      - name: Run Swift tests
+        run: make swift-test

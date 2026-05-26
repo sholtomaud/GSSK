@@ -1,0 +1,1437 @@
+{
+  "metadata": {
+    "schema_version": 3,
+    "name": "Bench 100",
+    "description": "Linear chain benchmark with 100 storage nodes.",
+    "kernel_version": "3.0.0"
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "source",
+      "value": 100.0
+    },
+    {
+      "id": "s0",
+      "type": "storage",
+      "value": 1000.0
+    },
+    {
+      "id": "s1",
+      "type": "storage",
+      "value": 990.0
+    },
+    {
+      "id": "s2",
+      "type": "storage",
+      "value": 980.0
+    },
+    {
+      "id": "s3",
+      "type": "storage",
+      "value": 970.0
+    },
+    {
+      "id": "s4",
+      "type": "storage",
+      "value": 960.0
+    },
+    {
+      "id": "s5",
+      "type": "storage",
+      "value": 950.0
+    },
+    {
+      "id": "s6",
+      "type": "storage",
+      "value": 940.0
+    },
+    {
+      "id": "s7",
+      "type": "storage",
+      "value": 930.0
+    },
+    {
+      "id": "s8",
+      "type": "storage",
+      "value": 920.0
+    },
+    {
+      "id": "s9",
+      "type": "storage",
+      "value": 910.0
+    },
+    {
+      "id": "s10",
+      "type": "storage",
+      "value": 900.0
+    },
+    {
+      "id": "s11",
+      "type": "storage",
+      "value": 890.0
+    },
+    {
+      "id": "s12",
+      "type": "storage",
+      "value": 880.0
+    },
+    {
+      "id": "s13",
+      "type": "storage",
+      "value": 870.0
+    },
+    {
+      "id": "s14",
+      "type": "storage",
+      "value": 860.0
+    },
+    {
+      "id": "s15",
+      "type": "storage",
+      "value": 850.0
+    },
+    {
+      "id": "s16",
+      "type": "storage",
+      "value": 840.0
+    },
+    {
+      "id": "s17",
+      "type": "storage",
+      "value": 830.0
+    },
+    {
+      "id": "s18",
+      "type": "storage",
+      "value": 820.0
+    },
+    {
+      "id": "s19",
+      "type": "storage",
+      "value": 810.0
+    },
+    {
+      "id": "s20",
+      "type": "storage",
+      "value": 800.0
+    },
+    {
+      "id": "s21",
+      "type": "storage",
+      "value": 790.0
+    },
+    {
+      "id": "s22",
+      "type": "storage",
+      "value": 780.0
+    },
+    {
+      "id": "s23",
+      "type": "storage",
+      "value": 770.0
+    },
+    {
+      "id": "s24",
+      "type": "storage",
+      "value": 760.0
+    },
+    {
+      "id": "s25",
+      "type": "storage",
+      "value": 750.0
+    },
+    {
+      "id": "s26",
+      "type": "storage",
+      "value": 740.0
+    },
+    {
+      "id": "s27",
+      "type": "storage",
+      "value": 730.0
+    },
+    {
+      "id": "s28",
+      "type": "storage",
+      "value": 720.0
+    },
+    {
+      "id": "s29",
+      "type": "storage",
+      "value": 710.0
+    },
+    {
+      "id": "s30",
+      "type": "storage",
+      "value": 700.0
+    },
+    {
+      "id": "s31",
+      "type": "storage",
+      "value": 690.0
+    },
+    {
+      "id": "s32",
+      "type": "storage",
+      "value": 680.0
+    },
+    {
+      "id": "s33",
+      "type": "storage",
+      "value": 670.0
+    },
+    {
+      "id": "s34",
+      "type": "storage",
+      "value": 660.0
+    },
+    {
+      "id": "s35",
+      "type": "storage",
+      "value": 650.0
+    },
+    {
+      "id": "s36",
+      "type": "storage",
+      "value": 640.0
+    },
+    {
+      "id": "s37",
+      "type": "storage",
+      "value": 630.0
+    },
+    {
+      "id": "s38",
+      "type": "storage",
+      "value": 620.0
+    },
+    {
+      "id": "s39",
+      "type": "storage",
+      "value": 610.0
+    },
+    {
+      "id": "s40",
+      "type": "storage",
+      "value": 600.0
+    },
+    {
+      "id": "s41",
+      "type": "storage",
+      "value": 590.0
+    },
+    {
+      "id": "s42",
+      "type": "storage",
+      "value": 580.0
+    },
+    {
+      "id": "s43",
+      "type": "storage",
+      "value": 570.0
+    },
+    {
+      "id": "s44",
+      "type": "storage",
+      "value": 560.0
+    },
+    {
+      "id": "s45",
+      "type": "storage",
+      "value": 550.0
+    },
+    {
+      "id": "s46",
+      "type": "storage",
+      "value": 540.0
+    },
+    {
+      "id": "s47",
+      "type": "storage",
+      "value": 530.0
+    },
+    {
+      "id": "s48",
+      "type": "storage",
+      "value": 520.0
+    },
+    {
+      "id": "s49",
+      "type": "storage",
+      "value": 510.0
+    },
+    {
+      "id": "s50",
+      "type": "storage",
+      "value": 500.0
+    },
+    {
+      "id": "s51",
+      "type": "storage",
+      "value": 490.0
+    },
+    {
+      "id": "s52",
+      "type": "storage",
+      "value": 480.0
+    },
+    {
+      "id": "s53",
+      "type": "storage",
+      "value": 470.0
+    },
+    {
+      "id": "s54",
+      "type": "storage",
+      "value": 460.0
+    },
+    {
+      "id": "s55",
+      "type": "storage",
+      "value": 450.0
+    },
+    {
+      "id": "s56",
+      "type": "storage",
+      "value": 440.0
+    },
+    {
+      "id": "s57",
+      "type": "storage",
+      "value": 430.0
+    },
+    {
+      "id": "s58",
+      "type": "storage",
+      "value": 420.0
+    },
+    {
+      "id": "s59",
+      "type": "storage",
+      "value": 410.0
+    },
+    {
+      "id": "s60",
+      "type": "storage",
+      "value": 400.0
+    },
+    {
+      "id": "s61",
+      "type": "storage",
+      "value": 390.0
+    },
+    {
+      "id": "s62",
+      "type": "storage",
+      "value": 380.0
+    },
+    {
+      "id": "s63",
+      "type": "storage",
+      "value": 370.0
+    },
+    {
+      "id": "s64",
+      "type": "storage",
+      "value": 360.0
+    },
+    {
+      "id": "s65",
+      "type": "storage",
+      "value": 350.0
+    },
+    {
+      "id": "s66",
+      "type": "storage",
+      "value": 340.0
+    },
+    {
+      "id": "s67",
+      "type": "storage",
+      "value": 330.0
+    },
+    {
+      "id": "s68",
+      "type": "storage",
+      "value": 320.0
+    },
+    {
+      "id": "s69",
+      "type": "storage",
+      "value": 310.0
+    },
+    {
+      "id": "s70",
+      "type": "storage",
+      "value": 300.0
+    },
+    {
+      "id": "s71",
+      "type": "storage",
+      "value": 290.0
+    },
+    {
+      "id": "s72",
+      "type": "storage",
+      "value": 280.0
+    },
+    {
+      "id": "s73",
+      "type": "storage",
+      "value": 270.0
+    },
+    {
+      "id": "s74",
+      "type": "storage",
+      "value": 260.0
+    },
+    {
+      "id": "s75",
+      "type": "storage",
+      "value": 250.0
+    },
+    {
+      "id": "s76",
+      "type": "storage",
+      "value": 240.0
+    },
+    {
+      "id": "s77",
+      "type": "storage",
+      "value": 230.0
+    },
+    {
+      "id": "s78",
+      "type": "storage",
+      "value": 220.0
+    },
+    {
+      "id": "s79",
+      "type": "storage",
+      "value": 210.0
+    },
+    {
+      "id": "s80",
+      "type": "storage",
+      "value": 200.0
+    },
+    {
+      "id": "s81",
+      "type": "storage",
+      "value": 190.0
+    },
+    {
+      "id": "s82",
+      "type": "storage",
+      "value": 180.0
+    },
+    {
+      "id": "s83",
+      "type": "storage",
+      "value": 170.0
+    },
+    {
+      "id": "s84",
+      "type": "storage",
+      "value": 160.0
+    },
+    {
+      "id": "s85",
+      "type": "storage",
+      "value": 150.0
+    },
+    {
+      "id": "s86",
+      "type": "storage",
+      "value": 140.0
+    },
+    {
+      "id": "s87",
+      "type": "storage",
+      "value": 130.0
+    },
+    {
+      "id": "s88",
+      "type": "storage",
+      "value": 120.0
+    },
+    {
+      "id": "s89",
+      "type": "storage",
+      "value": 110.0
+    },
+    {
+      "id": "s90",
+      "type": "storage",
+      "value": 100.0
+    },
+    {
+      "id": "s91",
+      "type": "storage",
+      "value": 90.0
+    },
+    {
+      "id": "s92",
+      "type": "storage",
+      "value": 80.0
+    },
+    {
+      "id": "s93",
+      "type": "storage",
+      "value": 70.0
+    },
+    {
+      "id": "s94",
+      "type": "storage",
+      "value": 60.0
+    },
+    {
+      "id": "s95",
+      "type": "storage",
+      "value": 50.0
+    },
+    {
+      "id": "s96",
+      "type": "storage",
+      "value": 40.0
+    },
+    {
+      "id": "s97",
+      "type": "storage",
+      "value": 30.0
+    },
+    {
+      "id": "s98",
+      "type": "storage",
+      "value": 20.0
+    },
+    {
+      "id": "s99",
+      "type": "storage",
+      "value": 10.0
+    },
+    {
+      "id": "sink",
+      "type": "sink",
+      "value": 0.0
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_src",
+      "origin": "src",
+      "target": "s0",
+      "logic": "constant",
+      "params": {
+        "k": 1.0
+      }
+    },
+    {
+      "id": "e0",
+      "origin": "s0",
+      "target": "s1",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e1",
+      "origin": "s1",
+      "target": "s2",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e2",
+      "origin": "s2",
+      "target": "s3",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e3",
+      "origin": "s3",
+      "target": "s4",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e4",
+      "origin": "s4",
+      "target": "s5",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e5",
+      "origin": "s5",
+      "target": "s6",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e6",
+      "origin": "s6",
+      "target": "s7",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e7",
+      "origin": "s7",
+      "target": "s8",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e8",
+      "origin": "s8",
+      "target": "s9",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e9",
+      "origin": "s9",
+      "target": "s10",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e10",
+      "origin": "s10",
+      "target": "s11",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e11",
+      "origin": "s11",
+      "target": "s12",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e12",
+      "origin": "s12",
+      "target": "s13",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e13",
+      "origin": "s13",
+      "target": "s14",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e14",
+      "origin": "s14",
+      "target": "s15",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e15",
+      "origin": "s15",
+      "target": "s16",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e16",
+      "origin": "s16",
+      "target": "s17",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e17",
+      "origin": "s17",
+      "target": "s18",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e18",
+      "origin": "s18",
+      "target": "s19",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e19",
+      "origin": "s19",
+      "target": "s20",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e20",
+      "origin": "s20",
+      "target": "s21",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e21",
+      "origin": "s21",
+      "target": "s22",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e22",
+      "origin": "s22",
+      "target": "s23",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e23",
+      "origin": "s23",
+      "target": "s24",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e24",
+      "origin": "s24",
+      "target": "s25",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e25",
+      "origin": "s25",
+      "target": "s26",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e26",
+      "origin": "s26",
+      "target": "s27",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e27",
+      "origin": "s27",
+      "target": "s28",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e28",
+      "origin": "s28",
+      "target": "s29",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e29",
+      "origin": "s29",
+      "target": "s30",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e30",
+      "origin": "s30",
+      "target": "s31",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e31",
+      "origin": "s31",
+      "target": "s32",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e32",
+      "origin": "s32",
+      "target": "s33",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e33",
+      "origin": "s33",
+      "target": "s34",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e34",
+      "origin": "s34",
+      "target": "s35",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e35",
+      "origin": "s35",
+      "target": "s36",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e36",
+      "origin": "s36",
+      "target": "s37",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e37",
+      "origin": "s37",
+      "target": "s38",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e38",
+      "origin": "s38",
+      "target": "s39",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e39",
+      "origin": "s39",
+      "target": "s40",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e40",
+      "origin": "s40",
+      "target": "s41",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e41",
+      "origin": "s41",
+      "target": "s42",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e42",
+      "origin": "s42",
+      "target": "s43",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e43",
+      "origin": "s43",
+      "target": "s44",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e44",
+      "origin": "s44",
+      "target": "s45",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e45",
+      "origin": "s45",
+      "target": "s46",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e46",
+      "origin": "s46",
+      "target": "s47",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e47",
+      "origin": "s47",
+      "target": "s48",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e48",
+      "origin": "s48",
+      "target": "s49",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e49",
+      "origin": "s49",
+      "target": "s50",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e50",
+      "origin": "s50",
+      "target": "s51",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e51",
+      "origin": "s51",
+      "target": "s52",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e52",
+      "origin": "s52",
+      "target": "s53",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e53",
+      "origin": "s53",
+      "target": "s54",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e54",
+      "origin": "s54",
+      "target": "s55",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e55",
+      "origin": "s55",
+      "target": "s56",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e56",
+      "origin": "s56",
+      "target": "s57",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e57",
+      "origin": "s57",
+      "target": "s58",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e58",
+      "origin": "s58",
+      "target": "s59",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e59",
+      "origin": "s59",
+      "target": "s60",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e60",
+      "origin": "s60",
+      "target": "s61",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e61",
+      "origin": "s61",
+      "target": "s62",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e62",
+      "origin": "s62",
+      "target": "s63",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e63",
+      "origin": "s63",
+      "target": "s64",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e64",
+      "origin": "s64",
+      "target": "s65",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e65",
+      "origin": "s65",
+      "target": "s66",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e66",
+      "origin": "s66",
+      "target": "s67",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e67",
+      "origin": "s67",
+      "target": "s68",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e68",
+      "origin": "s68",
+      "target": "s69",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e69",
+      "origin": "s69",
+      "target": "s70",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e70",
+      "origin": "s70",
+      "target": "s71",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e71",
+      "origin": "s71",
+      "target": "s72",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e72",
+      "origin": "s72",
+      "target": "s73",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e73",
+      "origin": "s73",
+      "target": "s74",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e74",
+      "origin": "s74",
+      "target": "s75",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e75",
+      "origin": "s75",
+      "target": "s76",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e76",
+      "origin": "s76",
+      "target": "s77",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e77",
+      "origin": "s77",
+      "target": "s78",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e78",
+      "origin": "s78",
+      "target": "s79",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e79",
+      "origin": "s79",
+      "target": "s80",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e80",
+      "origin": "s80",
+      "target": "s81",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e81",
+      "origin": "s81",
+      "target": "s82",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e82",
+      "origin": "s82",
+      "target": "s83",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e83",
+      "origin": "s83",
+      "target": "s84",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e84",
+      "origin": "s84",
+      "target": "s85",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e85",
+      "origin": "s85",
+      "target": "s86",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e86",
+      "origin": "s86",
+      "target": "s87",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e87",
+      "origin": "s87",
+      "target": "s88",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e88",
+      "origin": "s88",
+      "target": "s89",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e89",
+      "origin": "s89",
+      "target": "s90",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e90",
+      "origin": "s90",
+      "target": "s91",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e91",
+      "origin": "s91",
+      "target": "s92",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e92",
+      "origin": "s92",
+      "target": "s93",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e93",
+      "origin": "s93",
+      "target": "s94",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e94",
+      "origin": "s94",
+      "target": "s95",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e95",
+      "origin": "s95",
+      "target": "s96",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e96",
+      "origin": "s96",
+      "target": "s97",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e97",
+      "origin": "s97",
+      "target": "s98",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e98",
+      "origin": "s98",
+      "target": "s99",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e99",
+      "origin": "s99",
+      "target": "sink",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    }
+  ],
+  "config": {
+    "t_start": 0.0,
+    "t_end": 100.0,
+    "dt": 0.1,
+    "method": "rk4"
+  }
+}

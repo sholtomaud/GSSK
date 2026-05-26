@@ -1,0 +1,202 @@
+{
+    "metadata": {
+        "schema_version": 3,
+        "name": "Household Ecological-Economy",
+        "description": "Multi-carrier household model demonstrating money, energy, material and information flows. Reference example for Phase 5 — all five edge logic types, quality accounting (emergy), and cross-carrier coupling.",
+        "author": "GSSK reference examples",
+        "created_at": "2026-05-25T00:00:00Z"
+    },
+
+    "carriers": [
+        { "id": "money",       "unit": "AUD",             "conserved": true  },
+        { "id": "energy",      "unit": "kWh",             "conserved": true  },
+        { "id": "material",    "unit": "kg",              "conserved": true  },
+        { "id": "information", "unit": "decisions/month", "conserved": false }
+    ],
+
+    "nodes": [
+        { "id": "salary",             "type": "source",  "value": 1.0,     "carrier": "money",       "quality_input": 1.0 },
+        { "id": "bank_account",       "type": "storage", "value": 5000.0,  "carrier": "money" },
+        { "id": "super_fund",         "type": "storage", "value": 50000.0, "carrier": "money" },
+        { "id": "credit_card_debt",   "type": "storage", "value": 0.0,     "carrier": "money" },
+        { "id": "tax",                "type": "sink",    "value": 0.0,     "carrier": "money" },
+
+        { "id": "sunlight",           "type": "source",  "value": 1.0,     "carrier": "energy",      "quality_input": 1.0 },
+        { "id": "solar_battery",      "type": "storage", "value": 5.0,     "carrier": "energy" },
+        { "id": "grid_credit",        "type": "storage", "value": 0.0,     "carrier": "energy" },
+        { "id": "vehicle_fuel",       "type": "storage", "value": 40.0,    "carrier": "energy" },
+        { "id": "body_energy",        "type": "storage", "value": 350.0,   "carrier": "energy" },
+        { "id": "heat_loss",          "type": "sink",    "value": 0.0,     "carrier": "energy" },
+
+        { "id": "grocery_market",     "type": "source",  "value": 1.0,     "carrier": "material" },
+        { "id": "mains_water",        "type": "source",  "value": 1.0,     "carrier": "material" },
+        { "id": "pantry",             "type": "storage", "value": 10.0,    "carrier": "material" },
+        { "id": "fridge",             "type": "storage", "value": 5.0,     "carrier": "material" },
+        { "id": "wardrobe",           "type": "storage", "value": 50.0,    "carrier": "material" },
+        { "id": "appliances_stock",   "type": "storage", "value": 200.0,   "carrier": "material" },
+        { "id": "waste_bin",          "type": "storage", "value": 0.0,     "carrier": "material" },
+        { "id": "waste_landfill",     "type": "sink",    "value": 0.0,     "carrier": "material" },
+
+        { "id": "news_inflow",        "type": "source",  "value": 1.0,     "carrier": "information" },
+        { "id": "household_attention","type": "storage", "value": 100.0,   "carrier": "information" },
+        { "id": "pending_decisions",  "type": "storage", "value": 5.0,     "carrier": "information" },
+        { "id": "forgotten_decisions","type": "sink",    "value": 0.0,     "carrier": "information" }
+    ],
+
+    "edges": [
+        {
+            "id": "salary_in",
+            "origin": "salary",       "target": "bank_account",
+            "carrier": "money",       "logic": "constant",
+            "params": { "k": 5000.0 }
+        },
+        {
+            "id": "super_contrib",
+            "origin": "salary",       "target": "super_fund",
+            "carrier": "money",       "logic": "constant",
+            "params": { "k": 550.0 }
+        },
+        {
+            "id": "mortgage_out",
+            "origin": "bank_account", "target": "tax",
+            "carrier": "money",       "logic": "constant",
+            "params": { "k": 1800.0 }
+        },
+        {
+            "id": "tax_out",
+            "origin": "bank_account", "target": "tax",
+            "carrier": "money",       "logic": "constant",
+            "params": { "k": 600.0 }
+        },
+        {
+            "id": "grocery_payment",
+            "origin": "bank_account", "target": "tax",
+            "carrier": "money",       "logic": "linear",
+            "params": { "k": 0.1 }
+        },
+        {
+            "id": "credit_payment",
+            "origin": "credit_card_debt", "target": "bank_account",
+            "carrier": "money",           "logic": "threshold",
+            "params": { "k": 300.0, "threshold": 500.0 }
+        },
+
+        {
+            "id": "solar_charge",
+            "origin": "sunlight",      "target": "solar_battery",
+            "carrier": "energy",       "logic": "linear",
+            "params": { "k": 80.0 }
+        },
+        {
+            "id": "battery_export",
+            "origin": "solar_battery", "target": "grid_credit",
+            "carrier": "energy",       "logic": "linear",
+            "params": { "k": 0.05 }
+        },
+        {
+            "id": "battery_self_discharge",
+            "origin": "solar_battery", "target": "heat_loss",
+            "carrier": "energy",       "logic": "linear",
+            "params": { "k": 0.01 }
+        },
+        {
+            "id": "body_metabolism",
+            "origin": "body_energy",   "target": "heat_loss",
+            "carrier": "energy",       "logic": "linear",
+            "params": { "k": 0.02 }
+        },
+        {
+            "id": "vehicle_burn",
+            "origin": "vehicle_fuel",  "target": "heat_loss",
+            "carrier": "energy",       "logic": "linear",
+            "params": { "k": 0.03 }
+        },
+
+        {
+            "id": "grocery_receive",
+            "origin": "grocery_market", "target": "pantry",
+            "carrier": "material",      "logic": "interaction",
+            "params": { "k": 0.001, "control_node": "bank_account" }
+        },
+        {
+            "id": "water_fill",
+            "origin": "mains_water",   "target": "pantry",
+            "carrier": "material",     "logic": "constant",
+            "params": { "k": 1.5 }
+        },
+        {
+            "id": "pantry_to_fridge",
+            "origin": "pantry",        "target": "fridge",
+            "carrier": "material",     "logic": "linear",
+            "params": { "k": 0.2 }
+        },
+        {
+            "id": "fridge_eat",
+            "origin": "fridge",        "target": "body_energy",
+            "carrier": "material",     "logic": "limit",
+            "params": { "k": 2.0, "threshold": 3.0 }
+        },
+        {
+            "id": "pantry_spoil",
+            "origin": "pantry",        "target": "waste_bin",
+            "carrier": "material",     "logic": "linear",
+            "params": { "k": 0.03 }
+        },
+        {
+            "id": "fridge_spoil",
+            "origin": "fridge",        "target": "waste_bin",
+            "carrier": "material",     "logic": "linear",
+            "params": { "k": 0.02 }
+        },
+        {
+            "id": "waste_disposal",
+            "origin": "waste_bin",     "target": "waste_landfill",
+            "carrier": "material",     "logic": "linear",
+            "params": { "k": 0.5 }
+        },
+        {
+            "id": "appliance_wear",
+            "origin": "appliances_stock", "target": "waste_bin",
+            "carrier": "material",        "logic": "linear",
+            "params": { "k": 0.005 }
+        },
+        {
+            "id": "wardrobe_wear",
+            "origin": "wardrobe",      "target": "waste_bin",
+            "carrier": "material",     "logic": "linear",
+            "params": { "k": 0.01 }
+        },
+
+        {
+            "id": "attention_replenish",
+            "origin": "news_inflow",          "target": "household_attention",
+            "carrier": "information",          "logic": "constant",
+            "params": { "k": 10.0 }
+        },
+        {
+            "id": "attention_to_decisions",
+            "origin": "household_attention",  "target": "pending_decisions",
+            "carrier": "information",          "logic": "interaction",
+            "params": { "k": 0.02, "control_node": "news_inflow" }
+        },
+        {
+            "id": "decisions_resolved",
+            "origin": "pending_decisions",    "target": "forgotten_decisions",
+            "carrier": "information",          "logic": "linear",
+            "params": { "k": 0.3 }
+        },
+        {
+            "id": "attention_decay",
+            "origin": "household_attention",  "target": "forgotten_decisions",
+            "carrier": "information",          "logic": "linear",
+            "params": { "k": 0.05 }
+        }
+    ],
+
+    "config": {
+        "t_start": 0.0,
+        "t_end":   24.0,
+        "dt":      0.1,
+        "method":  "rk4"
+    }
+}

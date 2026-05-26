@@ -56,7 +56,8 @@ typedef enum {
   GSSK_METHOD_AUTO,
   GSSK_METHOD_EULER,
   GSSK_METHOD_RK4,
-  GSSK_METHOD_INCIPIENT
+  GSSK_METHOD_INCIPIENT,
+  GSSK_METHOD_ADAPTIVE /**< Phase 2: DOPRI5 5(4) explicit + PI step-size control */
 } GSSK_Method;
 
 /**
@@ -340,10 +341,10 @@ GSSK_Status GSSK_DeactivateNode(GSSK_Instance *inst, const char *node_id);
  * @brief Re-classify the network for IDC solver eligibility.
  *
  * Called automatically after GSSK_AddNode, GSSK_AddEdge, GSSK_DeactivateEdge/Node.
- * May be called manually after GSSK_SetEdgeK() if k changes logic type eligibility.
  *
- * Sets internal flag: incipient_eligible = true iff all active edges are
- * constant, linear, or interaction logic types.
+ * Phase 1: always sets incipient_eligible = true. All edge types now have
+ * IDC treatment (limit via effective-conductance linearisation; threshold via
+ * constant forcing), so IDC runs on every step regardless of edge types.
  */
 GSSK_Status GSSK_ReclassifyNetwork(GSSK_Instance *inst);
 
@@ -354,6 +355,270 @@ GSSK_Status GSSK_ReclassifyNetwork(GSSK_Instance *inst);
 double GSSK_GetTStart(GSSK_Instance *inst);
 double GSSK_GetTEnd(GSSK_Instance *inst);
 double GSSK_GetDt(GSSK_Instance *inst);
+
+/* =========================================================================
+ * Simulation clock (0.3 Round-trip Serialization)
+ * ========================================================================= */
+
+/**
+ * @brief Current simulation time. Starts at config.t_start; advances by dt
+ *        with each successful GSSK_Step(). Restored from snapshot.t on resume.
+ */
+double GSSK_GetCurrentTime(GSSK_Instance *inst);
+
+/**
+ * @brief Number of steps taken since the last GSSK_Init() or GSSK_Reset().
+ *        Restored from snapshot.step on resume.
+ */
+size_t GSSK_GetStepCount(GSSK_Instance *inst);
+
+/* =========================================================================
+ * Round-trip serialization (0.3)
+ * ========================================================================= */
+
+/**
+ * @brief Serialize the current topology to JSON.
+ *
+ * Emits nodes (with initial_value ICs), edges (with current k, capturing
+ * cybernetic adjustments), config, and metadata. Does NOT include a snapshot
+ * block — the result is a fresh model that restarts from t_start on Init.
+ *
+ * @param inst      GSSK instance.
+ * @param out_json  Populated with a heap-allocated JSON string.
+ *                  Caller must free with GSSK_FreeString().
+ * @return GSSK_SUCCESS or GSSK_ERR_MALLOC_FAILED.
+ */
+GSSK_Status GSSK_SerializeModel(GSSK_Instance *inst, char **out_json);
+
+/**
+ * @brief Serialize the current topology AND live state to JSON.
+ *
+ * Extends GSSK_SerializeModel with a top-level `snapshot` block containing:
+ *   - t, dt, step counter
+ *   - Q[] and Tr[] vectors keyed by stable node ID
+ *   - per-edge k (captures cybernetic adjustments)
+ *   - solver state (confidence, IDC eligibility)
+ *   - rng_state (null placeholder until Phase 4 RNG is introduced)
+ *
+ * Passing the result back to GSSK_Init() resumes from t = snapshot.t rather
+ * than t = config.t_start, satisfying the round-trip property:
+ *   Init → Step×N → SerializeSnapshot → Init → Step×M
+ *   is bit-identical to Init → Step×(N+M) for the same solver/dt.
+ *
+ * @param inst      GSSK instance.
+ * @param out_json  Populated with a heap-allocated JSON string.
+ *                  Caller must free with GSSK_FreeString().
+ * @return GSSK_SUCCESS or GSSK_ERR_MALLOC_FAILED.
+ */
+GSSK_Status GSSK_SerializeSnapshot(GSSK_Instance *inst, char **out_json);
+
+/**
+ * @brief Free a JSON string returned by GSSK_SerializeModel or
+ *        GSSK_SerializeSnapshot. Equivalent to free() but keeps ownership
+ *        explicit across language boundaries.
+ */
+void GSSK_FreeString(char *s);
+
+/* =========================================================================
+ * Phase 1 — IDC error estimates and threshold event log
+ * ========================================================================= */
+
+/**
+ * @brief Per-edge relative error between IDC and RK4 flows for the last step.
+ *        |flow_idc - flow_rk4| / max(|flow_rk4|, 1e-12).
+ *        Always 0.0 in EULER/RK4 modes.
+ */
+double GSSK_GetEdgeErrorEstimate(GSSK_Instance *inst, size_t edge_idx);
+
+/**
+ * @brief Step-level max error: max over all edges of GSSK_GetEdgeErrorEstimate.
+ *        Used internally as the criterion for solver confidence.
+ */
+double GSSK_GetStepErrorEstimate(GSSK_Instance *inst);
+
+/**
+ * @brief Number of threshold crossing events recorded since last GSSK_Reset().
+ */
+size_t GSSK_GetEventCount(GSSK_Instance *inst);
+
+/**
+ * @brief Simulation time of event at event_idx.
+ * @return 0.0 if event_idx out of range.
+ */
+double GSSK_GetEventTime(GSSK_Instance *inst, size_t event_idx);
+
+/**
+ * @brief Edge ID string of the threshold edge that crossed at event_idx.
+ * @return Pointer to internal C string (valid for lifetime of inst).
+ *         NULL if event_idx out of range.
+ */
+const char *GSSK_GetEventEdgeID(GSSK_Instance *inst, size_t event_idx);
+
+/**
+ * @brief Crossing direction at event_idx.
+ * @return +1 if Q_origin crossed threshold upward, -1 downward, 0 if OOB.
+ */
+int GSSK_GetEventDirection(GSSK_Instance *inst, size_t event_idx);
+
+/* =========================================================================
+ * Phase 2 — Adaptive Numerics (DOPRI5 + Conservation Diagnostics)
+ * ========================================================================= */
+
+/**
+ * @brief Diagnostic hook function types (Phase 2.2 / Phase 4.4).
+ *
+ * on_step      — called after each accepted DOPRI5 sub-step.
+ * on_event     — called when a threshold event is emitted.
+ * on_conservation_warning — called when |ΔQ_total / Q_total| > rel_tol.
+ * on_mutation  — called after any successful topology mutation (Phase 4).
+ * on_divergence — called when NaN/Inf is detected before GSSK_ERR_DIVERGENCE (Phase 4).
+ * ctx          — user pointer forwarded to every callback.
+ */
+typedef void (*GSSK_OnStepFn)(void *ctx, double t, double h, double err_norm);
+typedef void (*GSSK_OnEventFn)(void *ctx, double t, const char *edge_id, int dir);
+typedef void (*GSSK_OnConservationWarningFn)(void *ctx, double t,
+                                              double conservation_err);
+
+/* Forward declaration — GSSK_MutationRecord defined in Phase 4 section below */
+typedef struct GSSK_MutationRecord GSSK_MutationRecord;
+
+typedef void (*GSSK_OnMutationFn)(void *ctx, const GSSK_MutationRecord *rec);
+typedef void (*GSSK_OnDivergenceFn)(void *ctx, double t, const char *node_id,
+                                     double value);
+
+typedef struct {
+  GSSK_OnStepFn                 on_step;
+  GSSK_OnEventFn                on_event;
+  GSSK_OnConservationWarningFn  on_conservation_warning;
+  void                         *ctx;
+  /* Phase 4 extensions — zero-initialize to disable */
+  GSSK_OnMutationFn             on_mutation;
+  GSSK_OnDivergenceFn           on_divergence;
+} GSSK_DiagHooks;
+
+/**
+ * @brief Register diagnostic hooks.  Pass NULL to clear all hooks.
+ */
+void GSSK_SetDiagHooks(GSSK_Instance *inst, const GSSK_DiagHooks *hooks);
+
+/**
+ * @brief Advance the simulation by one adaptively-sized DOPRI5 step.
+ *
+ * Uses the internally managed step size (inst→h_next, initialised from
+ * config.dt).  The actual step taken may be smaller due to error control or
+ * proximity to t_end.  Always advances current_t by the accepted h.
+ *
+ * Only meaningful when method = GSSK_METHOD_ADAPTIVE.  Calling it for other
+ * methods is equivalent to calling GSSK_Step with config.dt.
+ *
+ * @return GSSK_SUCCESS on acceptance, GSSK_ERR_DIVERGENCE on NaN/Inf,
+ *         GSSK_WARN_SOLVER_DIVERGENCE if step could not meet tolerance
+ *         even at h_min (step accepted with warning).
+ */
+GSSK_Status GSSK_StepAdaptive(GSSK_Instance *inst);
+
+/**
+ * @brief Actual step size h used in the most recently accepted step.
+ *        For fixed-step modes this equals config.dt.
+ */
+double GSSK_GetLastStepSize(GSSK_Instance *inst);
+
+/**
+ * @brief Suggested step size for the next GSSK_StepAdaptive call.
+ *        Updated by the PI controller after every accepted step.
+ */
+double GSSK_GetNextStepSize(GSSK_Instance *inst);
+
+/**
+ * @brief Relative change in total storage-Q over the last step.
+ *
+ * For a fully closed system (no source/sink nodes) this should be near
+ * machine epsilon.  Non-zero values indicate either open-system flow or
+ * numerical leakage.  Only meaningful after at least one step.
+ */
+double GSSK_GetConservationError(GSSK_Instance *inst);
+
+/* =========================================================================
+ * Phase 3 — Sensitivity Analysis
+ * ========================================================================= */
+
+/**
+ * @brief Enable forward sensitivity tracking for a set of edge parameters.
+ *
+ * Allocates and zeroes a sensitivity matrix S[node_count × param_count] where
+ * S[i][j] = ∂Q_i/∂k_j.  Updated each GSSK_Step call via the augmented ODE
+ * dS/dt = J(Q)·S + B(Q), integrated with Euler (first-order).
+ *
+ * @param param_edge_indices  Edge indices whose k values are tracked.
+ * @param param_count         Number of parameters (columns of S).
+ * @return GSSK_SUCCESS or GSSK_ERR_MALLOC_FAILED / GSSK_ERR_NOT_FOUND.
+ */
+GSSK_Status GSSK_EnableForwardSensitivity(GSSK_Instance *inst,
+                                           const size_t *param_edge_indices,
+                                           size_t param_count);
+
+/**
+ * @brief Disable sensitivity tracking and free the sensitivity matrix.
+ */
+void GSSK_DisableForwardSensitivity(GSSK_Instance *inst);
+
+/**
+ * @brief Read ∂Q[node_idx] / ∂k[param_idx] from the sensitivity matrix.
+ *
+ * @param param_idx  Column of S — index into the param_edge_indices array
+ *                   supplied to GSSK_EnableForwardSensitivity, not the edge
+ *                   index itself.
+ * @return 0.0 if sensitivity is disabled or indices are out of range.
+ */
+double GSSK_GetSensitivity(GSSK_Instance *inst, size_t node_idx,
+                            size_t param_idx);
+
+/**
+ * @brief Observation / target for the adjoint solver.
+ *
+ * The adjoint objective is L = ½ Σ_i weight_i · (Q_i(T) − target_value_i)².
+ * The terminal adjoint is λ_i(T) = weight_i · (Q_i(T) − target_value_i).
+ */
+typedef struct {
+  size_t node_idx;      /**< State-vector index of the observed node. */
+  double target_value;  /**< Desired Q_i(T). */
+  double weight;        /**< Loss weight (1.0 = unit weight). */
+} GSSK_AdjointTarget;
+
+/**
+ * @brief Compute gradient ∂L/∂k via adjoint (backward) integration.
+ *
+ * Runs a fresh forward pass from config.t_start to config.t_end (using fixed
+ * config.dt), stores the trajectory, then integrates the adjoint ODE backward
+ * to compute ∂L/∂k_j for each j in param_edge_indices.
+ *
+ * Restores inst->state and clock to their pre-call values when done.
+ *
+ * @param targets             Terminal objective terms (see GSSK_AdjointTarget).
+ * @param target_count        Number of target terms.
+ * @param param_edge_indices  Edges whose k sensitivity is computed.
+ * @param param_count         Length of param_edge_indices.
+ * @param out_gradient        Caller-allocated array of length param_count.
+ *                            Filled with ∂L/∂k_j on return.
+ */
+GSSK_Status GSSK_RunAdjoint(GSSK_Instance *inst,
+                             const GSSK_AdjointTarget *targets,
+                             size_t target_count,
+                             const size_t *param_edge_indices,
+                             size_t param_count,
+                             double *out_gradient);
+
+/**
+ * @brief ∂Tr[node_idx] / ∂k[edge_idx] via implicit differentiation.
+ *
+ * Differentiates the quality system M·Tr = b w.r.t. k_{edge_idx},
+ * giving the sensitivity of every node's transformity to that parameter.
+ * Only valid if quality accounting is enabled and GSSK_Step has been called.
+ *
+ * @return 0.0 if quality is disabled or indices are out of range.
+ */
+double GSSK_GetTransformitySensitivity(GSSK_Instance *inst,
+                                        size_t node_idx, size_t edge_idx);
 
 /* =========================================================================
  * Error reporting
@@ -408,10 +673,170 @@ GSSK_EnsembleResult *GSSK_EnsembleForecast(GSSK_Instance *inst, size_t runs,
 void GSSK_FreeEnsembleResult(GSSK_EnsembleResult *res);
 
 /**
- * @brief Run parameter calibration against observed data.
+ * @brief Run parameter calibration against observed data (Monte-Carlo DE path).
  */
 GSSK_Status GSSK_Calibrate(GSSK_Instance *inst, GSSK_NodeObservations *obs,
                            size_t obs_count, int iterations);
+
+/**
+ * @brief Calibrate using the original differential-evolution Monte-Carlo path.
+ *        Equivalent to GSSK_Calibrate.
+ */
+GSSK_Status GSSK_CalibrateMonteCarlo(GSSK_Instance *inst,
+                                      GSSK_NodeObservations *obs,
+                                      size_t obs_count, int iterations);
+
+/**
+ * @brief Gradient-based calibration using Levenberg-Marquardt + forward sens.
+ *
+ * Iteratively updates param_edge_indices[j].k to minimise MSE against obs.
+ *
+ * @param param_edge_indices  Edges whose k is tuned.
+ * @param param_count         Number of tunable parameters.
+ * @param iterations          Maximum outer L-M iterations.
+ */
+GSSK_Status GSSK_CalibrateGradient(GSSK_Instance *inst,
+                                    GSSK_NodeObservations *obs,
+                                    size_t obs_count,
+                                    const size_t *param_edge_indices,
+                                    size_t param_count,
+                                    int iterations);
+
+/* =========================================================================
+ * Phase 5 — Multi-Carrier Schema
+ * ========================================================================= */
+
+/**
+ * @brief A carrier definition from the top-level `carriers` array.
+ *
+ * Carriers are the "code" in Odum's four-position inter-block channel (Position 1).
+ * Each carrier has a human-readable unit and a conservation flag.  When
+ * `conserved` is true the kernel tracks a per-carrier conservation error.
+ */
+typedef struct {
+  char id[32];    /**< Unique identifier, e.g. "money", "energy", "material". */
+  char unit[32];  /**< Physical unit string, e.g. "AUD", "kWh", "kg". */
+  bool conserved; /**< If true, total storage-Q for this carrier is tracked. */
+} GSSK_Carrier;
+
+/** Number of carriers declared in the top-level `carriers` array. */
+size_t GSSK_GetCarrierCount(GSSK_Instance *inst);
+
+/**
+ * @brief Pointer to carrier definition at index.
+ * @return NULL if idx >= GSSK_GetCarrierCount().
+ */
+const GSSK_Carrier *GSSK_GetCarrier(GSSK_Instance *inst, size_t idx);
+
+/**
+ * @brief Carrier string declared on node at node_idx.
+ * @return Empty string if no carrier is set.  Never NULL.
+ */
+const char *GSSK_GetNodeCarrier(GSSK_Instance *inst, size_t node_idx);
+
+/**
+ * @brief Carrier string declared on edge at edge_idx (Odum Position 1).
+ * @return Empty string if no carrier is set.  Never NULL.
+ */
+const char *GSSK_GetEdgeCarrier(GSSK_Instance *inst, size_t edge_idx);
+
+/**
+ * @brief Per-carrier conservation error from the last step.
+ *
+ * Only meaningful for carriers declared with `conserved: true`.  Returns the
+ * relative change in total storage-Q for all nodes whose carrier matches
+ * carriers[carrier_idx].id.
+ *
+ * For an open system (source or sink nodes present for this carrier), this
+ * reflects net inflow/outflow rather than a numerical leak.  Check against
+ * your own tolerance.
+ *
+ * @return 0.0 if carrier_idx is out of range, carrier is not conserved,
+ *         or no step has been taken yet.
+ */
+double GSSK_GetCarrierConservationError(GSSK_Instance *inst, size_t carrier_idx);
+
+/* =========================================================================
+ * Phase 4 — Replay & Observability
+ * ========================================================================= */
+
+/**
+ * @brief Operation types for the mutation log.
+ */
+typedef enum {
+  GSSK_MUT_ADD_NODE,
+  GSSK_MUT_ADD_EDGE,
+  GSSK_MUT_DEACTIVATE_EDGE,
+  GSSK_MUT_DEACTIVATE_NODE,
+  GSSK_MUT_SET_EDGE_K
+} GSSK_MutationOp;
+
+/**
+ * @brief One entry in the mutation log.
+ *
+ * Appended on every successful topology mutation (AddNode, AddEdge,
+ * DeactivateEdge, DeactivateNode, SetEdgeK).
+ */
+struct GSSK_MutationRecord {
+  double           t;             /**< current_t when mutation occurred. */
+  GSSK_MutationOp  op;            /**< Which operation was performed. */
+  char             target_id[64]; /**< Node or edge ID affected. */
+  char             payload[256];  /**< JSON fragment (add ops) or value string (set_k). */
+  char             cause[64];     /**< "user", "calibration", "event:<id>", etc. */
+};
+
+/**
+ * @brief Number of mutations recorded since Init (not cleared by Reset).
+ */
+size_t GSSK_GetMutationCount(GSSK_Instance *inst);
+
+/**
+ * @brief Read-only pointer to mutation record at idx.
+ * @return NULL if idx >= GSSK_GetMutationCount().
+ */
+const GSSK_MutationRecord *GSSK_GetMutationRecord(GSSK_Instance *inst,
+                                                   size_t idx);
+
+/**
+ * @brief Set the cause string for the NEXT mutation appended.
+ *        Automatically cleared after one mutation is appended.
+ *        Pass NULL or "" to revert to default ("user").
+ *
+ * Common values: "user", "calibration", "event:<edge_id>", "replay".
+ */
+void GSSK_SetMutationCause(GSSK_Instance *inst, const char *cause);
+
+/**
+ * @brief Remove all entries from the mutation log.
+ *        Does not free the backing array (capacity retained for reuse).
+ */
+void GSSK_ClearMutationLog(GSSK_Instance *inst);
+
+/**
+ * @brief Serialize the mutation log as a standalone JSON array.
+ *        Caller must free with GSSK_FreeString().
+ * @return GSSK_SUCCESS or GSSK_ERR_MALLOC_FAILED.
+ */
+GSSK_Status GSSK_ExportMutationLog(GSSK_Instance *inst, char **out_json);
+
+/**
+ * @brief Replay a simulation from initial_json, applying logged mutations.
+ *
+ * Initialises a fresh instance from initial_json (topology only, no snapshot),
+ * then steps forward to target_t applying each mutation at its recorded t.
+ *
+ * @param initial_json    JSON model string (topology, config, no snapshot block).
+ * @param mutations_json  JSON array of mutation objects (from GSSK_ExportMutationLog),
+ *                        or NULL / empty string for no mutations.
+ * @param target_t        Stop time (inclusive). Use GSSK_GetTEnd(orig) for full replay.
+ * @param out_inst        On return: new instance at state target_t.
+ *                        Caller must free with GSSK_Free().
+ * @return GSSK_SUCCESS, GSSK_ERR_DIVERGENCE, or GSSK_ERR_MALLOC_FAILED.
+ */
+GSSK_Status GSSK_Replay(const char *initial_json,
+                         const char *mutations_json,
+                         double target_t,
+                         GSSK_Instance **out_inst);
 
 #ifdef __cplusplus
 }

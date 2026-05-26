@@ -193,6 +193,166 @@ static int cmd_version(void) {
   return EXIT_SUCCESS;
 }
 
+/*
+ * cmd_diff: compare two snapshot files node-by-node.
+ *
+ * Usage: gssk diff <snap_a.json> <snap_b.json>
+ *
+ * Prints a table showing Q[node] in A, B, and the delta for every node that
+ * appears in both snapshots.  Nodes present in only one snapshot are flagged.
+ */
+static int cmd_diff(int argc, char **argv) {
+  if (argc < 2) {
+    fprintf(stderr, "Usage: gssk diff <snapshot_a.json> <snapshot_b.json>\n");
+    return EXIT_FAILURE;
+  }
+
+  char *data_a = read_file(argv[0]);
+  char *data_b = read_file(argv[1]);
+  if (!data_a || !data_b) {
+    free(data_a); free(data_b);
+    return EXIT_FAILURE;
+  }
+
+  GSSK_Instance *ka = NULL, *kb = NULL;
+  GSSK_Status sa = GSSK_Init(data_a, &ka);
+  GSSK_Status sb = GSSK_Init(data_b, &kb);
+  free(data_a); free(data_b);
+
+  if (sa != GSSK_SUCCESS) {
+    fprintf(stderr, "diff: failed to load snapshot A: %s\n",
+            ka ? GSSK_GetErrorDescription(ka) : "unknown");
+    GSSK_Free(ka); GSSK_Free(kb);
+    return EXIT_FAILURE;
+  }
+  if (sb != GSSK_SUCCESS) {
+    fprintf(stderr, "diff: failed to load snapshot B: %s\n",
+            kb ? GSSK_GetErrorDescription(kb) : "unknown");
+    GSSK_Free(ka); GSSK_Free(kb);
+    return EXIT_FAILURE;
+  }
+
+  printf("%-20s %14s %14s %14s\n", "node", "A", "B", "delta");
+  printf("%-20s %14s %14s %14s\n", "----", "-", "-", "-----");
+
+  const double *sa_state = GSSK_GetState(ka);
+  const double *sb_state = GSSK_GetState(kb);
+  size_t na = GSSK_GetStateSize(ka);
+  size_t nb = GSSK_GetStateSize(kb);
+
+  for (size_t i = 0; i < na; i++) {
+    const char *id = GSSK_GetNodeID(ka, i);
+    int jb = GSSK_FindNodeIdx(kb, id);
+    if (jb < 0) {
+      printf("%-20s %14.6f %14s %14s  [only in A]\n", id, sa_state[i], "-", "-");
+    } else {
+      double delta = sb_state[jb] - sa_state[i];
+      printf("%-20s %14.6f %14.6f %14.6f\n", id, sa_state[i], sb_state[jb], delta);
+    }
+  }
+  for (size_t j = 0; j < nb; j++) {
+    const char *id = GSSK_GetNodeID(kb, j);
+    if (GSSK_FindNodeIdx(ka, id) < 0)
+      printf("%-20s %14s %14.6f %14s  [only in B]\n", id, "-", sb_state[j], "-");
+  }
+
+  printf("\ntime A=%.4f  time B=%.4f\n",
+         GSSK_GetCurrentTime(ka), GSSK_GetCurrentTime(kb));
+
+  GSSK_Free(ka); GSSK_Free(kb);
+  return EXIT_SUCCESS;
+}
+
+/*
+ * cmd_replay: replay a model with an optional mutation log, printing CSV.
+ *
+ * Usage: gssk replay <model.json> [mutations.json] [--until <t>]
+ *
+ * Initialises from model.json (topology only), applies mutations at their
+ * recorded times, and emits state as CSV to stdout (or output.csv if given).
+ */
+static int cmd_replay(int argc, char **argv) {
+  if (argc < 1) {
+    fprintf(stderr,
+        "Usage: gssk replay <model.json> [mutations.json] [--until <t>] [output.csv]\n");
+    return EXIT_FAILURE;
+  }
+
+  const char *model_path    = argv[0];
+  const char *mut_path      = NULL;
+  const char *output_path   = NULL;
+  double      target_t      = -1.0; /* -1 means "use model t_end" */
+
+  for (int i = 1; i < argc; i++) {
+    if (strcmp(argv[i], "--until") == 0 && i + 1 < argc) {
+      target_t = atof(argv[++i]);
+    } else if (!mut_path && argv[i][0] != '-') {
+      /* Heuristic: first non-flag arg after model is mutations file or output */
+      if (i + 1 < argc && strcmp(argv[i+1], "--until") != 0 &&
+          (strlen(argv[i]) > 5 &&
+           strcmp(argv[i] + strlen(argv[i]) - 5, ".json") == 0)) {
+        mut_path = argv[i];
+      } else {
+        output_path = argv[i];
+      }
+    } else if (!output_path && argv[i][0] != '-') {
+      output_path = argv[i];
+    }
+  }
+
+  char *model_data = read_file(model_path);
+  if (!model_data) return EXIT_FAILURE;
+
+  char *mut_data = NULL;
+  if (mut_path) {
+    mut_data = read_file(mut_path);
+    if (!mut_data) { free(model_data); return EXIT_FAILURE; }
+  }
+
+  /* Determine target_t from model if not specified */
+  if (target_t < 0.0) {
+    GSSK_Instance *probe = NULL;
+    GSSK_Init(model_data, &probe);
+    if (probe) { target_t = GSSK_GetTEnd(probe); GSSK_Free(probe); }
+  }
+
+  GSSK_Instance *inst = NULL;
+  GSSK_Status status = GSSK_Replay(model_data, mut_data, target_t, &inst);
+  free(model_data);
+  free(mut_data);
+
+  if (!inst) return EXIT_FAILURE;
+
+  if (status != GSSK_SUCCESS && status != GSSK_WARN_SOLVER_DIVERGENCE) {
+    fprintf(stderr, "replay: %s\n", GSSK_GetErrorDescription(inst));
+    GSSK_Free(inst);
+    return EXIT_FAILURE;
+  }
+
+  /* Emit final state as a single-row CSV snapshot */
+  FILE *out = stdout;
+  if (output_path) {
+    out = fopen(output_path, "w");
+    if (!out) { perror("replay"); GSSK_Free(inst); return EXIT_FAILURE; }
+  }
+
+  size_t nc = GSSK_GetStateSize(inst);
+  fprintf(out, "time");
+  for (size_t i = 0; i < nc; i++) {
+    const char *id = GSSK_GetNodeID(inst, i);
+    fprintf(out, ",%s", id ? id : "unknown");
+  }
+  fprintf(out, "\n%.4f", GSSK_GetCurrentTime(inst));
+  const double *st = GSSK_GetState(inst);
+  for (size_t i = 0; i < nc; i++)
+    fprintf(out, ",%.6f", st[i]);
+  fprintf(out, "\n");
+
+  if (out != stdout) fclose(out);
+  GSSK_Free(inst);
+  return EXIT_SUCCESS;
+}
+
 /* =========================================================================
  * Entry point
  * ========================================================================= */
@@ -201,10 +361,12 @@ int main(int argc, char **argv) {
   if (argc < 2) {
     fprintf(stderr,
       "Usage:\n"
-      "  gssk <model.json> [output.csv]               Run simulation\n"
-      "  gssk run <model.json> [output.csv]            Run simulation\n"
-      "  gssk migrate --from 2 <input.json> [out.json] Upgrade v2 → v3 schema\n"
-      "  gssk version                                  Print kernel version\n");
+      "  gssk <model.json> [output.csv]                     Run simulation\n"
+      "  gssk run <model.json> [output.csv]                 Run simulation\n"
+      "  gssk migrate --from 2 <input.json> [out.json]      Upgrade v2 → v3 schema\n"
+      "  gssk diff <snap_a.json> <snap_b.json>              Diff two snapshots\n"
+      "  gssk replay <model.json> [muts.json] [--until <t>] Replay with mutations\n"
+      "  gssk version                                       Print kernel version\n");
     return EXIT_FAILURE;
   }
 
@@ -216,6 +378,12 @@ int main(int argc, char **argv) {
   }
   if (strcmp(argv[1], "run") == 0) {
     return cmd_run(argc - 2, argv + 2);
+  }
+  if (strcmp(argv[1], "diff") == 0) {
+    return cmd_diff(argc - 2, argv + 2);
+  }
+  if (strcmp(argv[1], "replay") == 0) {
+    return cmd_replay(argc - 2, argv + 2);
   }
 
   /* Default: treat argv[1] as a model file path (backwards-compatible) */

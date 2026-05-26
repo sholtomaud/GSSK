@@ -15,13 +15,31 @@ export default defineConfig({
     ],
     sidebar: [
       {
-        text: 'Documentation',
+        text: 'Guides',
         items: [
-          { text: 'Requirements', link: '/REQUIREMENTS' },
+          { text: 'Concepts', link: '/concepts' },
+          { text: 'Cookbook', link: '/cookbook' },
+          { text: 'Changelog', link: '/CHANGELOG' },
+        ]
+      },
+      {
+        text: 'Reference',
+        items: [
+          { text: 'API Reference', link: '/api-reference' },
+          { text: 'Schema Reference', link: '/gssk-schema' },
+          { text: 'LIMIT Logic Bounds', link: '/LIMIT_LOGIC' },
           { text: 'Technical Specification', link: '/SPECIFICATION' },
+          { text: 'Requirements', link: '/REQUIREMENTS' },
           { text: 'GPU Acceleration', link: '/DOCS_GPU' },
           { text: 'Performance & Scaling', link: '/DOCS_PERFORMANCE' },
-          { text: 'UI Specification', link: '/GSSK_UI_SPECIFICATION' }
+          { text: 'UI Specification', link: '/GSSK_UI_SPECIFICATION' },
+        ]
+      },
+      {
+        text: 'Examples',
+        items: [
+          { text: 'Household Model', link: '/examples/household/' },
+          { text: 'Interactive Demo', link: '/examples/household/demo', target: '_blank' },
         ]
       }
     ],

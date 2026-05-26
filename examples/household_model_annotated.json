@@ -1,0 +1,310 @@
+{
+    "_note": "Annotated version of household_model.json. The GSSK kernel ignores all fields prefixed with '_'. Edit household_model.json for simulation; use this file for documentation and onboarding.",
+
+    "metadata": {
+        "schema_version": 3,
+        "name": "Household Ecological-Economy",
+        "description": "Multi-carrier household model demonstrating money, energy, material and information flows. Reference example for Phase 5 — all five edge logic types, quality accounting (emergy), and cross-carrier coupling.",
+        "author": "GSSK reference examples",
+        "created_at": "2026-05-25T00:00:00Z"
+    },
+
+    "carriers": [
+        {
+            "_note": "Money: physically conserved within the household boundary (salary in, tax+spending out). AUD chosen as the unit — scale k values accordingly.",
+            "id": "money", "unit": "AUD", "conserved": true
+        },
+        {
+            "_note": "Energy: conserved by the first law. Includes electrical (kWh), chemical (fuel), and metabolic energy. Source quality_input=1.0 enables emergy tracing.",
+            "id": "energy", "unit": "kWh", "conserved": true
+        },
+        {
+            "_note": "Material: mass-conserved within the household boundary. Waste leaves to landfill; food enters from market and water supply.",
+            "id": "material", "unit": "kg", "conserved": true
+        },
+        {
+            "_note": "Information: NOT conserved (conserved:false). Attention and decisions are cognitively bounded and decay — the household forgets or ignores most incoming news.",
+            "id": "information", "unit": "decisions/month", "conserved": false
+        }
+    ],
+
+    "nodes": [
+        {
+            "_note": "Money source. 'value:1.0' is a normalised source strength; actual flow is set by edge k=5000. quality_input:1.0 seeds emergy propagation through the money carrier.",
+            "id": "salary", "type": "source", "value": 1.0, "carrier": "money", "quality_input": 1.0
+        },
+        {
+            "_note": "Primary liquid savings. Starts at 5000 AUD. This node is the hub of cross-carrier coupling — it controls grocery purchasing (interaction edge).",
+            "id": "bank_account", "type": "storage", "value": 5000.0, "carrier": "money"
+        },
+        {
+            "_note": "Superannuation (retirement savings). Grows at a fixed 550 AUD/month (super_contrib edge). Not connected to spending — isolated from the household budget.",
+            "id": "super_fund", "type": "storage", "value": 50000.0, "carrier": "money"
+        },
+        {
+            "_note": "Credit card liability. Starts at zero. When balance exceeds 500 AUD the threshold edge (credit_payment) triggers a minimum repayment of 300 AUD/month.",
+            "id": "credit_card_debt", "type": "storage", "value": 0.0, "carrier": "money"
+        },
+        {
+            "_note": "Catch-all money sink for mortgage, tax, and discretionary spending. Named 'tax' for brevity but aggregates all outbound money flows in this simplified model.",
+            "id": "tax", "type": "sink", "value": 0.0, "carrier": "money"
+        },
+
+        {
+            "_note": "Solar irradiance. Normalised source; quality_input:1.0 starts the emergy chain for the energy carrier. Edge k=80 represents a nominal 8 kWh/day rooftop array.",
+            "id": "sunlight", "type": "source", "value": 1.0, "carrier": "energy", "quality_input": 1.0
+        },
+        {
+            "_note": "Lithium battery. Starts partially charged at 5 kWh. Receives solar charge (linear k=80), exports excess to grid (linear k=0.05), loses to self-discharge (linear k=0.01).",
+            "id": "solar_battery", "type": "storage", "value": 5.0, "carrier": "energy"
+        },
+        {
+            "_note": "Accumulated feed-in tariff credit (kWh exported to grid). Grows as excess solar is exported. Not currently monetised back to bank_account in this model.",
+            "id": "grid_credit", "type": "storage", "value": 0.0, "carrier": "energy"
+        },
+        {
+            "_note": "Vehicle fuel tank. 40 kWh ≈ ~4 L petrol equivalent. Burns at k=0.03/month (vehicle_burn edge). No refuelling edge in this model — a deliberate simplification.",
+            "id": "vehicle_fuel", "type": "storage", "value": 40.0, "carrier": "energy"
+        },
+        {
+            "_note": "Metabolic energy reserve (glycogen + adipose). 350 kWh ≈ 42 kg fat. Gains energy from food via fridge_eat (limit logic); loses via body_metabolism (linear).",
+            "id": "body_energy", "type": "storage", "value": 350.0, "carrier": "energy"
+        },
+        {
+            "_note": "Irreversible thermodynamic sink. All entropy-generating flows terminate here: battery self-discharge, metabolic heat, vehicle combustion.",
+            "id": "heat_loss", "type": "sink", "value": 0.0, "carrier": "energy"
+        },
+
+        {
+            "_note": "Idealised grocery market — essentially infinite supply. Normalised to 1.0. Real flow rate is determined by the interaction edge (grocery_receive) controlled by bank_account.",
+            "id": "grocery_market", "type": "source", "value": 1.0, "carrier": "material"
+        },
+        {
+            "_note": "Municipal water supply. Constant 1.5 kg/month into pantry (water_fill edge). Treated as unlimited in this model.",
+            "id": "mains_water", "type": "source", "value": 1.0, "carrier": "material"
+        },
+        {
+            "_note": "Dry goods and non-perishables. Receives grocery deliveries and water. Transfers to fridge (linear), spoils into waste_bin (linear k=0.03).",
+            "id": "pantry", "type": "storage", "value": 10.0, "carrier": "material"
+        },
+        {
+            "_note": "Refrigerated food. Fills from pantry. Consumed by body_energy via limit logic (saturation at ~3 kg threshold). Spoils at k=0.02/month.",
+            "id": "fridge", "type": "storage", "value": 5.0, "carrier": "material"
+        },
+        {
+            "_note": "Clothing and textiles. Wears out at k=0.01/month into waste_bin. No purchasing edge — clothing is not resupplied in this simplified model.",
+            "id": "wardrobe", "type": "storage", "value": 50.0, "carrier": "material"
+        },
+        {
+            "_note": "Household durables (appliances, furniture). Depreciates at k=0.005/month into waste_bin. A very slow linear drain representing appliance end-of-life.",
+            "id": "appliances_stock", "type": "storage", "value": 200.0, "carrier": "material"
+        },
+        {
+            "_note": "Intermediate waste accumulator. Receives spoilage, wear, and appliance depreciation. Empties at k=0.5/month to waste_landfill (simulating weekly bin collection).",
+            "id": "waste_bin", "type": "storage", "value": 0.0, "carrier": "material"
+        },
+        {
+            "_note": "Final material sink. Represents landfill. All waste ultimately ends here. Monitoring this node gives total household waste output.",
+            "id": "waste_landfill", "type": "sink", "value": 0.0, "carrier": "material"
+        },
+
+        {
+            "_note": "Incoming news and information. Normalised source. Controls the rate at which household_attention converts to pending_decisions via an interaction edge.",
+            "id": "news_inflow", "type": "source", "value": 1.0, "carrier": "information"
+        },
+        {
+            "_note": "Cognitive bandwidth — the household's capacity to process information. Starts at 100 decisions/month. Replenished by news at constant k=10; decays at k=0.05/month.",
+            "id": "household_attention", "type": "storage", "value": 100.0, "carrier": "information"
+        },
+        {
+            "_note": "Decision queue. Backlog of pending choices (budget, shopping, maintenance). Filled by attention×news interaction (k=0.02). Resolved/forgotten at k=0.3/month.",
+            "id": "pending_decisions", "type": "storage", "value": 5.0, "carrier": "information"
+        },
+        {
+            "_note": "Decisions that were never acted on (forgotten or overtaken by events). Receives from both pending_decisions (resolved/forgotten at k=0.3) and attention_decay (k=0.05).",
+            "id": "forgotten_decisions", "type": "sink", "value": 0.0, "carrier": "information"
+        }
+    ],
+
+    "edges": [
+        {
+            "_note": "CONSTANT — fixed salary of 5000 AUD/month. F = k regardless of account balance. This is the primary energy source for the money carrier.",
+            "id": "salary_in",
+            "origin": "salary", "target": "bank_account",
+            "carrier": "money", "logic": "constant",
+            "params": { "k": 5000.0 }
+        },
+        {
+            "_note": "CONSTANT — mandatory superannuation contribution (11% of gross ≈ 550 AUD/month). Bypasses the spending/banking loop entirely.",
+            "id": "super_contrib",
+            "origin": "salary", "target": "super_fund",
+            "carrier": "money", "logic": "constant",
+            "params": { "k": 550.0 }
+        },
+        {
+            "_note": "CONSTANT — mortgage repayment of 1800 AUD/month. Fixed obligation, does not vary with account balance.",
+            "id": "mortgage_out",
+            "origin": "bank_account", "target": "tax",
+            "carrier": "money", "logic": "constant",
+            "params": { "k": 1800.0 }
+        },
+        {
+            "_note": "CONSTANT — income tax and rates of 600 AUD/month. Fixed government obligation.",
+            "id": "tax_out",
+            "origin": "bank_account", "target": "tax",
+            "carrier": "money", "logic": "constant",
+            "params": { "k": 600.0 }
+        },
+        {
+            "_note": "LINEAR — discretionary spending at 10% of account balance per month. F = 0.1 × Q_bank. Models Keynesian consumption: wealthier households spend more. Key parameter for cross-carrier sensitivity.",
+            "id": "grocery_payment",
+            "origin": "bank_account", "target": "tax",
+            "carrier": "money", "logic": "linear",
+            "params": { "k": 0.1 }
+        },
+        {
+            "_note": "THRESHOLD — credit card minimum repayment. F = 300 AUD/month only when Q_credit > 500 AUD. The kernel's Illinois event detector locates the exact crossing time. Currently always 0 since debt starts at 0 and no credit-spending edge exists.",
+            "id": "credit_payment",
+            "origin": "credit_card_debt", "target": "bank_account",
+            "carrier": "money", "logic": "threshold",
+            "params": { "k": 300.0, "threshold": 500.0 }
+        },
+
+        {
+            "_note": "LINEAR — solar panel charging. F = 80 × Q_sunlight = 80 kWh/month (≈ 2.7 kWh/day from a 3 kW array with ~30% capacity factor). The battery grows rapidly in early months.",
+            "id": "solar_charge",
+            "origin": "sunlight", "target": "solar_battery",
+            "carrier": "energy", "logic": "linear",
+            "params": { "k": 80.0 }
+        },
+        {
+            "_note": "LINEAR — export of excess battery charge to grid. F = 0.05 × Q_battery. At Q=5 kWh that's 0.25 kWh/month — slow export. Grid credit accumulates over years.",
+            "id": "battery_export",
+            "origin": "solar_battery", "target": "grid_credit",
+            "carrier": "energy", "logic": "linear",
+            "params": { "k": 0.05 }
+        },
+        {
+            "_note": "LINEAR — battery self-discharge. F = 0.01 × Q_battery. Lithium batteries lose ~1%/month to internal resistance. Irreversible — goes to heat_loss.",
+            "id": "battery_self_discharge",
+            "origin": "solar_battery", "target": "heat_loss",
+            "carrier": "energy", "logic": "linear",
+            "params": { "k": 0.01 }
+        },
+        {
+            "_note": "LINEAR — basal metabolic rate. F = 0.02 × Q_body ≈ 7 kWh/month at rest. Energy dissipated as body heat. The body must eat to maintain Q_body_energy.",
+            "id": "body_metabolism",
+            "origin": "body_energy", "target": "heat_loss",
+            "carrier": "energy", "logic": "linear",
+            "params": { "k": 0.02 }
+        },
+        {
+            "_note": "LINEAR — vehicle fuel consumption. F = 0.03 × Q_fuel. At 40 kWh initial charge = 1.2 kWh/month (negligible driving). Increases if vehicle_fuel is refilled.",
+            "id": "vehicle_burn",
+            "origin": "vehicle_fuel", "target": "heat_loss",
+            "carrier": "energy", "logic": "linear",
+            "params": { "k": 0.03 }
+        },
+
+        {
+            "_note": "INTERACTION — cross-carrier work gate. F = 0.001 × Q_market × Q_bank. Grocery material flow is controlled by bank_account (money carrier). This is the primary cross-carrier coupling in the model. Doubling k doubles pantry steady-state.",
+            "id": "grocery_receive",
+            "origin": "grocery_market", "target": "pantry",
+            "carrier": "material", "logic": "interaction",
+            "params": { "k": 0.001, "control_node": "bank_account" }
+        },
+        {
+            "_note": "CONSTANT — mains water input to pantry. 1.5 kg/month (cooking, drinking water stored before use). Independent of financial state.",
+            "id": "water_fill",
+            "origin": "mains_water", "target": "pantry",
+            "carrier": "material", "logic": "constant",
+            "params": { "k": 1.5 }
+        },
+        {
+            "_note": "LINEAR — pantry to fridge transfer. F = 0.2 × Q_pantry. Perishables moved from pantry into refrigerated storage at 20%/month rate.",
+            "id": "pantry_to_fridge",
+            "origin": "pantry", "target": "fridge",
+            "carrier": "material", "logic": "linear",
+            "params": { "k": 0.2 }
+        },
+        {
+            "_note": "LIMIT — food consumption (Michaelis-Menten). F = 2 × Q_fridge / (1 + Q_fridge/3). Maximum eating rate is k=2 kg/month; half-saturation at C=threshold=3 kg. Physical constraint: stomach capacity limits intake rate regardless of fridge contents.",
+            "id": "fridge_eat",
+            "origin": "fridge", "target": "body_energy",
+            "carrier": "material", "logic": "limit",
+            "params": { "k": 2.0, "threshold": 3.0 }
+        },
+        {
+            "_note": "LINEAR — pantry spoilage. F = 0.03 × Q_pantry. Dry goods spoil slowly (3%/month). Increases with pantry load.",
+            "id": "pantry_spoil",
+            "origin": "pantry", "target": "waste_bin",
+            "carrier": "material", "logic": "linear",
+            "params": { "k": 0.03 }
+        },
+        {
+            "_note": "LINEAR — fridge spoilage. F = 0.02 × Q_fridge. Refrigerated food spoils at 2%/month (slower than pantry). Represents forgotten leftovers.",
+            "id": "fridge_spoil",
+            "origin": "fridge", "target": "waste_bin",
+            "carrier": "material", "logic": "linear",
+            "params": { "k": 0.02 }
+        },
+        {
+            "_note": "LINEAR — bin collection. F = 0.5 × Q_waste_bin. Weekly bin collection represented as 50%/month drain from the waste accumulator to landfill.",
+            "id": "waste_disposal",
+            "origin": "waste_bin", "target": "waste_landfill",
+            "carrier": "material", "logic": "linear",
+            "params": { "k": 0.5 }
+        },
+        {
+            "_note": "LINEAR — appliance depreciation. F = 0.005 × Q_appliances. 0.5%/month wear — a $2000 appliance contributes $10/month in waste mass. Very slow drain.",
+            "id": "appliance_wear",
+            "origin": "appliances_stock", "target": "waste_bin",
+            "carrier": "material", "logic": "linear",
+            "params": { "k": 0.005 }
+        },
+        {
+            "_note": "LINEAR — clothing wear. F = 0.01 × Q_wardrobe. 1%/month attrition — a 50 kg wardrobe loses 0.5 kg/month to rags, disposal.",
+            "id": "wardrobe_wear",
+            "origin": "wardrobe", "target": "waste_bin",
+            "carrier": "material", "logic": "linear",
+            "params": { "k": 0.01 }
+        },
+
+        {
+            "_note": "CONSTANT — attention replenishment from news. F = 10 decisions/month regardless of existing attention level. News is always available; whether it is absorbed depends on the interaction edge.",
+            "id": "attention_replenish",
+            "origin": "news_inflow", "target": "household_attention",
+            "carrier": "information", "logic": "constant",
+            "params": { "k": 10.0 }
+        },
+        {
+            "_note": "INTERACTION — news-driven decision generation. F = 0.02 × Q_attention × Q_news. Decisions emerge from the product of cognitive bandwidth and news volume. Cross-carrier analogy: attention is the 'money' controlling information flow.",
+            "id": "attention_to_decisions",
+            "origin": "household_attention", "target": "pending_decisions",
+            "carrier": "information", "logic": "interaction",
+            "params": { "k": 0.02, "control_node": "news_inflow" }
+        },
+        {
+            "_note": "LINEAR — decision resolution. F = 0.3 × Q_pending. 30%/month of pending decisions get resolved or abandoned. High k means the household is decisive.",
+            "id": "decisions_resolved",
+            "origin": "pending_decisions", "target": "forgotten_decisions",
+            "carrier": "information", "logic": "linear",
+            "params": { "k": 0.3 }
+        },
+        {
+            "_note": "LINEAR — attention decay. F = 0.05 × Q_attention. Cognitive bandwidth erodes without rest and renewal — 5%/month background decay (distraction, fatigue).",
+            "id": "attention_decay",
+            "origin": "household_attention", "target": "forgotten_decisions",
+            "carrier": "information", "logic": "linear",
+            "params": { "k": 0.05 }
+        }
+    ],
+
+    "config": {
+        "_note": "24 months at dt=0.1 month. RK4 solver. At this dt the Michaelis-Menten limit edge linearisation error is < 0.1% (see docs/LIMIT_LOGIC.md).",
+        "t_start": 0.0,
+        "t_end":   24.0,
+        "dt":      0.1,
+        "method":  "rk4"
+    }
+}

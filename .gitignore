@@ -34,3 +34,13 @@ docs/.vitepress/dist/
 
 # Ensure dist/ artifacts are tracked
 !dist/
+
+# AI assistant memory
+.claude/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Python demo temp files
+/tmp/gssk_demo_*.csv

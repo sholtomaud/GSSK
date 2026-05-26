@@ -115,7 +115,7 @@ public final class GSSKSimulator {
     // MARK: - Private storage
 
     // GSSK_Instance is an incomplete C struct — Swift imports it as OpaquePointer.
-    private var instPtr: OpaquePointer?
+    var instPtr: OpaquePointer?  /* internal — accessible to @testable imports */
 
     /// The node manifest provided at init time (column → domain node ID).
     /// If the simulator was initialised directly from JSON (not a serialiser),
@@ -148,8 +148,18 @@ public final class GSSKSimulator {
         return GSSK_GetDt(p)
     }
 
-    /// Current simulation time (advances with each call to `step()`).
-    public private(set) var currentTime: Double = 0
+    /// Current simulation time — reads directly from the kernel clock.
+    /// After loading a snapshot JSON this correctly reflects snapshot.t.
+    public var currentTime: Double {
+        guard let p = instPtr else { return 0 }
+        return GSSK_GetCurrentTime(p)
+    }
+
+    /// Number of steps taken since the last init or reset.
+    public var stepCount: Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetStepCount(p))
+    }
 
     /// Current dual-solver confidence level (AUTO mode).
     /// Always `.high` in EULER/RK4/INCIPIENT modes.
@@ -252,8 +262,6 @@ public final class GSSKSimulator {
             throw Self.map(status: status, message: msg)
         }
 
-        self.currentTime = startTime
-
         // Build manifest from kernel ordering
         for i in 0 ..< stateSize {
             if let id = nodeID(at: i) {
@@ -282,14 +290,6 @@ public final class GSSKSimulator {
         guard status == GSSK_SUCCESS || status == GSSK_WARN_SOLVER_DIVERGENCE else {
             throw Self.map(status: status, message: "")
         }
-        currentTime += stepDt
-
-        // If we warned, we might still want the user to know, but we return the state
-        // because the kernel fell back to RK4 safely.
-        if status == GSSK_WARN_SOLVER_DIVERGENCE {
-            // In a production app, you might log this.
-        }
-
         return state()
     }
 
@@ -327,7 +327,6 @@ public final class GSSKSimulator {
     public func reset() {
         guard let p = instPtr else { return }
         GSSK_Reset(p)
-        currentTime = startTime
     }
 
     /// Read the current state vector (Q values for all nodes).
@@ -486,6 +485,379 @@ public final class GSSKSimulator {
     public func reclassify() {
         guard let p = instPtr else { return }
         GSSK_ReclassifyNetwork(p)
+    }
+
+    // MARK: - Phase 1 — IDC error estimates and event log
+
+    /// Per-edge relative error between IDC and RK4 flows from the last step.
+    /// Returns 0.0 in EULER/RK4 modes or if index is out of range.
+    public func edgeErrorEstimate(at index: Int) -> Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetEdgeErrorEstimate(p, index)
+    }
+
+    /// Step-level max error: max over all edges of `edgeErrorEstimate(at:)`.
+    /// Used by the kernel to decide between IDC and RK4 results.
+    public var stepErrorEstimate: Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetStepErrorEstimate(p)
+    }
+
+    /// Number of threshold crossing events recorded since last `reset()`.
+    public var eventCount: Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetEventCount(p))
+    }
+
+    /// A threshold crossing event.
+    public struct GSSKEvent {
+        /// Simulation time when the crossing occurred.
+        public let t: Double
+        /// ID of the threshold edge that crossed.
+        public let edgeID: String
+        /// +1 if Q_origin crossed threshold upward, -1 downward.
+        public let direction: Int
+    }
+
+    /// Return the event at `index` in the event log, or nil if out of range.
+    public func event(at index: Int) -> GSSKEvent? {
+        guard let p = instPtr, index < eventCount else { return nil }
+        let t   = GSSK_GetEventTime(p, index)
+        let dir = Int(GSSK_GetEventDirection(p, index))
+        guard let cStr = GSSK_GetEventEdgeID(p, index) else { return nil }
+        return GSSKEvent(t: t, edgeID: String(cString: cStr), direction: dir)
+    }
+
+    // MARK: - Phase 2 — Adaptive Numerics
+
+    /// Advance the simulation by one adaptively-sized DOPRI5 step.
+    ///
+    /// Uses the internally managed step size (`nextStepSize`, initialised from
+    /// `config.dt`).  Updates `currentTime` by the accepted `lastStepSize`.
+    /// Only meaningful when method = "adaptive"; for other methods behaves
+    /// identically to `step()` using `config.dt`.
+    ///
+    /// - Returns: Array of node state values after the step.
+    /// - Throws: `GSSKError` on NaN/Inf divergence.
+    @discardableResult
+    public func stepAdaptive() throws -> [Double] {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        let status = GSSK_StepAdaptive(p)
+        if status == GSSK_ERR_DIVERGENCE {
+            throw GSSKError.divergence
+        }
+        return Array(UnsafeBufferPointer(start: GSSK_GetState(p),
+                                         count: Int(GSSK_GetStateSize(p))))
+    }
+
+    /// Actual step size h used in the most recently accepted DOPRI5 step.
+    /// For fixed-step methods this equals `config.dt`.
+    public var lastStepSize: Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetLastStepSize(p)
+    }
+
+    /// Suggested h for the next `stepAdaptive()` call, updated by the PI
+    /// controller after every accepted DOPRI5 step.
+    public var nextStepSize: Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetNextStepSize(p)
+    }
+
+    /// Relative change in total storage-Q over the last step.
+    /// Near zero for a fully closed system (no source/sink nodes).
+    public var conservationError: Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetConservationError(p)
+    }
+
+    // MARK: - Phase 3 — Sensitivity Analysis
+
+    /// Enable forward sensitivity tracking for a set of edges (by index).
+    ///
+    /// After this call, every `step()` / `stepAdaptive()` updates the internal
+    /// sensitivity matrix S where S[nodeIdx][paramIdx] = ∂Q_nodeIdx/∂k_j.
+    /// - Parameter paramEdgeIndices: Edge indices to track (0-based).
+    @discardableResult
+    public func enableForwardSensitivity(paramEdgeIndices: [Int]) throws -> GSSK_Status {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        let idx = paramEdgeIndices.map { Int($0) }
+        return idx.withUnsafeBufferPointer { buf in
+            GSSK_EnableForwardSensitivity(p, buf.baseAddress, idx.count)
+        }
+    }
+
+    /// Disable forward sensitivity tracking and free the sensitivity matrix.
+    public func disableForwardSensitivity() {
+        guard let p = instPtr else { return }
+        GSSK_DisableForwardSensitivity(p)
+    }
+
+    /// Read ∂Q[nodeIdx] / ∂k[paramIdx] from the sensitivity matrix.
+    /// `paramIdx` is the column index into the array passed to
+    /// `enableForwardSensitivity`, not the raw edge index.
+    public func getSensitivity(nodeIdx: Int, paramIdx: Int) -> Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetSensitivity(p, nodeIdx, paramIdx)
+    }
+
+    /// Compute gradient ∂L/∂k via adjoint (backward) integration.
+    ///
+    /// Objective: L = ½ Σ_i weight_i · (Q_i(T) − target_i)².
+    /// Runs a fresh forward pass from t_start→t_end, then integrates backward.
+    /// Restores live state on return.
+    ///
+    /// - Parameters:
+    ///   - targets: Terminal objective terms as `(nodeIdx, targetValue, weight)`.
+    ///   - paramEdgeIndices: Edges whose k gradient is returned.
+    /// - Returns: Gradient vector ∂L/∂k_j for each j in `paramEdgeIndices`.
+    public func runAdjoint(
+        targets: [(nodeIdx: Int, targetValue: Double, weight: Double)],
+        paramEdgeIndices: [Int]
+    ) throws -> [Double] {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        var tgts = targets.map {
+            GSSK_AdjointTarget(node_idx: $0.nodeIdx,
+                               target_value: $0.targetValue,
+                               weight: $0.weight)
+        }
+        let idx  = paramEdgeIndices.map { Int($0) }
+        var grad = [Double](repeating: 0.0, count: paramEdgeIndices.count)
+        let tgtCount = tgts.count
+        let st: GSSK_Status = tgts.withUnsafeMutableBufferPointer { tBuf in
+            idx.withUnsafeBufferPointer { iBuf in
+                GSSK_RunAdjoint(p, tBuf.baseAddress, tgtCount,
+                                iBuf.baseAddress, idx.count, &grad)
+            }
+        }
+        if st == GSSK_ERR_MALLOC_FAILED { throw GSSKError.mallocFailed }
+        return grad
+    }
+
+    /// ∂Tr[nodeIdx] / ∂k[edgeIdx] via implicit differentiation of the quality
+    /// accounting system. Returns 0.0 if quality accounting is disabled.
+    public func getTransformitySensitivity(nodeIdx: Int, edgeIdx: Int) -> Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetTransformitySensitivity(p, nodeIdx, edgeIdx)
+    }
+
+    // MARK: - Serialization (0.3 Round-trip)
+
+    /// Serialize the current topology to a JSON string.
+    ///
+    /// The result is a valid model JSON with initial_value ICs and the current
+    /// edge k values. Passing it back to `init(json:)` starts a fresh run from
+    /// `t_start` with the current (possibly cybernetically adjusted) parameters.
+    ///
+    /// - Returns: Pretty-printed JSON string.
+    /// - Throws: `GSSKError.mallocFailed` if the kernel runs out of memory.
+    public func serializeModel() throws -> String {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        var ptr: UnsafeMutablePointer<CChar>? = nil
+        let status = GSSK_SerializeModel(p, &ptr)
+        guard status == GSSK_SUCCESS, let cStr = ptr else {
+            throw Self.map(status: status, message: "SerializeModel failed")
+        }
+        let result = String(cString: cStr)
+        GSSK_FreeString(ptr)
+        return result
+    }
+
+    /// Serialize the current topology and live state to a JSON string.
+    ///
+    /// The result includes a `snapshot` block with the current Q[], Tr[],
+    /// per-edge k, simulation time, and step counter. Passing it back to
+    /// `init(json:)` resumes from `t = snapshot.t`, satisfying the round-trip
+    /// property: `Init → Step×N → serializeSnapshot → init → Step×M` is
+    /// bit-identical to `Init → Step×(N+M)`.
+    ///
+    /// - Returns: Pretty-printed JSON string.
+    /// - Throws: `GSSKError.mallocFailed` if the kernel runs out of memory.
+    public func serializeSnapshot() throws -> String {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        var ptr: UnsafeMutablePointer<CChar>? = nil
+        let status = GSSK_SerializeSnapshot(p, &ptr)
+        guard status == GSSK_SUCCESS, let cStr = ptr else {
+            throw Self.map(status: status, message: "SerializeSnapshot failed")
+        }
+        let result = String(cString: cStr)
+        GSSK_FreeString(ptr)
+        return result
+    }
+
+    // MARK: - Phase 4 — Mutation Log & Replay
+
+    /// A recorded topology mutation.
+    public struct GSSKMutation {
+        public let t: Double
+        public let op: String
+        public let targetID: String
+        public let payload: String
+        public let cause: String
+    }
+
+    /// Number of mutations recorded since `init` (not cleared by `reset()`).
+    public var mutationCount: Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetMutationCount(p))
+    }
+
+    /// Read the mutation record at `index`, or nil if out of range.
+    public func mutation(at index: Int) -> GSSKMutation? {
+        guard let p = instPtr else { return nil }
+        guard let r = GSSK_GetMutationRecord(p, index) else { return nil }
+        let op: String
+        switch r.pointee.op {
+        case GSSK_MUT_ADD_NODE:         op = "add_node"
+        case GSSK_MUT_ADD_EDGE:         op = "add_edge"
+        case GSSK_MUT_DEACTIVATE_EDGE:  op = "deactivate_edge"
+        case GSSK_MUT_DEACTIVATE_NODE:  op = "deactivate_node"
+        default:                        op = "set_edge_k"
+        }
+        return GSSKMutation(
+            t:        r.pointee.t,
+            op:       op,
+            targetID: withUnsafeBytes(of: r.pointee.target_id) {
+                          String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
+                      },
+            payload:  withUnsafeBytes(of: r.pointee.payload) {
+                          String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
+                      },
+            cause:    withUnsafeBytes(of: r.pointee.cause) {
+                          String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self))
+                      }
+        )
+    }
+
+    /// All mutations in the log.
+    public var mutations: [GSSKMutation] {
+        (0 ..< mutationCount).compactMap { mutation(at: $0) }
+    }
+
+    /// Set the cause string for the next appended mutation.
+    /// Automatically cleared after one mutation is appended.
+    public func setMutationCause(_ cause: String) {
+        guard let p = instPtr else { return }
+        cause.withCString { GSSK_SetMutationCause(p, $0) }
+    }
+
+    /// Remove all entries from the mutation log (capacity is retained).
+    public func clearMutationLog() {
+        guard let p = instPtr else { return }
+        GSSK_ClearMutationLog(p)
+    }
+
+    /// Serialize the mutation log as a JSON array string.
+    /// - Throws: `GSSKError.mallocFailed` on OOM.
+    public func exportMutationLog() throws -> String {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        var ptr: UnsafeMutablePointer<CChar>? = nil
+        let status = GSSK_ExportMutationLog(p, &ptr)
+        guard status == GSSK_SUCCESS, let cStr = ptr else {
+            throw Self.map(status: status, message: "ExportMutationLog failed")
+        }
+        let result = String(cString: cStr)
+        GSSK_FreeString(ptr)
+        return result
+    }
+
+    /// Replay a simulation from `initialJSON`, applying mutations at their recorded times.
+    ///
+    /// - Parameters:
+    ///   - initialJSON: Topology-only model JSON (no snapshot block).
+    ///   - mutationsJSON: JSON array string from `exportMutationLog()`, or nil.
+    ///   - targetT: Stop time. Use the model's `t_end` for a full replay.
+    /// - Returns: New `GSSKSimulator` at state `targetT`.
+    /// - Throws: `GSSKError` on parse or divergence failure.
+    public static func replay(
+        from initialJSON: String,
+        mutations mutationsJSON: String? = nil,
+        until targetT: Double
+    ) throws -> GSSKSimulator {
+        var rawPtr: OpaquePointer? = nil
+        let muts = mutationsJSON ?? ""
+        let status: GSSK_Status = initialJSON.withCString { ij in
+            muts.withCString { mj in
+                GSSK_Replay(ij, mj, targetT, &rawPtr)
+            }
+        }
+        guard let ptr = rawPtr else { throw GSSKError.mallocFailed }
+        guard status == GSSK_SUCCESS || status == GSSK_WARN_SOLVER_DIVERGENCE else {
+            let msg = String(cString: GSSK_GetErrorDescription(ptr)!)
+            GSSK_Free(ptr)
+            throw Self.map(status: status, message: msg)
+        }
+        return GSSKSimulator(raw: ptr)
+    }
+
+    /// Internal initialiser that wraps an already-owned `GSSK_Instance*`.
+    private init(raw ptr: OpaquePointer) {
+        self.instPtr = ptr
+        self.nodeManifest = [:]
+        let n = Int(GSSK_GetStateSize(ptr))
+        for i in 0 ..< n {
+            if let cStr = GSSK_GetNodeID(ptr, i) {
+                nodeManifest[i] = String(cString: cStr)
+            }
+        }
+    }
+
+    // MARK: - Phase 5 — Multi-Carrier Schema
+
+    /// A carrier definition from the top-level `carriers` array.
+    public struct GSSKCarrier {
+        /// Unique identifier, e.g. "money", "energy", "material".
+        public let id: String
+        /// Physical unit string, e.g. "AUD", "kWh", "kg".
+        public let unit: String
+        /// If true, total storage-Q for this carrier is tracked per step.
+        public let conserved: Bool
+    }
+
+    /// Number of carriers declared in the model's top-level `carriers` array.
+    public var carrierCount: Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetCarrierCount(p))
+    }
+
+    /// Return the carrier definition at `index`, or nil if out of range.
+    public func carrier(at index: Int) -> GSSKCarrier? {
+        guard let p = instPtr,
+              let r = GSSK_GetCarrier(p, index) else { return nil }
+        return GSSKCarrier(
+            id:        withUnsafeBytes(of: r.pointee.id)   { String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self)) },
+            unit:      withUnsafeBytes(of: r.pointee.unit) { String(cString: $0.baseAddress!.assumingMemoryBound(to: CChar.self)) },
+            conserved: r.pointee.conserved
+        )
+    }
+
+    /// All carriers declared in the model.
+    public var carriers: [GSSKCarrier] {
+        (0 ..< carrierCount).compactMap { carrier(at: $0) }
+    }
+
+    /// Carrier string declared on the node at `nodeIndex`.
+    /// Returns an empty string if no carrier is set on that node.
+    public func nodeCarrier(at nodeIndex: Int) -> String {
+        guard let p = instPtr,
+              let cStr = GSSK_GetNodeCarrier(p, nodeIndex) else { return "" }
+        return String(cString: cStr)
+    }
+
+    /// Carrier string declared on the edge at `edgeIndex` (Odum Position 1).
+    /// Returns an empty string if no carrier is set on that edge.
+    public func edgeCarrier(at edgeIndex: Int) -> String {
+        guard let p = instPtr,
+              let cStr = GSSK_GetEdgeCarrier(p, edgeIndex) else { return "" }
+        return String(cString: cStr)
+    }
+
+    /// Per-carrier conservation error from the last step (relative change in
+    /// total storage-Q for all nodes matching `carriers[carrierIndex].id`).
+    /// Returns 0.0 if the carrier is not conserved or no step has been taken.
+    public func carrierConservationError(for carrierIndex: Int) -> Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetCarrierConservationError(p, carrierIndex)
     }
 
     // MARK: - Private helpers

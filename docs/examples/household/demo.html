@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Household Model — GSSK Interactive Demo</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <style>
+    :root {
+      --bg:     #1b1b1f;
+      --panel:  #202127;
+      --border: rgba(255,255,255,0.1);
+      --brand:  #a8b1ff;
+      --text:   rgba(255,255,255,0.87);
+      --muted:  rgba(255,255,255,0.45);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; padding: 1.5rem; }
+    h1 { font-size: 1.6rem; font-weight: 700; color: var(--brand); margin-bottom: 0.25rem; }
+    h2 { font-size: 1rem; font-weight: 600; color: var(--brand); margin-bottom: 0.75rem; }
+    p.sub { color: var(--muted); font-size: 0.85rem; margin-bottom: 1rem; }
+    .layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; max-width: 1280px; margin: 0 auto; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.2rem; }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .chart-box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; }
+    label { display: block; margin-bottom: 0.9rem; }
+    label span.name { font-size: 0.8rem; color: var(--text); display: block; margin-bottom: 2px; }
+    label span.val  { font-size: 0.72rem; color: var(--brand); float: right; }
+    label span.desc { font-size: 0.68rem; color: var(--muted); display: block; margin-bottom: 3px; }
+    input[type=range] { width: 100%; accent-color: var(--brand); cursor: pointer; }
+    button { width: 100%; padding: 0.55rem; background: var(--brand); color: #1b1b1f;
+             font-weight: 700; border: none; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin-top: 0.5rem; }
+    button:hover { opacity: 0.88; }
+    .ss-box { margin-top: 1rem; padding: 0.8rem; background: rgba(168,177,255,0.07); border-radius: 8px; font-size: 0.78rem; line-height: 1.6; }
+    .ss-box span { color: var(--brand); }
+    canvas { max-height: 280px; }
+    .carrier-tabs { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .carrier-tab  { padding: 0.3rem 0.7rem; border-radius: 20px; border: 1px solid var(--border);
+                    cursor: pointer; font-size: 0.78rem; background: transparent; color: var(--muted); }
+    .carrier-tab.active { background: var(--brand); color: #1b1b1f; border-color: var(--brand); font-weight: 600; }
+    @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .charts { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+<div style="max-width:1280px;margin:0 auto 1.2rem;">
+  <h1>Household Ecological-Economy</h1>
+  <p class="sub">
+    Interactive demo — adjust parameters and click <strong>Run</strong> to re-simulate.
+    The RK4 solver runs entirely in the browser (no server, no WASM build required).
+  </p>
+</div>
+
+<div class="layout">
+
+  <!-- Controls -->
+  <div class="panel">
+    <h2>Parameters</h2>
+
+    <label>
+      <span class="name">Salary <span class="val" id="v_salary">5000</span> AUD/mo</span>
+      <span class="desc">Monthly income (constant flow)</span>
+      <input type="range" id="s_salary" min="1000" max="12000" step="100" value="5000">
+    </label>
+
+    <label>
+      <span class="name">Mortgage + Tax <span class="val" id="v_fixed">2400</span> AUD/mo</span>
+      <span class="desc">Fixed outgoings (mortgage 1800 + tax 600)</span>
+      <input type="range" id="s_fixed" min="0" max="5000" step="100" value="2400">
+    </label>
+
+    <label>
+      <span class="name">Spending rate k <span class="val" id="v_spend">0.10</span> /mo</span>
+      <span class="desc">Linear spend fraction of account balance</span>
+      <input type="range" id="s_spend" min="0.01" max="0.5" step="0.01" value="0.1">
+    </label>
+
+    <label>
+      <span class="name">Solar charge k <span class="val" id="v_solar">80</span> kWh/mo</span>
+      <span class="desc">Rooftop array output (scales with sunlight source)</span>
+      <input type="range" id="s_solar" min="0" max="300" step="5" value="80">
+    </label>
+
+    <label>
+      <span class="name">Grocery k <span class="val" id="v_grocery">0.001</span></span>
+      <span class="desc">k_grocery: money × market → pantry (cross-carrier)</span>
+      <input type="range" id="s_grocery" min="0.0001" max="0.005" step="0.0001" value="0.001">
+    </label>
+
+    <label>
+      <span class="name">Eating limit k <span class="val" id="v_eat">2.0</span> kg/mo</span>
+      <span class="desc">Max food consumption rate (Michaelis-Menten)</span>
+      <input type="range" id="s_eat" min="0.1" max="8" step="0.1" value="2.0">
+    </label>
+
+    <label>
+      <span class="name">Attention k <span class="val" id="v_att">10</span> /mo</span>
+      <span class="desc">News-driven attention replenishment (constant)</span>
+      <input type="range" id="s_att" min="1" max="50" step="1" value="10">
+    </label>
+
+    <button onclick="runSim()">▶ Run Simulation</button>
+
+    <div class="ss-box" id="ssbox">
+      <strong>Steady state</strong><br>
+      bank_account Q* = <span id="ss_bank">—</span> AUD<br>
+      τ (time constant) = <span id="ss_tau">—</span> months<br>
+      pantry Q* ≈ <span id="ss_pantry">—</span> kg
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div>
+    <div class="carrier-tabs">
+      <button class="carrier-tab active" onclick="showCarrier('money',this)">Money</button>
+      <button class="carrier-tab" onclick="showCarrier('energy',this)">Energy</button>
+      <button class="carrier-tab" onclick="showCarrier('material',this)">Material</button>
+      <button class="carrier-tab" onclick="showCarrier('information',this)">Information</button>
+    </div>
+
+    <div class="charts" id="charts">
+      <!-- canvas elements injected by JS -->
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ─── Slider live-update ───────────────────────────────────────────────────────
+const sliders = ['salary','fixed','spend','solar','grocery','eat','att'];
+sliders.forEach(id => {
+  const el = document.getElementById('s_' + id);
+  const vl = document.getElementById('v_' + id);
+  function fmt(v) { return parseFloat(v) < 0.01 ? parseFloat(v).toFixed(4) : parseFloat(v).toFixed(2).replace(/\.?0+$/, ''); }
+  vl.textContent = fmt(el.value);
+  el.addEventListener('input', () => { vl.textContent = fmt(el.value); });
+});
+
+// ─── RK4 ODE solver ──────────────────────────────────────────────────────────
+function rk4(deriv, state, dt) {
+  const k1 = deriv(state);
+  const s2 = state.map((v,i) => v + 0.5*dt*k1[i]);
+  const k2 = deriv(s2);
+  const s3 = state.map((v,i) => v + 0.5*dt*k2[i]);
+  const k3 = deriv(s3);
+  const s4 = state.map((v,i) => v + dt*k3[i]);
+  const k4 = deriv(s4);
+  return state.map((v,i) => v + dt*(k1[i]+2*k2[i]+2*k3[i]+k4[i])/6);
+}
+
+// ─── Household ODE ───────────────────────────────────────────────────────────
+// Node indices:
+const I = {
+  salary:0, bank:1, super:2, credit:3, tax:4,
+  sun:5, battery:6, grid:7, fuel:8, body:9, heat:10,
+  mktMat:11, water:12, pantry:13, fridge:14, wardrobe:15, appliances:16, bin:17, landfill:18,
+  news:19, attention:20, pending:21, forgotten:22
+};
+
+function makeDerivs(p) {
+  // p = parameter object
+  return function(s) {
+    const dQ = new Array(23).fill(0);
+
+    // ── Money ──
+    const F_salary    = p.salary;                              // constant
+    const F_mortgage  = p.fixed;                               // constant (combined)
+    const F_spend     = p.spend  * s[I.bank];                  // linear
+    const F_credit    = s[I.credit] > 500 ? 300 : 0;          // threshold
+
+    dQ[I.bank]   += F_salary  - F_mortgage - F_spend + F_credit;
+    dQ[I.super]  += 550;                                       // super fixed
+    dQ[I.credit] += 0;                                         // no spending-to-credit in this model
+    dQ[I.credit] -= F_credit;
+    dQ[I.tax]    += F_mortgage + F_spend;
+
+    // ── Energy ──
+    const F_charge    = p.solar * s[I.sun];                    // linear
+    const F_export    = 0.05 * s[I.battery];
+    const F_discharge = 0.01 * s[I.battery];
+    const F_metabolism= 0.02 * s[I.body];
+    const F_vehicle   = 0.03 * s[I.fuel];
+
+    dQ[I.battery] += F_charge - F_export - F_discharge;
+    dQ[I.grid]    += F_export;
+    dQ[I.fuel]    -= F_vehicle;
+    dQ[I.body]    -= F_metabolism;
+    dQ[I.heat]    += F_discharge + F_metabolism + F_vehicle;
+
+    // ── Material ──
+    const C_eat  = 3.0;
+    const F_gro  = p.grocery * s[I.mktMat] * s[I.bank];       // interaction cross-carrier
+    const F_water= 1.5;                                         // constant
+    const F_ptof = 0.2  * s[I.pantry];                         // linear
+    const F_eat  = p.eat * s[I.fridge] / (1 + s[I.fridge]/C_eat); // limit
+    const F_pspoil = 0.03 * s[I.pantry];
+    const F_fspoil = 0.02 * s[I.fridge];
+    const F_waste  = 0.5  * s[I.bin];
+    const F_appwear= 0.005 * s[I.appliances];
+    const F_wardwear= 0.01 * s[I.wardrobe];
+
+    dQ[I.pantry]     += F_gro + F_water - F_ptof - F_pspoil;
+    dQ[I.fridge]     += F_ptof - F_eat - F_fspoil;
+    dQ[I.body]       += F_eat;                                  // food → metabolic energy
+    dQ[I.bin]        += F_pspoil + F_fspoil + F_appwear + F_wardwear - F_waste;
+    dQ[I.landfill]   += F_waste;
+    dQ[I.appliances] -= F_appwear;
+    dQ[I.wardrobe]   -= F_wardwear;
+
+    // ── Information ──
+    const F_attrep  = p.att;                                   // constant
+    const F_att2dec = 0.02 * s[I.attention] * s[I.news];      // interaction
+    const F_resolve = 0.3  * s[I.pending];                    // linear
+    const F_decay   = 0.05 * s[I.attention];                  // linear
+
+    dQ[I.attention] += F_attrep - F_att2dec - F_decay;
+    dQ[I.pending]   += F_att2dec - F_resolve;
+    dQ[I.forgotten] += F_resolve + F_decay;
+
+    // Sources and sinks have fixed Q — zero their derivatives
+    dQ[I.salary] = 0; dQ[I.sun] = 0; dQ[I.mktMat] = 0;
+    dQ[I.water] = 0; dQ[I.news] = 0;
+    dQ[I.tax] = 0; dQ[I.heat] = 0; dQ[I.landfill] = 0; dQ[I.forgotten] = 0;
+
+    return dQ;
+  };
+}
+
+const INITIAL = [
+  1,       // salary (source, fixed)
+  5000,    // bank_account
+  50000,   // super_fund
+  0,       // credit_card_debt
+  0,       // tax (sink, fixed)
+  1,       // sunlight (source, fixed)
+  5,       // solar_battery
+  0,       // grid_credit
+  40,      // vehicle_fuel
+  350,     // body_energy
+  0,       // heat_loss (sink, fixed)
+  1,       // grocery_market (source, fixed)
+  1,       // mains_water (source, fixed)
+  10,      // pantry
+  5,       // fridge
+  50,      // wardrobe
+  200,     // appliances_stock
+  0,       // waste_bin
+  0,       // waste_landfill (sink, fixed)
+  1,       // news_inflow (source, fixed)
+  100,     // household_attention
+  5,       // pending_decisions
+  0        // forgotten_decisions (sink, fixed)
+];
+
+// ─── Chart management ────────────────────────────────────────────────────────
+const CARRIER_NODES = {
+  money:       { nodes: ['bank_account','super_fund','credit_card_debt'], unit:'AUD',   title:'Money Storages (AUD)' },
+  energy:      { nodes: ['solar_battery','grid_credit','vehicle_fuel','body_energy'],   unit:'kWh',   title:'Energy Storages (kWh)' },
+  material:    { nodes: ['pantry','fridge','wardrobe','appliances_stock','waste_bin'],   unit:'kg',    title:'Material Storages (kg)' },
+  information: { nodes: ['household_attention','pending_decisions'],                     unit:'dec/mo',title:'Information Storages' },
+};
+
+const NODE_IDX = {
+  bank_account:1, super_fund:2, credit_card_debt:3,
+  solar_battery:6, grid_credit:7, vehicle_fuel:8, body_energy:9,
+  pantry:13, fridge:14, wardrobe:15, appliances_stock:16, waste_bin:17,
+  household_attention:20, pending_decisions:21,
+};
+
+const COLORS = ['#a8b1ff','#ffba69','#74c7ec','#a6e3a1','#f38ba8','#cba6f7','#89dceb'];
+
+let charts = {};
+let simData = null;
+let activeCarrier = 'money';
+
+function initCharts() {
+  const box = document.getElementById('charts');
+  box.innerHTML = '';
+  Object.keys(charts).forEach(k => { try { charts[k].destroy(); } catch(e){} });
+  charts = {};
+
+  Object.entries(CARRIER_NODES).forEach(([key, cfg]) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'chart-box';
+    wrap.id = 'cbox_' + key;
+    wrap.style.display = key === activeCarrier ? '' : 'none';
+
+    const canvas = document.createElement('canvas');
+    canvas.id = 'c_' + key;
+    wrap.appendChild(canvas);
+    box.appendChild(wrap);
+
+    charts[key] = new Chart(canvas.getContext('2d'), {
+      type: 'line',
+      data: { labels: [], datasets: cfg.nodes.map((n,i) => ({
+        label: n.replace(/_/g,' '),
+        data: [],
+        borderColor: COLORS[i % COLORS.length],
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: 0.3,
+      })) },
+      options: {
+        animation: false,
+        plugins: { legend: { labels: { color: '#ccc', font: { size: 10 } } } },
+        scales: {
+          x: { ticks: { color: '#888', maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.06)' }, title: { display: true, text: 'Months', color: '#888' } },
+          y: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.06)' }, title: { display: true, text: cfg.unit, color: '#888' } },
+        },
+      }
+    });
+  });
+}
+
+function showCarrier(key, btn) {
+  activeCarrier = key;
+  document.querySelectorAll('.carrier-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  Object.keys(CARRIER_NODES).forEach(k => {
+    document.getElementById('cbox_' + k).style.display = k === key ? '' : 'none';
+  });
+}
+
+function updateCharts(times, stateHistory) {
+  const labels = times.map(t => t.toFixed(1));
+  Object.entries(CARRIER_NODES).forEach(([key, cfg]) => {
+    const ch = charts[key];
+    ch.data.labels = labels;
+    cfg.nodes.forEach((n, di) => {
+      ch.data.datasets[di].data = stateHistory.map(s => s[NODE_IDX[n]]);
+    });
+    ch.update('none');
+  });
+}
+
+// ─── Run simulation ───────────────────────────────────────────────────────────
+function runSim() {
+  const p = {
+    salary:  +document.getElementById('s_salary').value,
+    fixed:   +document.getElementById('s_fixed').value,
+    spend:   +document.getElementById('s_spend').value,
+    solar:   +document.getElementById('s_solar').value,
+    grocery: +document.getElementById('s_grocery').value,
+    eat:     +document.getElementById('s_eat').value,
+    att:     +document.getElementById('s_att').value,
+  };
+
+  const dt = 0.1, t_end = 24;
+  const derivs = makeDerivs(p);
+  let state = [...INITIAL];
+  const times = [0];
+  const history = [state.slice()];
+
+  for (let t = dt; t <= t_end + 1e-9; t += dt) {
+    state = rk4(derivs, state, dt);
+    // clamp negatives (sources/sinks stay fixed)
+    for (let i = 0; i < state.length; i++) if (state[i] < 0) state[i] = 0;
+    // keep sources/sinks pinned
+    state[I.salary]=1; state[I.sun]=1; state[I.mktMat]=1;
+    state[I.water]=1;  state[I.news]=1;
+    times.push(parseFloat(t.toFixed(10)));
+    history.push(state.slice());
+  }
+
+  simData = { times, history };
+  updateCharts(times, history);
+
+  // Update steady-state display
+  const Qstar_bank   = (p.salary - p.fixed - 550) / p.spend;
+  const tau          = 1.0 / p.spend;
+  const k_spoil = 0.03, k_ptof = 0.2;
+  const Qstar_pantry = (p.grocery * Math.max(Qstar_bank, 0)) / (k_spoil + k_ptof);
+
+  document.getElementById('ss_bank').textContent    = Qstar_bank > 0 ? Qstar_bank.toLocaleString('en-AU', {maximumFractionDigits:0}) : '(negative — overspending)';
+  document.getElementById('ss_tau').textContent     = tau.toFixed(1);
+  document.getElementById('ss_pantry').textContent  = Qstar_pantry.toFixed(1);
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+initCharts();
+runSim();
+</script>
+</body>
+</html>

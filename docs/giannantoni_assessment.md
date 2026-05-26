@@ -298,23 +298,98 @@ future version if there is demand.
 
 Prioritised in order of value/complexity ratio:
 
-### Phase 1 — Emergy accounting layer (no schema change, additive API)
-- Add `double *emergy` and `double *transformity` to `GSSK_Instance`
-- After each `GSSK_Step()`, run a second pass using non-conservative Emergy
-  Algebra: `Em_target += max(Tr_inputs) × F` for co-products,
-  `Em_target += Tr_origin × F` for other flows
-- Expose `GSSK_GetTransformity()` and `GSSK_GetEmpower()` (emergy flow rate)
-- Opt-in via `"metadata": { "compute_emergy": true }` in the model JSON
-- **Complexity**: low. Two additional `double*` arrays and a second loop over edges.
+### Phase 1 — IDC as Baseline (No Silent Fallback) ✅ IMPLEMENTED (v3.0.0)
 
-### Phase 2 — Incipient solver for linear-constant-k networks
-- Detect at `GSSK_Init` time whether all edges have constant-k linear/interaction
-  logic (the common case)
-- If yes, build the system matrix `A` where `A[i][j] = k_ij` for flows
-- Expose `"method": "incipient"` which computes `Q(t) = expm(A × t) × Q(0)`
-  using a Padé approximant matrix exponential (standard C99 implementation)
-- Falls back to RK4 for models with limit/threshold edges
-- **Complexity**: medium. Matrix exponential in C99 is ~100 lines.
+The kernel now runs IDC on every AUTO/INCIPIENT step, regardless of edge types.
+Previously, limit/threshold edges silently fell back to RK4 only; now:
+
+1. **Padé (3,3) matrix exponential** replaces Taylor-6 truncation:
+   `N(X)/D(X)` where `X = A·dt`, `N = 120I+60X+12X²+X³`, `D = 120I-60X+12X²-X³`.
+   A-stable, O(h⁷) global error, far better than Taylor for large ‖A·dt‖.
+
+2. **Limit edges** included in IDC flow matrix via effective conductance:
+   `g = k·C/(C+Q)` — the linearisation of Michaelis-Menten at the current
+   operating point. Allows IDC to handle saturation flows without silent fallback.
+
+3. **Riccati exact duet** for isolated 2-node interaction systems:
+   When the only active edge is an interaction edge forming a conserved pair
+   (S = Q_A + Q_B constant), the exact solution is applied:
+   `Q_A(t+dt) = S·Q_A₀ / (Q_A₀ + Q_B₀·exp(k·S·dt))`
+
+4. **Threshold event detection** via Illinois algorithm (up to 64 iterations):
+   When Q_origin crosses threshold between RK4 start and end, the exact
+   crossing time is located and recorded in an event log.
+
+5. **Per-edge and step-level error estimates** computed each step:
+   `edge_error[i] = |flow_idc - flow_rk4| / max(|flow_rk4|, 1e-12)`
+   `step_error = max(edge_error[i])`
+
+6. **GSSK_ReclassifyNetwork** always sets `incipient_eligible = true` —
+   the concept of "IDC-ineligible" edges no longer exists.
+
+New API: `GSSK_GetEdgeErrorEstimate`, `GSSK_GetStepErrorEstimate`,
+`GSSK_GetEventCount`, `GSSK_GetEventTime`, `GSSK_GetEventEdgeID`,
+`GSSK_GetEventDirection`.
+
+### Phase 1.1 continued — N-et generalisation (chained/cyclic interaction edges)
+
+The **isolated duet** (Phase 1.1, implemented) handles exactly one interaction
+edge between two storage nodes. The exact solution relies on conservation:
+`S = Q_A + Q_B = const`.
+
+For chained or cyclic interaction networks the situation is harder.
+
+#### Chains (A → B → C via interaction edges)
+
+For a linear chain where A loses to B (F₁ = k₁·Q_A·Q_B) and B loses to C
+(F₂ = k₂·Q_B·Q_C):
+
+- `dQ_A/dt = −k₁·Q_A·Q_B`
+- `dQ_B/dt = +k₁·Q_A·Q_B − k₂·Q_B·Q_C`
+- `dQ_C/dt = +k₂·Q_B·Q_C`
+
+The total `S = Q_A + Q_B + Q_C` is conserved. The ODE for Q_A alone satisfies
+a **Riccati equation** but with a time-varying coefficient (k₁·Q_B(t)), which
+is not analytically tractable in closed form because Q_B depends on Q_C.
+
+Giannantoni's 2006 §3 calls this the **n-et** (n-tuple): the explicit incipient
+solution exists formally as a product of n exponentials, but requires solving a
+coupled algebraic system at each time step. For n = 2 (the duet) this reduces to
+the single Riccati formula. For n ≥ 3 the n-et solution requires resolving an
+n×n interaction polynomial system — computationally comparable to the matrix
+exponential already used in Phase 1.
+
+#### Cycles (A → B, B → A via interaction edges)
+
+For a true 2-edge cycle:
+- F_AB = k₁·Q_A·Q_B  (A → B)
+- F_BA = k₂·Q_A·Q_B  (B → A, same control structure)
+
+The net flow from A to B is `(k₁ − k₂)·Q_A·Q_B`. If k₁ ≠ k₂, this reduces
+to a **single effective interaction edge** with k = k₁ − k₂ — the isolated
+duet solution applies directly. If k₁ = k₂, the net flow is zero (detailed
+balance).
+
+A true cycle with asymmetric control (F_AB = k₁·Q_A·Q_B, F_BA = k₂·Q_B·Q_C)
+introduces a third node and the chain case applies.
+
+#### What GSSK does today
+
+- **Isolated duet (1 active interaction edge)**: exact Riccati formula ✅
+- **Chain / general n-et**: Padé (3,3) linearisation via effective conductance
+  `g_ij = k_ij · Q_control` — same as the interaction-edge entry in `build_flow_matrix`.
+  This is a linearisation about the current operating point, accurate for small dt.
+- **True 2-edge cycles**: if reducible to a net single edge, the duet detector
+  fires; otherwise falls through to Padé linearisation.
+
+The deferred item is an automatic **n-et algebraic solver** for chains of length
+≥ 3, which would give exact solutions without linearisation. This is a research
+implementation task; for now Padé with per-step error monitoring is the fallback.
+
+### Phase 2 — Emergy accounting layer (emergy/transformity, additive API)
+- The `quality_input` / transformity system (Brown 2025) is already implemented
+- Full Giannantoni emergy algebra (max co-product rule vs. sum) is deferred
+- **Complexity**: medium. One additional `double*` array, second pass over edges.
 
 ### Phase 3 — Fractional/ordinal generativity (future)
 - Implement the incipient derivative of fractional order for "binary-duet" solutions

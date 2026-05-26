@@ -1,0 +1,177 @@
+{
+  "metadata": {
+    "schema_version": 3,
+    "name": "Bench 10",
+    "description": "Linear chain benchmark with 10 storage nodes.",
+    "kernel_version": "3.0.0"
+  },
+  "nodes": [
+    {
+      "id": "src",
+      "type": "source",
+      "value": 100.0
+    },
+    {
+      "id": "s0",
+      "type": "storage",
+      "value": 100.0
+    },
+    {
+      "id": "s1",
+      "type": "storage",
+      "value": 90.0
+    },
+    {
+      "id": "s2",
+      "type": "storage",
+      "value": 80.0
+    },
+    {
+      "id": "s3",
+      "type": "storage",
+      "value": 70.0
+    },
+    {
+      "id": "s4",
+      "type": "storage",
+      "value": 60.0
+    },
+    {
+      "id": "s5",
+      "type": "storage",
+      "value": 50.0
+    },
+    {
+      "id": "s6",
+      "type": "storage",
+      "value": 40.0
+    },
+    {
+      "id": "s7",
+      "type": "storage",
+      "value": 30.0
+    },
+    {
+      "id": "s8",
+      "type": "storage",
+      "value": 20.0
+    },
+    {
+      "id": "s9",
+      "type": "storage",
+      "value": 10.0
+    },
+    {
+      "id": "sink",
+      "type": "sink",
+      "value": 0.0
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_src",
+      "origin": "src",
+      "target": "s0",
+      "logic": "constant",
+      "params": {
+        "k": 1.0
+      }
+    },
+    {
+      "id": "e0",
+      "origin": "s0",
+      "target": "s1",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e1",
+      "origin": "s1",
+      "target": "s2",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e2",
+      "origin": "s2",
+      "target": "s3",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e3",
+      "origin": "s3",
+      "target": "s4",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e4",
+      "origin": "s4",
+      "target": "s5",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e5",
+      "origin": "s5",
+      "target": "s6",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e6",
+      "origin": "s6",
+      "target": "s7",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e7",
+      "origin": "s7",
+      "target": "s8",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e8",
+      "origin": "s8",
+      "target": "s9",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    },
+    {
+      "id": "e9",
+      "origin": "s9",
+      "target": "sink",
+      "logic": "linear",
+      "params": {
+        "k": 0.05
+      }
+    }
+  ],
+  "config": {
+    "t_start": 0.0,
+    "t_end": 100.0,
+    "dt": 0.1,
+    "method": "rk4"
+  }
+}
