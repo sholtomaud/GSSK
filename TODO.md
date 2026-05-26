@@ -341,6 +341,178 @@ general-purpose ODE library. The wedge is:
 
 ---
 
+## Phase 7 — ESL Node Type Taxonomy (Schema v4)
+
+> **Motivation:** GSSK currently encodes Odum's Interaction, Constant Gain,
+> Loop-Limited, Exchange, and Switch as `edge.logic` parameters. Per Odum's
+> diagramming language these are *nodes* — processing units with internal state
+> — not properties of flows. The only true edges in ESL are the flows themselves
+> (energy, matter, money, information, code). This phase corrects the topology.
+
+### 7.1 Correct Node/Edge Taxonomy Decision
+
+- [ ] **Open Design Question — Schema version strategy:**
+  `type: "interaction"` as a first-class node requires multi-input routing
+  (two or more incoming edges) and a new compute path. Choose between:
+  - (A) Hard schema v4 break: `edge.logic` is removed; all processing units
+        are nodes; flows are edges only. Existing v3 models get a migration
+        tool.
+  - (B) Compatibility shim: keep `logic` on edges as a v3 alias; v4 models
+        use proper node types; kernel accepts both.
+  **Record decision here before coding begins.**
+
+- [ ] **Open Design Question — Exchange node price state:**
+  The Exchange diamond couples two carrier flows via a price. Is `price`:
+  - (A) A fixed parameter in the node definition (static price, simple).
+  - (B) A stateful Q that can drift (market price determined by supply/demand
+        ratio — needed for proper market models).
+  For the household model (A) is sufficient; (B) is needed for Phase 8+.
+  **Record decision here.**
+
+- [ ] **Open Design Question — Composite macro-expansion timing:**
+  Built-in and user-defined composites must expand into primitives. Choose:
+  - (A) Parse-time expansion in `GSSK_Init` — simplest, but mutation log
+        references expanded primitives, not the composite name.
+  - (B) Runtime lazy expansion — composites remain named objects; expansion
+        is deferred until first `GSSK_Step`. Mutation log can reference the
+        composite ID.
+  **Record decision here.**
+
+### 7.2 New Fundamental Node Types
+
+- [ ] `type: "interaction"` — multi-input production/work gate.
+      Two or more incoming flow edges; output ∝ product of input forces.
+      Internal state: `k` (gain coefficient). Maps to Odum Fig 2.6.
+      IDC treatment: existing Riccati duet path applies when n=2; Padé for n≥3.
+- [ ] `type: "gain"` — constant gain amplifier.
+      One control input (small energy), one energy-source input (large), one
+      output proportional to control. Maps to Odum Fig 2.7.
+      `output = k × Q_control` where energy source is assumed unlimited.
+- [ ] `type: "loop_limited"` — Michaelis-Menten / loop-limited converter.
+      Single input force; output saturates due to internal recycling cycle.
+      `F = k × Q_in / (1 + Q_in / C)`. Maps to Odum Fig 2.8.
+      (Currently: `logic: "limit"` on an edge — move to node.)
+- [ ] `type: "exchange"` — transaction / exchange diamond.
+      Couples two carrier flows (e.g. money ↔ goods) via a price parameter.
+      Atomic per step: debit `price × F` from money carrier, credit `F` to
+      goods carrier. Maps to Odum Fig 2.4.
+      Required for household model grocery transaction.
+- [ ] `type: "switch"` — digital switching box, on/off process.
+      One or more controlling inputs; threshold condition toggles flow.
+      Maps to Odum Fig 2.12. (Currently: `logic: "threshold"` on an edge.)
+
+### 7.3 Schema v4 & Migration
+
+- [ ] Bump `schema_version` to 4 in `include/gssk.h` and JSON Schema.
+- [ ] Migration tool: `gssk migrate --from 3 input.json` auto-converts
+      `logic: "interaction"` edges to `type: "interaction"` node + two
+      incoming edges; same for `gain`, `loop_limited`, `threshold`.
+- [ ] Update all `examples/*.json` models to schema v4.
+- [ ] Update regression suite expected CSVs (`make test-update`).
+- [ ] Update household model: replace interaction-edge grocery transaction
+      with proper `type: "exchange"` node coupling money ↔ material.
+
+### 7.4 Solver & Sensitivity Updates
+
+- [ ] Multi-input routing: `compute_derivatives` must handle nodes with more
+      than two incoming edges for `interaction` and `gain` types.
+- [ ] Hand-code `∂f/∂p` for new node types (required by Phase 3 sensitivity).
+- [ ] Add new node types to fuzz target and regression suite.
+- [ ] Update Swift, Python, JS bindings with new `NodeType` enum values.
+- [ ] 10+ new tests covering each new node type.
+
+---
+
+## Phase 8 — Composite Node Types & Archetype System
+
+> **Motivation:** Odum's Fig 1.2b composite symbols (Producer, Consumer,
+> System Frame, etc.) are combinations of Phase 7 fundamental nodes. Modellers
+> should be able to use `type: "producer"` without manually wiring the
+> internals. Custom archetypes allow domain-specific composite definitions
+> to be supplied in the model JSON. This is the derived-dimensions layer
+> of the taxonomy.
+
+### 8.1 Built-in Composite Types
+
+- [ ] `type: "producer"` — storage + autocatalytic interaction + sink output.
+      Expands to: `storage` node, `interaction` node (self-feedback),
+      `sink` node; internal edges wired automatically at `GSSK_Init`.
+- [ ] `type: "consumer"` — storage + multiple interaction inputs + sink.
+      Odum's hexagon. Expands to storage with two interaction inputs and
+      a heat-sink edge.
+- [ ] `type: "system_frame"` — namespace/encapsulation boundary.
+      Groups a named set of nodes; exposes named ports to the outer graph.
+      Does not add numerical behaviour — a structural/documentation device.
+- [ ] `type: "misc_box"` — generic unspecified processing unit.
+      Alias for `storage` with a flag marking internal detail as unresolved.
+- [ ] Document expansion rules for each composite in `docs/concepts.md`.
+
+### 8.2 User-Defined Archetypes
+
+- [ ] Top-level `"archetypes"` block in the model JSON:
+  ```json
+  "archetypes": {
+    "solar_panel": {
+      "nodes": [ ... ],
+      "edges": [ ... ],
+      "ports": { "energy_in": "sunlight_node", "energy_out": "output_node" }
+    }
+  }
+  ```
+- [ ] Any node with `"type": "solar_panel"` expands using that definition,
+      with the instance's `id` used as a namespace prefix for internal IDs.
+- [ ] Validation: archetype port names must resolve to internal node IDs;
+      circular archetype references are rejected at parse time.
+- [ ] `GSSK_GetArchetypeCount`, `GSSK_GetArchetypeName` accessors.
+- [ ] Archetypes serialised into the snapshot block.
+
+### 8.3 Archetype Cookbook & Docs
+
+- [ ] `docs/cookbook.md` — new recipes: "Defining a custom producer archetype",
+      "Wiring a Producer–Consumer economy with Exchange nodes".
+- [ ] Update household model to use `type: "producer"` and `type: "consumer"`
+      composite nodes where appropriate.
+
+---
+
+## Phase 9 — Runtime Pattern Discovery (Generativity)
+
+> **Motivation:** Giannantoni's generativity principle holds that systems
+> do not merely transform existing qualities but originate new ones through
+> recurring, self-stabilising structural patterns. This phase implements a
+> kernel-level mechanism to detect such patterns in the live graph and propose
+> them as named archetypes — a novel contribution that operationalises
+> Giannantoni's framework computationally.
+
+### 9.1 Structural Pattern Detection
+
+- [ ] After each `GSSK_Step`, scan the live graph for recurring subgraph
+      motifs (node-type sequences + connectivity) using a lightweight
+      subgraph isomorphism scan (VF2 or colour-coding for small motifs).
+- [ ] Maintain a motif frequency table; motifs that appear ≥ N times (default
+      N=3) and remain stable across ≥ M consecutive steps (default M=10)
+      are flagged as candidates.
+- [ ] `GSSK_GetMotifCount(inst)` / `GSSK_GetMotif(inst, idx)` accessors.
+
+### 9.2 Archetype Proposal API
+
+- [ ] `GSSK_ProposeArchetype(inst, motif_idx, name)` — promotes a detected
+      motif to a named archetype, added to the instance's archetype registry.
+- [ ] Proposed archetypes are included in `GSSK_ExportMutationLog` with
+      `"op": "archetype_proposal"` records.
+- [ ] Serialised in the snapshot block; replayable via `GSSK_Replay`.
+
+### 9.3 Generativity Metric
+
+- [ ] Define a scalar *generativity index* G(t): rate of new stable motifs
+      emerging per unit time, weighted by motif complexity.
+- [ ] `GSSK_GetGenerativityIndex(inst)` — inspired by Giannantoni 2023 §4.
+- [ ] Expose in CLI: `gssk run model.json --report generativity`.
+- [ ] Document the metric and its theoretical grounding in
+      `docs/giannantoni_assessment.md`.
+
+---
+
 ## Continuous Concerns
 
 - [ ] Every new logic primitive added requires: forward implementation,
