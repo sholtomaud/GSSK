@@ -92,10 +92,10 @@ typedef enum {
  * Version information
  * ========================================================================= */
 
-#define GSK_VERSION_MAJOR 3
+#define GSK_VERSION_MAJOR 4
 #define GSK_VERSION_MINOR 0
 #define GSK_VERSION_PATCH 0
-#define GSK_VERSION_STRING "3.0.0"
+#define GSK_VERSION_STRING "4.0.0"
 
 /* Numeric version for comparison: (major << 16) | (minor << 8) | patch */
 #define GSK_VERSION_CODE(major, minor, patch) \
@@ -262,6 +262,13 @@ const char *GSSK_GetNodeID(GSSK_Instance *inst, size_t index);
  * @brief Find node index by ID. Returns -1 if not found.
  */
 int GSSK_FindNodeIdx(GSSK_Instance *inst, const char *id);
+
+/**
+ * @brief Get node type as a string ("source", "storage", "sink",
+ *        "interaction", "gain", "loop_limited", "exchange", "switch").
+ * @return const char* — valid for lifetime of inst. Never NULL.
+ */
+const char *GSSK_GetNodeTypeString(GSSK_Instance *inst, size_t node_idx);
 
 /**
  * @brief Get edge ID by index. Returns NULL if edge has no id or index is OOB.

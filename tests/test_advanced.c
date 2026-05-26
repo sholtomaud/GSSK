@@ -90,8 +90,86 @@ void test_ensemble() {
     printf("  Ensemble test PASSED\n");
 }
 
+/* Phase 7 — interaction node smoke test.  Uses examples/interaction_model.json
+ * topology inline: A + B → gate (interaction) → C; src → converter (loop_limited)
+ * → D.  Both C and D should monotonically increase from 0 once a few RK4
+ * steps run. */
+static const char *PHASE7_MODEL =
+    "{\n"
+    "  \"metadata\": { \"schema_version\": 4 },\n"
+    "  \"nodes\": [\n"
+    "    { \"id\": \"A\",    \"type\": \"source\",       \"value\": 10.0 },\n"
+    "    { \"id\": \"B\",    \"type\": \"source\",       \"value\": 5.0  },\n"
+    "    { \"id\": \"gate\", \"type\": \"interaction\",  \"value\": 0.0, \"params\": { \"k\": 0.01 } },\n"
+    "    { \"id\": \"C\",    \"type\": \"storage\",      \"value\": 0.0  },\n"
+    "    { \"id\": \"src\",  \"type\": \"source\",       \"value\": 20.0 },\n"
+    "    { \"id\": \"converter\", \"type\": \"loop_limited\", \"value\": 0.0, \"params\": { \"k\": 3.0, \"C\": 5.0 } },\n"
+    "    { \"id\": \"D\",    \"type\": \"storage\",      \"value\": 0.0  },\n"
+    "    { \"id\": \"heat\", \"type\": \"sink\",         \"value\": 0.0  }\n"
+    "  ],\n"
+    "  \"edges\": [\n"
+    "    { \"origin\": \"A\",        \"target\": \"gate\"      },\n"
+    "    { \"origin\": \"B\",        \"target\": \"gate\"      },\n"
+    "    { \"origin\": \"gate\",     \"target\": \"C\"         },\n"
+    "    { \"origin\": \"C\",        \"target\": \"heat\",       \"logic\": \"linear\", \"params\": { \"k\": 0.05 } },\n"
+    "    { \"origin\": \"src\",      \"target\": \"converter\" },\n"
+    "    { \"origin\": \"converter\",\"target\": \"D\"         },\n"
+    "    { \"origin\": \"D\",        \"target\": \"heat\",       \"logic\": \"linear\", \"params\": { \"k\": 0.02 } }\n"
+    "  ],\n"
+    "  \"config\": { \"t_start\": 0, \"t_end\": 50, \"dt\": 0.1, \"method\": \"rk4\" }\n"
+    "}";
+
+void test_interaction_node() {
+    printf("Testing Phase 7 interaction node...\n");
+    GSSK_Instance *inst = NULL;
+    GSSK_Status st = GSSK_Init(PHASE7_MODEL, &inst);
+    assert(st == GSSK_SUCCESS);
+
+    int c_idx = GSSK_FindNodeIdx(inst, "C");
+    assert(c_idx >= 0);
+
+    double C0 = GSSK_GetState(inst)[c_idx];
+    for (int i = 0; i < 10; i++) {
+        st = GSSK_Step(inst, GSSK_GetDt(inst));
+        assert(st == GSSK_SUCCESS || st == GSSK_WARN_SOLVER_DIVERGENCE);
+    }
+    double C1 = GSSK_GetState(inst)[c_idx];
+    printf("  C: %.4f -> %.4f\n", C0, C1);
+    assert(C1 > C0);
+
+    GSSK_Free(inst);
+    printf("  Interaction node test PASSED\n");
+}
+
+void test_loop_limited_node() {
+    printf("Testing Phase 7 loop_limited node...\n");
+    GSSK_Instance *inst = NULL;
+    GSSK_Status st = GSSK_Init(PHASE7_MODEL, &inst);
+    assert(st == GSSK_SUCCESS);
+
+    int d_idx = GSSK_FindNodeIdx(inst, "D");
+    assert(d_idx >= 0);
+
+    double D0 = GSSK_GetState(inst)[d_idx];
+    for (int i = 0; i < 10; i++) {
+        st = GSSK_Step(inst, GSSK_GetDt(inst));
+        assert(st == GSSK_SUCCESS || st == GSSK_WARN_SOLVER_DIVERGENCE);
+    }
+    double D1 = GSSK_GetState(inst)[d_idx];
+    printf("  D: %.4f -> %.4f\n", D0, D1);
+    assert(D1 > D0);
+    /* Saturation: F_max = k*Q/(1+Q/C) = 3*20/(1+20/5) = 12; over 10 steps
+     * (dt=0.1) that's ≤ 12.  Allow generous upper bound. */
+    assert(D1 < 25.0);
+
+    GSSK_Free(inst);
+    printf("  Loop-limited node test PASSED\n");
+}
+
 int main() {
     test_calibration();
     test_ensemble();
+    test_interaction_node();
+    test_loop_limited_node();
     return 0;
 }

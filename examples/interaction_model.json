@@ -1,0 +1,23 @@
+{
+  "metadata": { "schema_version": 4, "name": "Phase 7 Node Type Demo" },
+  "nodes": [
+    { "id": "A", "type": "source", "value": 10.0 },
+    { "id": "B", "type": "source", "value": 5.0 },
+    { "id": "gate", "type": "interaction", "value": 0.0, "params": { "k": 0.01 } },
+    { "id": "C", "type": "storage", "value": 0.0 },
+    { "id": "src", "type": "source", "value": 20.0 },
+    { "id": "converter", "type": "loop_limited", "value": 0.0, "params": { "k": 3.0, "C": 5.0 } },
+    { "id": "D", "type": "storage", "value": 0.0 },
+    { "id": "heat", "type": "sink", "value": 0.0 }
+  ],
+  "edges": [
+    { "id": "a_to_gate", "origin": "A", "target": "gate" },
+    { "id": "b_to_gate", "origin": "B", "target": "gate" },
+    { "id": "gate_to_c", "origin": "gate", "target": "C" },
+    { "id": "c_decay", "origin": "C", "target": "heat", "logic": "linear", "params": { "k": 0.05 } },
+    { "id": "src_to_conv", "origin": "src", "target": "converter" },
+    { "id": "conv_to_d", "origin": "converter", "target": "D" },
+    { "id": "d_decay", "origin": "D", "target": "heat", "logic": "linear", "params": { "k": 0.02 } }
+  ],
+  "config": { "t_start": 0, "t_end": 50, "dt": 0.1, "method": "rk4" }
+}

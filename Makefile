@@ -25,7 +25,7 @@ TARGET_LIB = $(LIB_DIR)/libgssk.a
 TARGET_CLI = $(BIN_DIR)/gssk
 TARGET_COMPARE = $(BIN_DIR)/csv_compare
 
-.PHONY: all clean test test-update test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen
 
@@ -104,6 +104,16 @@ test-update: all
 		echo "Generating expected output for $$name"; \
 		./bin/gssk $$model tests/expected/$$name.csv; \
 	done
+
+# Advanced API test suite (calibration, ensemble, Phase 7 node types)
+TARGET_TEST_ADV = $(BIN_DIR)/test_advanced
+
+$(TARGET_TEST_ADV): $(TEST_DIR)/test_advanced.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-advanced: all $(TARGET_TEST_ADV)
+	@echo "Running advanced API tests..."
+	@./$(TARGET_TEST_ADV)
 
 clean: swift-clean
 	rm -rf $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results coverage/
@@ -261,7 +271,8 @@ WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_
 "_GSSK_GetMutationCount","_GSSK_GetMutationRecord","_GSSK_SetMutationCause",\
 "_GSSK_ClearMutationLog","_GSSK_ExportMutationLog","_GSSK_Replay",\
 "_GSSK_GetCarrierCount","_GSSK_GetCarrier","_GSSK_GetNodeCarrier",\
-"_GSSK_GetEdgeCarrier","_GSSK_GetCarrierConservationError"]
+"_GSSK_GetEdgeCarrier","_GSSK_GetCarrierConservationError",\
+"_GSSK_GetNodeTypeString"]
 
 wasm: dist
 	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/advanced.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \
