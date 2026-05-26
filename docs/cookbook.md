@@ -145,6 +145,87 @@ while sim.currentTime < sim.endTime - 1e-12 {
 let final = sim.state
 ```
 
+## Using built-in composite node types (Phase 8)
+
+Composite node types expand at parse time into Phase 7 primitives, so a
+modeller can reach for Odum's Fig 1.2b symbols (producer, consumer, etc.)
+without manually wiring the internals.
+
+```json
+{
+  "nodes": [
+    { "id": "plant", "type": "producer", "value": 100.0,
+      "params": { "k_production": 0.01, "k_respiration": 0.03 } },
+    { "id": "herbivore", "type": "consumer", "value": 20.0,
+      "params": { "k_metabolism": 0.08 } }
+  ],
+  "edges": [
+    { "origin": "plant", "target": "herbivore",
+      "logic": "interaction",
+      "params": { "k": 0.002, "control_node": "herbivore__body" } }
+  ]
+}
+```
+
+What `producer` expands to:
+
+* `plant__body` — the autocatalytic storage (receives external inflows;
+  external `origin: "plant"` and `target: "plant"` edges route here).
+* `plant__gate` — the interaction node implementing the self-feedback gate.
+* `plant__heat` — the heat-sink for respiration.
+
+What `consumer` expands to:
+
+* `herbivore__body` — the consumer's storage.
+* `herbivore__heat` — the metabolism sink.
+
+When you reference an expanded node (e.g. as a `control_node`), use the
+namespaced id `{composite_id}__{template_id}`.  When you reference the
+composite itself (e.g. `origin: "plant"`), the kernel routes the edge to
+the composite's default input/output (here both are `__body`).
+
+The expansion is observable via:
+
+```c
+size_t arch_count = GSSK_GetArchetypeCount(inst);     // ≥ 4 built-ins
+size_t comp_count = GSSK_GetCompositeCount(inst);     // composites in model
+const char *cid   = GSSK_GetCompositeID(inst, 0);     // original id
+```
+
+## Defining a custom archetype (Phase 8)
+
+Add a top-level `"archetypes"` object to the model JSON.  Each entry is a
+named template whose `nodes`, `edges`, and `ports` define the internal
+structure.  Any subsequent `type: "<name>"` declaration expands using
+the template, namespaced by the instance id.
+
+```json
+{
+  "archetypes": {
+    "relay": {
+      "nodes": [
+        { "id": "buf", "type": "storage", "value": 0.0 }
+      ],
+      "edges": [],
+      "ports": { "in": "buf", "out": "buf" }
+    }
+  },
+  "nodes": [
+    { "id": "src",  "type": "source", "value": 10.0 },
+    { "id": "r",    "type": "relay",  "value":  5.0 },
+    { "id": "sink", "type": "sink",   "value":  0.0 }
+  ],
+  "edges": [
+    { "origin": "src", "target": "r",    "logic": "constant", "params": { "k": 1.0 } },
+    { "origin": "r",   "target": "sink", "logic": "linear",   "params": { "k": 0.5 } }
+  ]
+}
+```
+
+The `r` composite expands to a single primitive `r__buf` (a storage node)
+with default-in and default-out both bound to `buf`.  External edges that
+target `r` are redirected to `r__buf`.
+
 ## Build and run tests
 
 ```bash

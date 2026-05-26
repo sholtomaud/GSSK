@@ -166,10 +166,179 @@ void test_loop_limited_node() {
     printf("  Loop-limited node test PASSED\n");
 }
 
+/* =========================================================================
+ * Phase 8 — Composite Node Types & Archetype System
+ * ========================================================================= */
+
+static const char *PHASE8_PRODUCER_MODEL =
+    "{\n"
+    "  \"metadata\": { \"schema_version\": 4 },\n"
+    "  \"nodes\": [\n"
+    "    { \"id\": \"sun\", \"type\": \"source\", \"value\": 1.0 },\n"
+    "    { \"id\": \"plant\", \"type\": \"producer\", \"value\": 50.0,\n"
+    "      \"params\": { \"k_production\": 0.01, \"k_respiration\": 0.02 } },\n"
+    "    { \"id\": \"heat\", \"type\": \"sink\", \"value\": 0.0 }\n"
+    "  ],\n"
+    "  \"edges\": [\n"
+    "    { \"origin\": \"sun\", \"target\": \"plant\", \"logic\": \"linear\","
+    "      \"params\": { \"k\": 5.0 } }\n"
+    "  ],\n"
+    "  \"config\": { \"t_start\": 0, \"t_end\": 10, \"dt\": 0.1, \"method\": \"rk4\" }\n"
+    "}";
+
+void test_producer_composite() {
+    printf("Testing Phase 8 producer composite...\n");
+    GSSK_Instance *inst = NULL;
+    GSSK_Status st = GSSK_Init(PHASE8_PRODUCER_MODEL, &inst);
+    assert(st == GSSK_SUCCESS);
+
+    /* 4 built-in archetypes registered */
+    size_t arch_count = GSSK_GetArchetypeCount(inst);
+    printf("  archetype count = %zu\n", arch_count);
+    assert(arch_count >= 4);
+
+    /* Exactly one composite expansion (plant) */
+    assert(GSSK_GetCompositeCount(inst) == 1);
+    const char *cid = GSSK_GetCompositeID(inst, 0);
+    assert(cid && strcmp(cid, "plant") == 0);
+
+    /* plant expanded to plant__body, plant__gate, plant__heat */
+    int body_idx = GSSK_FindNodeIdx(inst, "plant__body");
+    int gate_idx = GSSK_FindNodeIdx(inst, "plant__gate");
+    int phid_idx = GSSK_FindNodeIdx(inst, "plant__heat");
+    assert(body_idx >= 0);
+    assert(gate_idx >= 0);
+    assert(phid_idx >= 0);
+
+    /* Run 10 steps; production (k·Q²) > respiration (0.02·Q) for Q=50 ⇒ growth.
+     * k_production = 0.01: F_prod = 0.01·50·50 = 25; F_resp = 0.02·50 = 1.
+     * Net body inflow is dominated by production. */
+    double Q0 = GSSK_GetState(inst)[body_idx];
+    for (int i = 0; i < 10; i++) {
+        st = GSSK_Step(inst, GSSK_GetDt(inst));
+        assert(st == GSSK_SUCCESS || st == GSSK_WARN_SOLVER_DIVERGENCE);
+    }
+    double Q1 = GSSK_GetState(inst)[body_idx];
+    printf("  plant__body: %.4f -> %.4f\n", Q0, Q1);
+    assert(Q1 > Q0);
+
+    GSSK_Free(inst);
+    printf("  Producer composite test PASSED\n");
+}
+
+static const char *PHASE8_CONSUMER_MODEL =
+    "{\n"
+    "  \"metadata\": { \"schema_version\": 4 },\n"
+    "  \"nodes\": [\n"
+    "    { \"id\": \"plant\", \"type\": \"producer\", \"value\": 100.0,\n"
+    "      \"params\": { \"k_production\": 0.01, \"k_respiration\": 0.02 } },\n"
+    "    { \"id\": \"deer\", \"type\": \"consumer\", \"value\": 5.0,\n"
+    "      \"params\": { \"k_metabolism\": 0.1 } },\n"
+    "    { \"id\": \"heat\", \"type\": \"sink\", \"value\": 0.0 }\n"
+    "  ],\n"
+    "  \"edges\": [\n"
+    "    { \"origin\": \"plant\", \"target\": \"deer\", \"logic\": \"linear\","
+    "      \"params\": { \"k\": 0.5 } }\n"
+    "  ],\n"
+    "  \"config\": { \"t_start\": 0, \"t_end\": 20, \"dt\": 0.1, \"method\": \"rk4\" }\n"
+    "}";
+
+void test_consumer_composite() {
+    printf("Testing Phase 8 consumer composite...\n");
+    GSSK_Instance *inst = NULL;
+    GSSK_Status st = GSSK_Init(PHASE8_CONSUMER_MODEL, &inst);
+    assert(st == GSSK_SUCCESS);
+
+    /* Two composites: plant + deer */
+    assert(GSSK_GetCompositeCount(inst) == 2);
+
+    int deer_body = GSSK_FindNodeIdx(inst, "deer__body");
+    assert(deer_body >= 0);
+
+    double Q0 = GSSK_GetState(inst)[deer_body];
+    for (int i = 0; i < 20; i++) {
+        st = GSSK_Step(inst, GSSK_GetDt(inst));
+        assert(st == GSSK_SUCCESS || st == GSSK_WARN_SOLVER_DIVERGENCE);
+    }
+    double Q1 = GSSK_GetState(inst)[deer_body];
+    printf("  deer__body: %.4f -> %.4f\n", Q0, Q1);
+    /* Inflow from plant ≈ 0.5·100 ≈ 50/step; metabolism 0.1·Q.
+     * Either grows or stays positive — assert it changed. */
+    assert(fabs(Q1 - Q0) > 1e-6);
+
+    GSSK_Free(inst);
+    printf("  Consumer composite test PASSED\n");
+}
+
+static const char *PHASE8_USER_ARCHETYPE_MODEL =
+    "{\n"
+    "  \"metadata\": { \"schema_version\": 4 },\n"
+    "  \"archetypes\": {\n"
+    "    \"relay\": {\n"
+    "      \"nodes\": [ { \"id\": \"buf\", \"type\": \"storage\", \"value\": 0.0 } ],\n"
+    "      \"edges\": [],\n"
+    "      \"ports\": { \"in\": \"buf\", \"out\": \"buf\" }\n"
+    "    }\n"
+    "  },\n"
+    "  \"nodes\": [\n"
+    "    { \"id\": \"src\",  \"type\": \"source\",  \"value\": 10.0 },\n"
+    "    { \"id\": \"r\",    \"type\": \"relay\",   \"value\": 5.0  },\n"
+    "    { \"id\": \"sink\", \"type\": \"sink\",    \"value\": 0.0  }\n"
+    "  ],\n"
+    "  \"edges\": [\n"
+    "    { \"origin\": \"src\", \"target\": \"r\",    \"logic\": \"constant\", \"params\": { \"k\": 1.0 } },\n"
+    "    { \"origin\": \"r\",   \"target\": \"sink\", \"logic\": \"linear\",   \"params\": { \"k\": 0.5 } }\n"
+    "  ],\n"
+    "  \"config\": { \"t_start\": 0, \"t_end\": 10, \"dt\": 0.1 }\n"
+    "}";
+
+void test_user_archetype() {
+    printf("Testing Phase 8 user-defined archetype...\n");
+    GSSK_Instance *inst = NULL;
+    GSSK_Status st = GSSK_Init(PHASE8_USER_ARCHETYPE_MODEL, &inst);
+    assert(st == GSSK_SUCCESS);
+
+    /* 4 built-ins + 1 user = 5 archetypes */
+    size_t arch_count = GSSK_GetArchetypeCount(inst);
+    printf("  archetype count = %zu\n", arch_count);
+    assert(arch_count == 5);
+
+    /* Verify relay is present */
+    bool found_relay = false;
+    for (size_t i = 0; i < arch_count; i++) {
+        const char *n = GSSK_GetArchetypeName(inst, i);
+        if (n && strcmp(n, "relay") == 0) { found_relay = true; break; }
+    }
+    assert(found_relay);
+
+    /* One composite expansion (r) */
+    assert(GSSK_GetCompositeCount(inst) == 1);
+
+    /* Expanded storage node is r__buf */
+    int buf_idx = GSSK_FindNodeIdx(inst, "r__buf");
+    assert(buf_idx >= 0);
+
+    double Q0 = GSSK_GetState(inst)[buf_idx];
+    for (int i = 0; i < 5; i++) {
+        st = GSSK_Step(inst, GSSK_GetDt(inst));
+        assert(st == GSSK_SUCCESS || st == GSSK_WARN_SOLVER_DIVERGENCE);
+    }
+    double Q1 = GSSK_GetState(inst)[buf_idx];
+    printf("  r__buf: %.4f -> %.4f\n", Q0, Q1);
+    /* Inflow 1.0/step (constant), outflow 0.5·Q.  Should change. */
+    assert(fabs(Q1 - Q0) > 1e-6);
+
+    GSSK_Free(inst);
+    printf("  User archetype test PASSED\n");
+}
+
 int main() {
     test_calibration();
     test_ensemble();
     test_interaction_node();
     test_loop_limited_node();
+    test_producer_composite();
+    test_consumer_composite();
+    test_user_archetype();
     return 0;
 }

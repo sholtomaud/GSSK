@@ -845,6 +845,44 @@ GSSK_Status GSSK_Replay(const char *initial_json,
                          double target_t,
                          GSSK_Instance **out_inst);
 
+/* =========================================================================
+ * Phase 8 — Composite Node Types & Archetype System
+ *
+ * Composite node types (e.g. "producer", "consumer", "misc_box",
+ * "system_frame") expand at GSSK_Init() time into combinations of the
+ * fundamental Phase 7 node types.  Built-in archetypes are auto-registered
+ * (4 of them); user-defined archetypes may be supplied via the top-level
+ * "archetypes" object in the model JSON.
+ *
+ * The expanded primitives use namespaced ids: "{composite_id}__{template_id}"
+ * (e.g. a producer node named "forest" becomes "forest__body",
+ * "forest__gate", "forest__heat" plus internal edges).
+ * ========================================================================= */
+
+/**
+ * @brief Number of archetypes (built-in + user-defined) registered in this instance.
+ */
+size_t GSSK_GetArchetypeCount(GSSK_Instance *inst);
+
+/**
+ * @brief Name of archetype at idx.  Built-ins occupy idx 0..3
+ *        (producer, consumer, misc_box, system_frame); user-defined follow.
+ * @return Pointer to internal string (valid for instance lifetime), or NULL
+ *         if idx is out of range.
+ */
+const char *GSSK_GetArchetypeName(GSSK_Instance *inst, size_t idx);
+
+/**
+ * @brief Number of composite node instances expanded in this instance.
+ */
+size_t GSSK_GetCompositeCount(GSSK_Instance *inst);
+
+/**
+ * @brief Original (unexpanded) composite ID at composite_idx.
+ * @return Pointer to internal string, or NULL if OOB.
+ */
+const char *GSSK_GetCompositeID(GSSK_Instance *inst, size_t composite_idx);
+
 #ifdef __cplusplus
 }
 #endif

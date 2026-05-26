@@ -85,6 +85,58 @@ typedef struct {
   int    direction; /* +1 = crossed upward, -1 = crossed downward */
 } GSSK_EventInternal;
 
+/* =========================================================================
+ * Phase 8 — Composite Node Types & Archetype System (internal)
+ * ========================================================================= */
+
+#define GSSK_MAX_ARCH_NODES   16
+#define GSSK_MAX_ARCH_EDGES   32
+#define GSSK_MAX_ARCH_PORTS    8
+#define GSSK_MAX_ARCHETYPES   32
+#define GSSK_MAX_COMPOSITES  128
+
+/* Template for one node inside an archetype definition */
+typedef struct {
+  char   id[64];        /* internal id within archetype namespace */
+  char   type_str[32];  /* node type string */
+  double value;
+  double node_k, node_C, node_threshold, node_price;
+  char   carrier[32];
+} GSSK_ANodeTmpl;
+
+/* Template for one edge inside an archetype definition */
+typedef struct {
+  char   id[64];
+  char   origin[64];
+  char   target[64];
+  char   logic[32];     /* logic type string; empty = "linear" */
+  double k;
+  double threshold;
+  char   carrier[32];
+} GSSK_AEdgeTmpl;
+
+/* One archetype definition (built-in or user-defined) */
+typedef struct {
+  char           name[64];
+  GSSK_ANodeTmpl nodes[GSSK_MAX_ARCH_NODES];
+  size_t         node_count;
+  GSSK_AEdgeTmpl edges[GSSK_MAX_ARCH_EDGES];
+  size_t         edge_count;
+  char           port_names[GSSK_MAX_ARCH_PORTS][32];
+  char           port_nodes[GSSK_MAX_ARCH_PORTS][64];
+  size_t         port_count;
+  char           default_in[64];
+  char           default_out[64];
+  bool           is_structural;
+} GSSK_ADefn;
+
+/* Per-instance composite expansion record */
+typedef struct {
+  char composite_id[64];
+  int  in_node_idx;
+  int  out_node_idx;
+} GSSK_CompositeMap;
+
 struct GSSK_Instance {
   char error_msg[256];
 
@@ -172,6 +224,12 @@ struct GSSK_Instance {
   GSSK_Carrier *carriers;            /* carrier definitions from "carriers" array */
   size_t        carrier_count;
   double       *carrier_cons_error;  /* per-carrier conservation error, last step */
+
+  /* Phase 8 — Archetype System */
+  GSSK_ADefn        arch_defns[GSSK_MAX_ARCHETYPES];
+  size_t            arch_count;
+  GSSK_CompositeMap composites[GSSK_MAX_COMPOSITES];
+  size_t            composite_count;
 };
 
 /* =========================================================================
@@ -1856,6 +1914,255 @@ GSSK_Status GSSK_ReclassifyNetwork(GSSK_Instance *inst) {
 }
 
 /* =========================================================================
+ * Phase 8 — Archetype helpers (built-in registration, lookup, expansion)
+ * ========================================================================= */
+
+/* Register the four built-in archetypes (producer, consumer, misc_box,
+ * system_frame).  Built-in archetypes use literal node ids that we
+ * namespace-prefix at expansion time. */
+static void register_builtin_archetypes(GSSK_Instance *inst) {
+  GSSK_ADefn *d;
+
+  /* ---- producer: storage + interaction (self-feedback) + sink ----
+   * Nodes: __body (storage), __gate (interaction), __heat (sink).
+   * Internal edges: feed_a, feed_b (body->gate ×2), prod (gate->body),
+   *                 resp (body->heat linear, k_respiration). */
+  d = &inst->arch_defns[inst->arch_count++];
+  memset(d, 0, sizeof(*d));
+  strncpy(d->name, "producer", 63);
+  d->is_structural = false;
+  /* nodes */
+  strncpy(d->nodes[0].id, "body", 63);
+  strncpy(d->nodes[0].type_str, "storage", 31);
+  d->nodes[0].value = 0.0;
+  strncpy(d->nodes[1].id, "gate", 63);
+  strncpy(d->nodes[1].type_str, "interaction", 31);
+  d->nodes[1].node_k = 0.01;
+  strncpy(d->nodes[2].id, "heat", 63);
+  strncpy(d->nodes[2].type_str, "sink", 31);
+  d->node_count = 3;
+  /* edges */
+  strncpy(d->edges[0].id, "feed_a", 63);
+  strncpy(d->edges[0].origin, "body", 63);
+  strncpy(d->edges[0].target, "gate", 63);
+  strncpy(d->edges[0].logic, "linear", 31);
+  d->edges[0].k = 1.0;
+  strncpy(d->edges[1].id, "feed_b", 63);
+  strncpy(d->edges[1].origin, "body", 63);
+  strncpy(d->edges[1].target, "gate", 63);
+  strncpy(d->edges[1].logic, "linear", 31);
+  d->edges[1].k = 1.0;
+  strncpy(d->edges[2].id, "prod", 63);
+  strncpy(d->edges[2].origin, "gate", 63);
+  strncpy(d->edges[2].target, "body", 63);
+  strncpy(d->edges[2].logic, "linear", 31);
+  d->edges[2].k = 1.0;
+  strncpy(d->edges[3].id, "resp", 63);
+  strncpy(d->edges[3].origin, "body", 63);
+  strncpy(d->edges[3].target, "heat", 63);
+  strncpy(d->edges[3].logic, "linear", 31);
+  d->edges[3].k = 0.05;
+  d->edge_count = 4;
+  strncpy(d->default_in,  "body", 63);
+  strncpy(d->default_out, "body", 63);
+
+  /* ---- consumer: storage + sink (metabolism) ---- */
+  d = &inst->arch_defns[inst->arch_count++];
+  memset(d, 0, sizeof(*d));
+  strncpy(d->name, "consumer", 63);
+  d->is_structural = false;
+  strncpy(d->nodes[0].id, "body", 63);
+  strncpy(d->nodes[0].type_str, "storage", 31);
+  strncpy(d->nodes[1].id, "heat", 63);
+  strncpy(d->nodes[1].type_str, "sink", 31);
+  d->node_count = 2;
+  strncpy(d->edges[0].id, "metab", 63);
+  strncpy(d->edges[0].origin, "body", 63);
+  strncpy(d->edges[0].target, "heat", 63);
+  strncpy(d->edges[0].logic, "linear", 31);
+  d->edges[0].k = 0.1;
+  d->edge_count = 1;
+  strncpy(d->default_in,  "body", 63);
+  strncpy(d->default_out, "body", 63);
+
+  /* ---- misc_box: generic unspecified processing unit ---- */
+  d = &inst->arch_defns[inst->arch_count++];
+  memset(d, 0, sizeof(*d));
+  strncpy(d->name, "misc_box", 63);
+  d->is_structural = false;
+  strncpy(d->nodes[0].id, "box", 63);
+  strncpy(d->nodes[0].type_str, "storage", 31);
+  d->node_count = 1;
+  d->edge_count = 0;
+  strncpy(d->default_in,  "box", 63);
+  strncpy(d->default_out, "box", 63);
+
+  /* ---- system_frame: structural-only namespace boundary ---- */
+  d = &inst->arch_defns[inst->arch_count++];
+  memset(d, 0, sizeof(*d));
+  strncpy(d->name, "system_frame", 63);
+  d->is_structural = true;
+  d->node_count = 0;
+  d->edge_count = 0;
+}
+
+static GSSK_ADefn *find_archetype(GSSK_Instance *inst, const char *type_str) {
+  if (!inst || !type_str) return NULL;
+  for (size_t i = 0; i < inst->arch_count; i++)
+    if (strcmp(inst->arch_defns[i].name, type_str) == 0)
+      return &inst->arch_defns[i];
+  return NULL;
+}
+
+/* Resolve an external edge endpoint that names a composite ID.
+ * Returns the inst->nodes[] slot of the composite's default_in node, or -1. */
+static int resolve_composite_in(GSSK_Instance *inst, const char *id) {
+  if (!inst || !id) return -1;
+  for (size_t i = 0; i < inst->composite_count; i++)
+    if (strcmp(inst->composites[i].composite_id, id) == 0)
+      return inst->composites[i].in_node_idx;
+  return -1;
+}
+
+static int resolve_composite_out(GSSK_Instance *inst, const char *id) {
+  if (!inst || !id) return -1;
+  for (size_t i = 0; i < inst->composite_count; i++)
+    if (strcmp(inst->composites[i].composite_id, id) == 0)
+      return inst->composites[i].out_node_idx;
+  return -1;
+}
+
+/* Parse user-defined archetypes from the top-level "archetypes" object.
+ * Each entry has the form:
+ *   "name": {
+ *     "nodes": [...], "edges": [...], "ports": { "<name>": "<internal_id>" }
+ *   }
+ * Returns GSSK_SUCCESS or an error code (sets inst->error_msg on failure). */
+static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
+  cJSON *arch_obj = cJSON_GetObjectItem(root, "archetypes");
+  if (!cJSON_IsObject(arch_obj)) return GSSK_SUCCESS;
+
+  cJSON *a = NULL;
+  cJSON_ArrayForEach(a, arch_obj) {
+    if (!a || !a->string) continue;
+    if (inst->arch_count >= GSSK_MAX_ARCHETYPES) {
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "Phase 8: too many archetypes (>%d).", GSSK_MAX_ARCHETYPES);
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+    GSSK_ADefn *def = &inst->arch_defns[inst->arch_count];
+    memset(def, 0, sizeof(*def));
+    strncpy(def->name, a->string, 63);
+    def->name[63] = '\0';
+    def->is_structural = false;
+
+    /* Parse nodes */
+    cJSON *anodes = cJSON_GetObjectItem(a, "nodes");
+    if (cJSON_IsArray(anodes)) {
+      int an = cJSON_GetArraySize(anodes);
+      if (an > GSSK_MAX_ARCH_NODES) {
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Phase 8: archetype '%s' has too many nodes (>%d).",
+                 def->name, GSSK_MAX_ARCH_NODES);
+        return GSSK_ERR_SCHEMA_VIOLATION;
+      }
+      for (int i = 0; i < an; i++) {
+        cJSON *n = cJSON_GetArrayItem(anodes, i);
+        cJSON *nid = cJSON_GetObjectItem(n, "id");
+        cJSON *nty = cJSON_GetObjectItem(n, "type");
+        cJSON *nvl = cJSON_GetObjectItem(n, "value");
+        cJSON *nca = cJSON_GetObjectItem(n, "carrier");
+        cJSON *npp = cJSON_GetObjectItem(n, "params");
+        if (!cJSON_IsString(nid) || !cJSON_IsString(nty)) {
+          snprintf(inst->error_msg, sizeof(inst->error_msg),
+                   "Phase 8: archetype '%s' node missing id/type.", def->name);
+          return GSSK_ERR_SCHEMA_VIOLATION;
+        }
+        GSSK_ANodeTmpl *nt = &def->nodes[def->node_count++];
+        strncpy(nt->id, nid->valuestring, 63);
+        strncpy(nt->type_str, nty->valuestring, 31);
+        nt->value = cJSON_IsNumber(nvl) ? nvl->valuedouble : 0.0;
+        if (cJSON_IsString(nca)) strncpy(nt->carrier, nca->valuestring, 31);
+        if (cJSON_IsObject(npp)) {
+          cJSON *pk  = cJSON_GetObjectItem(npp, "k");
+          cJSON *pC  = cJSON_GetObjectItem(npp, "C");
+          cJSON *pth = cJSON_GetObjectItem(npp, "threshold");
+          cJSON *ppr = cJSON_GetObjectItem(npp, "price");
+          if (cJSON_IsNumber(pk))  nt->node_k         = pk->valuedouble;
+          if (cJSON_IsNumber(pC))  nt->node_C         = pC->valuedouble;
+          if (cJSON_IsNumber(pth)) nt->node_threshold = pth->valuedouble;
+          if (cJSON_IsNumber(ppr)) nt->node_price     = ppr->valuedouble;
+        }
+      }
+    }
+
+    /* Parse edges */
+    cJSON *aedges = cJSON_GetObjectItem(a, "edges");
+    if (cJSON_IsArray(aedges)) {
+      int ae = cJSON_GetArraySize(aedges);
+      if (ae > GSSK_MAX_ARCH_EDGES) {
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Phase 8: archetype '%s' has too many edges (>%d).",
+                 def->name, GSSK_MAX_ARCH_EDGES);
+        return GSSK_ERR_SCHEMA_VIOLATION;
+      }
+      for (int i = 0; i < ae; i++) {
+        cJSON *e = cJSON_GetArrayItem(aedges, i);
+        cJSON *eid = cJSON_GetObjectItem(e, "id");
+        cJSON *eor = cJSON_GetObjectItem(e, "origin");
+        cJSON *etg = cJSON_GetObjectItem(e, "target");
+        cJSON *elg = cJSON_GetObjectItem(e, "logic");
+        cJSON *eca = cJSON_GetObjectItem(e, "carrier");
+        cJSON *epp = cJSON_GetObjectItem(e, "params");
+        if (!cJSON_IsString(eor) || !cJSON_IsString(etg)) {
+          snprintf(inst->error_msg, sizeof(inst->error_msg),
+                   "Phase 8: archetype '%s' edge missing origin/target.",
+                   def->name);
+          return GSSK_ERR_SCHEMA_VIOLATION;
+        }
+        GSSK_AEdgeTmpl *et = &def->edges[def->edge_count++];
+        if (cJSON_IsString(eid)) strncpy(et->id, eid->valuestring, 63);
+        strncpy(et->origin, eor->valuestring, 63);
+        strncpy(et->target, etg->valuestring, 63);
+        if (cJSON_IsString(elg)) strncpy(et->logic, elg->valuestring, 31);
+        else                     strncpy(et->logic, "linear", 31);
+        if (cJSON_IsString(eca)) strncpy(et->carrier, eca->valuestring, 31);
+        et->k = 1.0;
+        if (cJSON_IsObject(epp)) {
+          cJSON *pk  = cJSON_GetObjectItem(epp, "k");
+          cJSON *pth = cJSON_GetObjectItem(epp, "threshold");
+          if (cJSON_IsNumber(pk))  et->k         = pk->valuedouble;
+          if (cJSON_IsNumber(pth)) et->threshold = pth->valuedouble;
+        }
+      }
+    }
+
+    /* Parse ports — also defines default_in/default_out */
+    cJSON *aports = cJSON_GetObjectItem(a, "ports");
+    if (cJSON_IsObject(aports)) {
+      cJSON *p = NULL;
+      cJSON_ArrayForEach(p, aports) {
+        if (!p || !p->string || !cJSON_IsString(p)) continue;
+        if (def->port_count >= GSSK_MAX_ARCH_PORTS) break;
+        strncpy(def->port_names[def->port_count], p->string, 31);
+        strncpy(def->port_nodes[def->port_count], p->valuestring, 63);
+        def->port_count++;
+      }
+    }
+    if (def->port_count > 0) {
+      strncpy(def->default_in,  def->port_nodes[0], 63);
+      strncpy(def->default_out, def->port_nodes[def->port_count - 1], 63);
+    } else if (def->node_count > 0) {
+      strncpy(def->default_in,  def->nodes[0].id, 63);
+      strncpy(def->default_out, def->nodes[0].id, 63);
+    }
+
+    inst->arch_count++;
+  }
+  return GSSK_SUCCESS;
+}
+
+/* =========================================================================
  * GSSK_Init
  * ========================================================================= */
 
@@ -1963,6 +2270,15 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     }
   }
 
+  /* ---- 0.7 Archetypes (Phase 8) ----
+   * Register built-in archetypes first; user archetypes follow.  Built-ins
+   * occupy arch_defns[0..3] (producer, consumer, misc_box, system_frame). */
+  inst->arch_count      = 0;
+  inst->composite_count = 0;
+  register_builtin_archetypes(inst);
+  status = parse_user_archetypes(inst, root);
+  if (status != GSSK_SUCCESS) goto cleanup;
+
   /* ---- 1. Nodes ---- */
   cJSON *nodes_arr = cJSON_GetObjectItem(root, "nodes");
   if (!cJSON_IsArray(nodes_arr)) {
@@ -1972,17 +2288,38 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     goto cleanup;
   }
 
-  inst->node_count = (size_t)cJSON_GetArraySize(nodes_arr);
-  inst->nodes  = calloc(inst->node_count, sizeof(GSSK_NodeInternal));
-  inst->state  = calloc(inst->node_count, sizeof(double));
-  inst->dQ     = calloc(inst->node_count, sizeof(double));
+  /* Pre-count nodes and extra edges after composite expansion */
+  int n_json_nodes = cJSON_GetArraySize(nodes_arr);
+  size_t total_nodes       = 0;
+  size_t total_extra_edges = 0;
+  for (int i = 0; i < n_json_nodes; i++) {
+    cJSON *nn = cJSON_GetArrayItem(nodes_arr, i);
+    cJSON *tn = cJSON_GetObjectItem(nn, "type");
+    const char *ts = cJSON_IsString(tn) ? tn->valuestring : "storage";
+    GSSK_ADefn *def = find_archetype(inst, ts);
+    if (def && !def->is_structural) {
+      total_nodes       += def->node_count;
+      total_extra_edges += def->edge_count;
+    } else {
+      total_nodes += 1;
+    }
+  }
+
+  inst->node_count = total_nodes;
+  inst->nodes  = calloc(inst->node_count ? inst->node_count : 1,
+                        sizeof(GSSK_NodeInternal));
+  inst->state  = calloc(inst->node_count ? inst->node_count : 1,
+                        sizeof(double));
+  inst->dQ     = calloc(inst->node_count ? inst->node_count : 1,
+                        sizeof(double));
 
   if (!inst->nodes || !inst->state || !inst->dQ) {
     status = GSSK_ERR_MALLOC_FAILED; goto cleanup;
   }
 
   bool any_quality = false;
-  for (int i = 0; i < (int)inst->node_count; i++) {
+  size_t node_slot = 0;
+  for (int i = 0; i < n_json_nodes; i++) {
     cJSON *node = cJSON_GetArrayItem(nodes_arr, i);
     cJSON *id   = cJSON_GetObjectItem(node, "id");
     cJSON *type = cJSON_GetObjectItem(node, "type");
@@ -1994,7 +2331,8 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
     }
 
-    for (int j = 0; j < i; j++) {
+    /* Duplicate-id check (against already-emitted primitive node ids) */
+    for (size_t j = 0; j < node_slot; j++) {
       if (strcmp(inst->nodes[j].id, id->valuestring) == 0) {
         snprintf(inst->error_msg, sizeof(inst->error_msg),
                  "Schema Error: Duplicate node ID '%s'.", id->valuestring);
@@ -2002,49 +2340,136 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       }
     }
 
-    strncpy(inst->nodes[i].id, id->valuestring, 63);
-    inst->nodes[i].id[63]        = '\0';
-    inst->nodes[i].type          = parse_node_type(type->valuestring);
-    inst->nodes[i].initial_value = val->valuedouble;
-    inst->nodes[i].active        = true;
-    inst->state[i]               = val->valuedouble;
+    /* Optional fields shared between primitive and composite paths */
+    cJSON *nc      = cJSON_GetObjectItem(node, "carrier");
+    const char *carrier_str = cJSON_IsString(nc) ? nc->valuestring : NULL;
+    cJSON *nparams = cJSON_GetObjectItem(node, "params");
+
+    GSSK_ADefn *def = find_archetype(inst, type->valuestring);
+    if (def && !def->is_structural) {
+      /* ---- Composite node expansion ---- */
+      if (inst->composite_count >= GSSK_MAX_COMPOSITES) {
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Phase 8: too many composite instances (>%d).",
+                 GSSK_MAX_COMPOSITES);
+        status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+      }
+      /* Edges go into a temporary buffer once we know the original edge_count;
+       * for now allocate them inline into a pending-list area at the end of
+       * the edges array (created in section 2 below).  We defer actual edge
+       * placement until edge allocation, but the templates need to know the
+       * inst->nodes[] slots.  So we record the composite map and emit nodes
+       * here; the internal edges are emitted after the user edges array is
+       * sized in section 2. */
+      int in_idx = -1, out_idx = -1;
+      size_t dummy = 0;
+      /* Place nodes only (edges handled in step 2 below via re-call) */
+      for (size_t j = 0; j < def->node_count; j++) {
+        GSSK_ANodeTmpl *t = &def->nodes[j];
+        GSSK_NodeInternal *N = &inst->nodes[node_slot + j];
+        memset(N, 0, sizeof(*N));
+        snprintf(N->id, 63, "%s__%s", id->valuestring, t->id);
+        N->id[63] = '\0';
+        N->type   = parse_node_type(t->type_str);
+        N->initial_value = (strcmp(t->id, def->default_in) == 0)
+                             ? val->valuedouble : t->value;
+        N->active = true;
+        inst->state[node_slot + j] = N->initial_value;
+        if (t->carrier[0]) strncpy(N->carrier, t->carrier, 31);
+        else if (carrier_str) strncpy(N->carrier, carrier_str, 31);
+        N->node_k         = t->node_k;
+        N->node_C         = t->node_C;
+        N->node_threshold = t->node_threshold;
+        N->node_price     = t->node_price;
+        /* Built-in param overrides (producer.gate, etc.) */
+        if (cJSON_IsObject(nparams)) {
+          if (strcmp(def->name, "producer") == 0 && strcmp(t->id, "gate") == 0) {
+            cJSON *kp = cJSON_GetObjectItem(nparams, "k_production");
+            if (cJSON_IsNumber(kp)) N->node_k = kp->valuedouble;
+          }
+        }
+        if (strcmp(t->id, def->default_in)  == 0) in_idx  = (int)(node_slot + j);
+        if (strcmp(t->id, def->default_out) == 0) out_idx = (int)(node_slot + j);
+      }
+      GSSK_CompositeMap *cm = &inst->composites[inst->composite_count++];
+      strncpy(cm->composite_id, id->valuestring, 63);
+      cm->composite_id[63] = '\0';
+      cm->in_node_idx  = in_idx;
+      cm->out_node_idx = out_idx;
+      node_slot += def->node_count;
+      (void)dummy;
+      continue;
+    }
+
+    /* ---- system_frame: structural-only — record as NODE_CONSTANT ---- */
+    if (def && def->is_structural) {
+      strncpy(inst->nodes[node_slot].id, id->valuestring, 63);
+      inst->nodes[node_slot].id[63] = '\0';
+      inst->nodes[node_slot].type = NODE_CONSTANT;
+      inst->nodes[node_slot].initial_value = val->valuedouble;
+      inst->nodes[node_slot].active = true;
+      inst->state[node_slot] = val->valuedouble;
+      if (carrier_str) strncpy(inst->nodes[node_slot].carrier, carrier_str, 31);
+      node_slot++;
+      continue;
+    }
+
+    /* ---- Primitive node parsing (storage / source / sink / processing) ---- */
+    strncpy(inst->nodes[node_slot].id, id->valuestring, 63);
+    inst->nodes[node_slot].id[63]        = '\0';
+    inst->nodes[node_slot].type          = parse_node_type(type->valuestring);
+    inst->nodes[node_slot].initial_value = val->valuedouble;
+    inst->nodes[node_slot].active        = true;
+    inst->state[node_slot]               = val->valuedouble;
 
     /* Optional v2 fields */
     cJSON *qi = cJSON_GetObjectItem(node, "quality_input");
     if (cJSON_IsNumber(qi) && qi->valuedouble > 0.0) {
-      inst->nodes[i].quality_input = qi->valuedouble;
+      inst->nodes[node_slot].quality_input = qi->valuedouble;
       any_quality = true;
     }
 
     cJSON *om = cJSON_GetObjectItem(node, "output_mode");
-    inst->nodes[i].output_mode = parse_output_mode(
+    inst->nodes[node_slot].output_mode = parse_output_mode(
         cJSON_IsString(om) ? om->valuestring : NULL);
 
-    cJSON *nc = cJSON_GetObjectItem(node, "carrier");
-    if (cJSON_IsString(nc)) { strncpy(inst->nodes[i].carrier, nc->valuestring, 31); }
+    if (carrier_str) {
+      strncpy(inst->nodes[node_slot].carrier, carrier_str, 31);
+    }
 
-    /* Phase 7 — processing-node params block (optional, ignored for v3 types) */
-    cJSON *nparams = cJSON_GetObjectItem(node, "params");
+    /* Phase 7 — processing-node params block */
     if (cJSON_IsObject(nparams)) {
       cJSON *nk  = cJSON_GetObjectItem(nparams, "k");
       cJSON *nC  = cJSON_GetObjectItem(nparams, "C");
       cJSON *nth = cJSON_GetObjectItem(nparams, "threshold");
       cJSON *npr = cJSON_GetObjectItem(nparams, "price");
-      if (cJSON_IsNumber(nk))  inst->nodes[i].node_k         = nk->valuedouble;
-      if (cJSON_IsNumber(nC))  inst->nodes[i].node_C         = nC->valuedouble;
-      if (cJSON_IsNumber(nth)) inst->nodes[i].node_threshold = nth->valuedouble;
-      if (cJSON_IsNumber(npr)) inst->nodes[i].node_price     = npr->valuedouble;
+      if (cJSON_IsNumber(nk))  inst->nodes[node_slot].node_k         = nk->valuedouble;
+      if (cJSON_IsNumber(nC))  inst->nodes[node_slot].node_C         = nC->valuedouble;
+      if (cJSON_IsNumber(nth)) inst->nodes[node_slot].node_threshold = nth->valuedouble;
+      if (cJSON_IsNumber(npr)) inst->nodes[node_slot].node_price     = npr->valuedouble;
     }
+
+    node_slot++;
   }
+  /* Final node count = number of primitive slots emitted */
+  inst->node_count = node_slot;
 
   /* ---- 2. Edges ---- */
   cJSON *edges_arr = cJSON_GetObjectItem(root, "edges");
+  size_t user_edge_count = 0;
+  if (cJSON_IsArray(edges_arr))
+    user_edge_count = (size_t)cJSON_GetArraySize(edges_arr);
+
+  /* Allocate edges array with room for composite-internal edges */
+  size_t edges_capacity = user_edge_count + total_extra_edges;
+  inst->edges = calloc(edges_capacity ? edges_capacity : 1,
+                        sizeof(GSSK_EdgeInternal));
+  if (!inst->edges && edges_capacity > 0) {
+    status = GSSK_ERR_MALLOC_FAILED; goto cleanup;
+  }
+
   if (cJSON_IsArray(edges_arr)) {
-    inst->edge_count = (size_t)cJSON_GetArraySize(edges_arr);
-    inst->edges = calloc(inst->edge_count, sizeof(GSSK_EdgeInternal));
-    if (!inst->edges && inst->edge_count > 0) {
-      status = GSSK_ERR_MALLOC_FAILED; goto cleanup;
-    }
+    inst->edge_count = user_edge_count;
 
     for (int i = 0; i < (int)inst->edge_count; i++) {
       cJSON *edge      = cJSON_GetArrayItem(edges_arr, i);
@@ -2067,7 +2492,15 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       }
 
       inst->edges[i].origin_idx = find_node_idx(inst, origin->valuestring);
+      if (inst->edges[i].origin_idx == -1) {
+        int ci = resolve_composite_out(inst, origin->valuestring);
+        if (ci != -1) inst->edges[i].origin_idx = ci;
+      }
       inst->edges[i].target_idx = find_node_idx(inst, target->valuestring);
+      if (inst->edges[i].target_idx == -1) {
+        int ci = resolve_composite_in(inst, target->valuestring);
+        if (ci != -1) inst->edges[i].target_idx = ci;
+      }
       inst->edges[i].active     = true;
       inst->edges[i].coupled_idx = -1;
 
@@ -2172,6 +2605,76 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       if (cJSON_IsString(cpled)) {
         inst->edges[i].coupled_idx = find_edge_idx(inst, cpled->valuestring);
       }
+    }
+  }
+
+  /* ---- 2.5 Append composite-internal edges (Phase 8) ----
+   * Walk JSON nodes again, find composites, and emit their archetype's edges
+   * using the recorded composite map.  Composite IDs are namespaced so we
+   * locate inst->nodes[] slots by "{composite_id}__{template_id}". */
+  for (int i = 0; i < n_json_nodes; i++) {
+    cJSON *node = cJSON_GetArrayItem(nodes_arr, i);
+    cJSON *id   = cJSON_GetObjectItem(node, "id");
+    cJSON *type = cJSON_GetObjectItem(node, "type");
+    cJSON *nparams = cJSON_GetObjectItem(node, "params");
+    if (!cJSON_IsString(id) || !cJSON_IsString(type)) continue;
+    GSSK_ADefn *def = find_archetype(inst, type->valuestring);
+    if (!def || def->is_structural || def->edge_count == 0) continue;
+
+    double k_respiration = -1.0, k_metabolism = -1.0;
+    if (cJSON_IsObject(nparams)) {
+      cJSON *kr = cJSON_GetObjectItem(nparams, "k_respiration");
+      cJSON *km = cJSON_GetObjectItem(nparams, "k_metabolism");
+      if (cJSON_IsNumber(kr)) k_respiration = kr->valuedouble;
+      if (cJSON_IsNumber(km)) k_metabolism  = km->valuedouble;
+    }
+
+    for (size_t j = 0; j < def->edge_count; j++) {
+      GSSK_AEdgeTmpl *te = &def->edges[j];
+      char origin_id[160], target_id[160];
+      snprintf(origin_id, sizeof(origin_id), "%s__%s",
+               id->valuestring, te->origin);
+      snprintf(target_id, sizeof(target_id), "%s__%s",
+               id->valuestring, te->target);
+      int o = find_node_idx(inst, origin_id);
+      int t = find_node_idx(inst, target_id);
+      if (o < 0 || t < 0) {
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Phase 8: failed to expand archetype '%s' for '%s'.",
+                 def->name, id->valuestring);
+        status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+      }
+      if (inst->edge_count >= edges_capacity) {
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Phase 8: edge capacity exceeded during composite expansion.");
+        status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+      }
+      GSSK_EdgeInternal *E = &inst->edges[inst->edge_count];
+      memset(E, 0, sizeof(*E));
+      if (te->id[0])
+        snprintf(E->id, 63, "%s__%s", id->valuestring, te->id);
+      E->origin_idx  = o;
+      E->target_idx  = t;
+      E->control_idx = -1;
+      E->coupled_idx = -1;
+      E->active      = true;
+      int lt = parse_logic_type(te->logic[0] ? te->logic : "linear");
+      if (lt < 0) lt = GSSK_LOGIC_LINEAR;
+      E->logic     = (GSSK_LogicType)lt;
+      E->k         = te->k;
+      E->threshold = te->threshold;
+      if (te->carrier[0]) strncpy(E->carrier, te->carrier, 31);
+
+      /* Built-in parameter overrides */
+      if (strcmp(def->name, "producer") == 0 &&
+          strcmp(te->id, "resp") == 0 && k_respiration >= 0.0) {
+        E->k = k_respiration;
+      }
+      if (strcmp(def->name, "consumer") == 0 &&
+          strcmp(te->id, "metab") == 0 && k_metabolism >= 0.0) {
+        E->k = k_metabolism;
+      }
+      inst->edge_count++;
     }
   }
 
@@ -3197,6 +3700,28 @@ double GSSK_GetCarrierConservationError(GSSK_Instance *inst, size_t carrier_idx)
   if (!inst || carrier_idx >= inst->carrier_count || !inst->carrier_cons_error)
     return 0.0;
   return inst->carrier_cons_error[carrier_idx];
+}
+
+/* =========================================================================
+ * Phase 8 — Archetype accessors
+ * ========================================================================= */
+
+size_t GSSK_GetArchetypeCount(GSSK_Instance *inst) {
+  return inst ? inst->arch_count : 0;
+}
+
+const char *GSSK_GetArchetypeName(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->arch_count) return NULL;
+  return inst->arch_defns[idx].name;
+}
+
+size_t GSSK_GetCompositeCount(GSSK_Instance *inst) {
+  return inst ? inst->composite_count : 0;
+}
+
+const char *GSSK_GetCompositeID(GSSK_Instance *inst, size_t composite_idx) {
+  if (!inst || composite_idx >= inst->composite_count) return NULL;
+  return inst->composites[composite_idx].composite_id;
 }
 
 /* =========================================================================

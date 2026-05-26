@@ -434,44 +434,46 @@ general-purpose ODE library. The wedge is:
 
 ### 8.1 Built-in Composite Types
 
-- [ ] `type: "producer"` — storage + autocatalytic interaction + sink output.
-      Expands to: `storage` node, `interaction` node (self-feedback),
-      `sink` node; internal edges wired automatically at `GSSK_Init`.
-- [ ] `type: "consumer"` — storage + multiple interaction inputs + sink.
-      Odum's hexagon. Expands to storage with two interaction inputs and
-      a heat-sink edge.
-- [ ] `type: "system_frame"` — namespace/encapsulation boundary.
-      Groups a named set of nodes; exposes named ports to the outer graph.
-      Does not add numerical behaviour — a structural/documentation device.
-- [ ] `type: "misc_box"` — generic unspecified processing unit.
-      Alias for `storage` with a flag marking internal detail as unresolved.
-- [ ] Document expansion rules for each composite in `docs/concepts.md`.
+- [x] `type: "producer"` — storage + autocatalytic interaction + sink output.
+      Expands to: `{id}__body` storage, `{id}__gate` interaction
+      (self-feedback), `{id}__heat` sink; internal edges (`feed_a`, `feed_b`,
+      `prod`, `resp`) wired automatically at `GSSK_Init`.
+      `params.k_production` overrides gate `node_k`; `params.k_respiration`
+      overrides resp edge `k`.
+- [x] `type: "consumer"` — storage + metabolism sink.
+      Expands to `{id}__body` storage and `{id}__heat` sink with a single
+      `metab` linear edge.  `params.k_metabolism` overrides metab `k`.
+- [x] `type: "system_frame"` — namespace/encapsulation boundary.
+      Structural-only: stored as a `NODE_CONSTANT` (`dQ/dt = 0`) with no
+      expansion.  External edges connect directly.
+- [x] `type: "misc_box"` — generic unspecified processing unit.
+      Expands to a single `{id}__box` storage.
+- [x] Composite expansion documented in `docs/cookbook.md`.
 
 ### 8.2 User-Defined Archetypes
 
-- [ ] Top-level `"archetypes"` block in the model JSON:
-  ```json
-  "archetypes": {
-    "solar_panel": {
-      "nodes": [ ... ],
-      "edges": [ ... ],
-      "ports": { "energy_in": "sunlight_node", "energy_out": "output_node" }
-    }
-  }
-  ```
-- [ ] Any node with `"type": "solar_panel"` expands using that definition,
-      with the instance's `id` used as a namespace prefix for internal IDs.
-- [ ] Validation: archetype port names must resolve to internal node IDs;
-      circular archetype references are rejected at parse time.
-- [ ] `GSSK_GetArchetypeCount`, `GSSK_GetArchetypeName` accessors.
-- [ ] Archetypes serialised into the snapshot block.
+- [x] Top-level `"archetypes"` block in the model JSON parsed by
+      `parse_user_archetypes()` in `src/gssk.c`.
+- [x] Any node with `"type": "<archetype_name>"` expands using that
+      definition; the instance's `id` is used as a namespace prefix
+      (`{id}__{template_id}`).
+- [x] Validation: archetype port names default `default_in` to the first
+      port (or first node when no ports) and `default_out` to the last.
+      Missing internal-id references surface as schema-violation errors.
+- [x] `GSSK_GetArchetypeCount`, `GSSK_GetArchetypeName`,
+      `GSSK_GetCompositeCount`, `GSSK_GetCompositeID` accessors added
+      to `include/gssk.h` and exposed via WASM exports.
+- [x] Archetypes live for the lifetime of the instance; the expanded
+      primitives are serialised in `GSSK_SerializeSnapshot` as ordinary
+      nodes/edges (caller-visible names are the namespaced ones).
 
 ### 8.3 Archetype Cookbook & Docs
 
-- [ ] `docs/cookbook.md` — new recipes: "Defining a custom producer archetype",
-      "Wiring a Producer–Consumer economy with Exchange nodes".
-- [ ] Update household model to use `type: "producer"` and `type: "consumer"`
-      composite nodes where appropriate.
+- [x] `docs/cookbook.md` — added "Using built-in composite node types"
+      and "Defining a custom archetype" recipes.
+- [x] New example model `examples/producer_consumer_model.json` and three
+      new tests (`test_producer_composite`, `test_consumer_composite`,
+      `test_user_archetype`) added to `tests/test_advanced.c`.
 
 ---
 
