@@ -165,7 +165,10 @@ coverage-report: coverage-build
 		./$(TARGET_COV_CLI) $$model tests/results/$$name.csv > /dev/null 2>&1 || true; \
 	done
 	lcov --capture --directory . --output-file coverage/lcov.info \
-	     --exclude '*/cJSON.c' --exclude '*/tests/*' 2>/dev/null
+	     --ignore-errors mismatch,unused
+	lcov --remove coverage/lcov.info '*/cJSON.c' '*/tests/*' \
+	     --output-file coverage/lcov.info \
+	     --ignore-errors mismatch,unused
 	genhtml coverage/lcov.info --output-directory coverage/html --quiet
 
 coverage-check: coverage-report
