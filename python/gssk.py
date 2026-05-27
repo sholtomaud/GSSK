@@ -187,6 +187,33 @@ _lib.GSSK_GetCompositeCount.restype  = ctypes.c_size_t
 _lib.GSSK_GetCompositeID.argtypes    = [ctypes.c_void_p, ctypes.c_size_t]
 _lib.GSSK_GetCompositeID.restype     = ctypes.c_char_p
 
+_lib.GSSK_GetMotifCount.argtypes     = [ctypes.c_void_p]
+_lib.GSSK_GetMotifCount.restype      = ctypes.c_size_t
+
+_lib.GSSK_GetMotifCanon.argtypes     = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_GetMotifCanon.restype      = ctypes.c_char_p
+
+_lib.GSSK_GetMotifOccurrence.argtypes  = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_GetMotifOccurrence.restype   = ctypes.c_size_t
+
+_lib.GSSK_GetMotifStableSteps.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_GetMotifStableSteps.restype  = ctypes.c_size_t
+
+_lib.GSSK_IsMotifCandidate.argtypes  = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_IsMotifCandidate.restype   = ctypes.c_bool
+
+_lib.GSSK_GetMotifSize.argtypes      = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_GetMotifSize.restype       = ctypes.c_size_t
+
+_lib.GSSK_GetMotifComplexity.argtypes = [ctypes.c_void_p, ctypes.c_size_t]
+_lib.GSSK_GetMotifComplexity.restype  = ctypes.c_double
+
+_lib.GSSK_GetGenerativityIndex.argtypes = [ctypes.c_void_p]
+_lib.GSSK_GetGenerativityIndex.restype  = ctypes.c_double
+
+_lib.GSSK_ProposeArchetype.argtypes  = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_char_p]
+_lib.GSSK_ProposeArchetype.restype   = ctypes.c_int
+
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
 class GSSKError(Exception):
@@ -414,6 +441,40 @@ class GSSKSimulator:
     def composite_id(self, index: int) -> str | None:
         cstr = _lib.GSSK_GetCompositeID(self._inst, index)
         return cstr.decode() if cstr else None
+
+    # ── Phase 9 — Pattern discovery / generativity ───────────────────────────
+
+    @property
+    def motif_count(self) -> int:
+        return int(_lib.GSSK_GetMotifCount(self._inst))
+
+    def motif_canon(self, index: int) -> str | None:
+        cstr = _lib.GSSK_GetMotifCanon(self._inst, index)
+        return cstr.decode() if cstr else None
+
+    def motif_occurrence(self, index: int) -> int:
+        return int(_lib.GSSK_GetMotifOccurrence(self._inst, index))
+
+    def motif_stable_steps(self, index: int) -> int:
+        return int(_lib.GSSK_GetMotifStableSteps(self._inst, index))
+
+    def is_motif_candidate(self, index: int) -> bool:
+        return bool(_lib.GSSK_IsMotifCandidate(self._inst, index))
+
+    def motif_size(self, index: int) -> int:
+        return int(_lib.GSSK_GetMotifSize(self._inst, index))
+
+    def motif_complexity(self, index: int) -> float:
+        return float(_lib.GSSK_GetMotifComplexity(self._inst, index))
+
+    @property
+    def generativity_index(self) -> float:
+        return float(_lib.GSSK_GetGenerativityIndex(self._inst))
+
+    def propose_archetype(self, motif_index: int, name: str) -> None:
+        status = _lib.GSSK_ProposeArchetype(self._inst, motif_index, name.encode())
+        if status != GSSK_SUCCESS:
+            raise GSSKError(f"ProposeArchetype failed (status={status})")
 
     # ── Serialisation ────────────────────────────────────────────────────────
 

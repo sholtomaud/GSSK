@@ -137,6 +137,25 @@ typedef struct {
   int  out_node_idx;
 } GSSK_CompositeMap;
 
+/* -------------------------------------------------------------------------
+ * Phase 9 — Runtime Pattern Discovery
+ * ------------------------------------------------------------------------- */
+#define GSSK_MOTIF_TABLE_CAP      256  /* max distinct motif patterns tracked */
+#define GSSK_MOTIF_MIN_COUNT        3  /* occurrences/step to count toward stability */
+#define GSSK_MOTIF_MIN_STEPS       10  /* consecutive stable steps → candidate */
+#define GSSK_MOTIF_SCAN_NODE_LIMIT 64  /* skip scan when node_count exceeds this */
+
+typedef struct {
+  char    canon[128];     /* canonical pattern string */
+  char    node_types[3][32]; /* node type strings in canonical order */
+  uint8_t size;           /* 2 or 3 */
+  uint8_t edge_bits;      /* adjacency bitmask in canonical order */
+  double  complexity;     /* popcount(edge_bits) / size */
+  size_t  occurrence;     /* times seen this step */
+  size_t  stable_steps;   /* consecutive steps meeting MIN_COUNT */
+  bool    is_candidate;   /* promoted: stable_steps >= MIN_STEPS */
+} GSSK_MotifEntry;
+
 struct GSSK_Instance {
   char error_msg[256];
 
@@ -230,6 +249,11 @@ struct GSSK_Instance {
   size_t            arch_count;
   GSSK_CompositeMap composites[GSSK_MAX_COMPOSITES];
   size_t            composite_count;
+
+  /* Phase 9 — Runtime Pattern Discovery */
+  GSSK_MotifEntry motifs[GSSK_MOTIF_TABLE_CAP];
+  size_t          motif_count;
+  double          generativity_index;
 };
 
 /* =========================================================================
@@ -238,6 +262,9 @@ struct GSSK_Instance {
 
 static GSSK_MutationOp parse_mutation_op(const char *s);  /* forward decl (Phase 4) */
 static const char *node_type_str(GSSK_NodeType t);          /* forward decl (Phase 7) */
+static void append_mutation(GSSK_Instance *inst, GSSK_MutationOp op,
+                             const char *target_id, const char *payload); /* Phase 4, used in Phase 9 */
+static void scan_motifs_internal(GSSK_Instance *inst);                    /* Phase 9 */
 
 static GSSK_NodeType parse_node_type(const char *s) {
   if (strcmp(s, "source")       == 0) return NODE_SOURCE;
@@ -3148,7 +3175,290 @@ post_step:
 
   inst->current_t += dt;
   inst->step_count++;
+  scan_motifs_internal(inst);
   return ret;
+}
+
+/* =========================================================================
+ * Phase 9 — Runtime Pattern Discovery
+ * ========================================================================= */
+
+/* Build canonical form for a 3-node motif.  Enumerates all 6 permutations,
+ * keeps only those that maintain non-decreasing type order, and picks the
+ * lexicographically smallest — giving a proper isomorphism-invariant form. */
+static void make_canon_3(char *out, size_t cap,
+                          const char *t[3], const bool e[3][3],
+                          char best_types[3][32], uint8_t *out_bits) {
+  static const int perms[6][3] = {
+    {0,1,2},{0,2,1},{1,0,2},{1,2,0},{2,0,1},{2,1,0}
+  };
+  char best[128] = "";
+  uint8_t best_bits = 0;
+  char best_t[3][32] = {"","",""};
+
+  for (int pi = 0; pi < 6; pi++) {
+    int p0 = perms[pi][0], p1 = perms[pi][1], p2 = perms[pi][2];
+    if (strcmp(t[p0], t[p1]) > 0 || strcmp(t[p1], t[p2]) > 0) continue;
+    uint8_t bits = 0;
+    if (e[p0][p1]) bits |= 1;
+    if (e[p0][p2]) bits |= 2;
+    if (e[p1][p0]) bits |= 4;
+    if (e[p1][p2]) bits |= 8;
+    if (e[p2][p0]) bits |= 16;
+    if (e[p2][p1]) bits |= 32;
+    char cand[128];
+    snprintf(cand, sizeof(cand), "3:%s:%s:%s:%u", t[p0], t[p1], t[p2], (unsigned)bits);
+    if (best[0] == '\0' || strcmp(cand, best) < 0) {
+      strncpy(best, cand, sizeof(best) - 1);
+      best_bits = bits;
+      strncpy(best_t[0], t[p0], 31); best_t[0][31] = '\0';
+      strncpy(best_t[1], t[p1], 31); best_t[1][31] = '\0';
+      strncpy(best_t[2], t[p2], 31); best_t[2][31] = '\0';
+    }
+  }
+  strncpy(out, best[0] ? best : "3:?:?:?:0", cap - 1); out[cap - 1] = '\0';
+  if (best_types) {
+    strncpy(best_types[0], best_t[0], 31); best_types[0][31] = '\0';
+    strncpy(best_types[1], best_t[1], 31); best_types[1][31] = '\0';
+    strncpy(best_types[2], best_t[2], 31); best_types[2][31] = '\0';
+  }
+  if (out_bits) *out_bits = best_bits;
+}
+
+static void record_motif_internal(GSSK_Instance *inst, const char *canon,
+                                   uint8_t size, uint8_t edge_bits,
+                                   const char node_types[3][32]) {
+  for (size_t i = 0; i < inst->motif_count; i++) {
+    if (strcmp(inst->motifs[i].canon, canon) == 0) {
+      inst->motifs[i].occurrence++;
+      return;
+    }
+  }
+  if (inst->motif_count >= GSSK_MOTIF_TABLE_CAP) return;
+  GSSK_MotifEntry *m = &inst->motifs[inst->motif_count++];
+  memset(m, 0, sizeof(*m));
+  strncpy(m->canon, canon, sizeof(m->canon) - 1);
+  m->size = size;
+  m->edge_bits = edge_bits;
+  int ec = 0;
+  for (int b = 0; b < 8; b++) if (edge_bits & (1u << b)) ec++;
+  m->complexity = (double)ec / size;
+  for (int j = 0; j < size && j < 3; j++) {
+    strncpy(m->node_types[j], node_types[j], sizeof(m->node_types[j]) - 1);
+  }
+  m->occurrence = 1;
+}
+
+static void scan_motifs_internal(GSSK_Instance *inst) {
+  size_t n = inst->node_count;
+  if (n == 0 || n > GSSK_MOTIF_SCAN_NODE_LIMIT) return;
+
+  /* Build flat adjacency matrix adj[a*n+b] = true if active edge a→b */
+  bool adj[GSSK_MOTIF_SCAN_NODE_LIMIT * GSSK_MOTIF_SCAN_NODE_LIMIT];
+  memset(adj, 0, n * n * sizeof(bool));
+  for (size_t ei = 0; ei < inst->edge_count; ei++) {
+    GSSK_EdgeInternal *e = &inst->edges[ei];
+    if (!e->active || e->origin_idx < 0 || e->target_idx < 0) continue;
+    adj[(size_t)e->origin_idx * n + (size_t)e->target_idx] = true;
+  }
+
+  /* Reset occurrence counts from last step */
+  for (size_t mi = 0; mi < inst->motif_count; mi++)
+    inst->motifs[mi].occurrence = 0;
+
+  /* ---- 2-node motifs: each pair (a < b) with at least one edge ---- */
+  for (size_t a = 0; a < n; a++) {
+    if (!inst->nodes[a].active) continue;
+    for (size_t b = a + 1; b < n; b++) {
+      if (!inst->nodes[b].active) continue;
+      bool ab = adj[a * n + b], ba = adj[b * n + a];
+      if (!ab && !ba) continue;
+      const char *ta = node_type_str(inst->nodes[a].type);
+      const char *tb = node_type_str(inst->nodes[b].type);
+      char canon[128];
+      uint8_t bits = 0;
+      char types_canon[3][32] = {"","",""};
+      /* pick which ordering makes the lex-smaller string */
+      uint8_t bits_ab = (uint8_t)((ab ? 1 : 0) | (ba ? 2 : 0));
+      uint8_t bits_ba = (uint8_t)((ba ? 1 : 0) | (ab ? 2 : 0));
+      char cand_ab[128], cand_ba[128];
+      snprintf(cand_ab, sizeof(cand_ab), "2:%s:%s:%u", ta, tb, (unsigned)bits_ab);
+      snprintf(cand_ba, sizeof(cand_ba), "2:%s:%s:%u", tb, ta, (unsigned)bits_ba);
+      if (strcmp(cand_ab, cand_ba) <= 0) {
+        strncpy(canon, cand_ab, sizeof(canon) - 1); canon[sizeof(canon)-1] = '\0';
+        bits = bits_ab;
+        strncpy(types_canon[0], ta, 31); strncpy(types_canon[1], tb, 31);
+      } else {
+        strncpy(canon, cand_ba, sizeof(canon) - 1); canon[sizeof(canon)-1] = '\0';
+        bits = bits_ba;
+        strncpy(types_canon[0], tb, 31); strncpy(types_canon[1], ta, 31);
+      }
+      record_motif_internal(inst, canon, 2, bits, (const char (*)[32])types_canon);
+    }
+  }
+
+  /* ---- 3-node motifs: each triple (a < b < c) with ≥ 2 edges ---- */
+  for (size_t a = 0; a < n; a++) {
+    if (!inst->nodes[a].active) continue;
+    for (size_t b = a + 1; b < n; b++) {
+      if (!inst->nodes[b].active) continue;
+      for (size_t c = b + 1; c < n; c++) {
+        if (!inst->nodes[c].active) continue;
+        bool eab = adj[a*n+b], eba = adj[b*n+a];
+        bool eac = adj[a*n+c], eca = adj[c*n+a];
+        bool ebc = adj[b*n+c], ecb = adj[c*n+b];
+        int edge_cnt = (eab?1:0)+(eba?1:0)+(eac?1:0)+(eca?1:0)+(ebc?1:0)+(ecb?1:0);
+        if (edge_cnt < 2) continue;
+        const char *types[3] = {
+          node_type_str(inst->nodes[a].type),
+          node_type_str(inst->nodes[b].type),
+          node_type_str(inst->nodes[c].type)
+        };
+        bool e[3][3] = {
+          {false, eab, eac},
+          {eba, false, ebc},
+          {eca, ecb, false}
+        };
+        char canon[128];
+        char best_types[3][32];
+        uint8_t bits = 0;
+        make_canon_3(canon, sizeof(canon), types, e, best_types, &bits);
+        if (canon[0])
+          record_motif_internal(inst, canon, 3, bits, (const char (*)[32])best_types);
+      }
+    }
+  }
+
+  /* ---- Update stability counters and generativity index ---- */
+  size_t new_candidates = 0;
+  double total_complexity = 0.0;
+  for (size_t mi = 0; mi < inst->motif_count; mi++) {
+    GSSK_MotifEntry *m = &inst->motifs[mi];
+    if (m->occurrence >= GSSK_MOTIF_MIN_COUNT) {
+      m->stable_steps++;
+      if (!m->is_candidate && m->stable_steps >= GSSK_MOTIF_MIN_STEPS) {
+        m->is_candidate = true;
+        new_candidates++;
+        total_complexity += m->complexity;
+      }
+    } else {
+      m->stable_steps = 0;
+    }
+  }
+  double dt = inst->config.dt > 1e-15 ? inst->config.dt : 1.0;
+  double avg_c = new_candidates > 0 ? total_complexity / (double)new_candidates : 0.0;
+  inst->generativity_index = (double)new_candidates * avg_c / dt;
+}
+
+/* =========================================================================
+ * Phase 9 — Public API
+ * ========================================================================= */
+
+size_t GSSK_GetMotifCount(GSSK_Instance *inst) {
+  return inst ? inst->motif_count : 0;
+}
+
+const char *GSSK_GetMotifCanon(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->motif_count) return NULL;
+  return inst->motifs[idx].canon;
+}
+
+size_t GSSK_GetMotifOccurrence(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->motif_count) return 0;
+  return inst->motifs[idx].occurrence;
+}
+
+size_t GSSK_GetMotifStableSteps(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->motif_count) return 0;
+  return inst->motifs[idx].stable_steps;
+}
+
+bool GSSK_IsMotifCandidate(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->motif_count) return false;
+  return inst->motifs[idx].is_candidate;
+}
+
+size_t GSSK_GetMotifSize(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->motif_count) return 0;
+  return inst->motifs[idx].size;
+}
+
+double GSSK_GetMotifComplexity(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->motif_count) return 0.0;
+  return inst->motifs[idx].complexity;
+}
+
+double GSSK_GetGenerativityIndex(GSSK_Instance *inst) {
+  return inst ? inst->generativity_index : 0.0;
+}
+
+GSSK_Status GSSK_ProposeArchetype(GSSK_Instance *inst, size_t motif_idx,
+                                   const char *name) {
+  if (!inst || !name) return GSSK_ERR_NOT_FOUND;
+  if (motif_idx >= inst->motif_count) return GSSK_ERR_NOT_FOUND;
+  GSSK_MotifEntry *m = &inst->motifs[motif_idx];
+  if (!m->is_candidate) return GSSK_ERR_NOT_FOUND;
+
+  /* Check name uniqueness */
+  for (size_t i = 0; i < inst->arch_count; i++) {
+    if (strcmp(inst->arch_defns[i].name, name) == 0)
+      return GSSK_ERR_SCHEMA_VIOLATION;
+  }
+  if (inst->arch_count >= GSSK_MAX_ARCHETYPES) return GSSK_ERR_SCHEMA_VIOLATION;
+
+  /* Build archetype definition from motif */
+  GSSK_ADefn *def = &inst->arch_defns[inst->arch_count];
+  memset(def, 0, sizeof(*def));
+  strncpy(def->name, name, sizeof(def->name) - 1);
+  def->node_count = m->size;
+  def->is_structural = false;
+
+  for (size_t ni = 0; ni < m->size; ni++) {
+    snprintf(def->nodes[ni].id, sizeof(def->nodes[ni].id), "node%zu", ni);
+    strncpy(def->nodes[ni].type_str, m->node_types[ni],
+            sizeof(def->nodes[ni].type_str) - 1);
+    def->nodes[ni].value = 0.0;
+  }
+
+  /* Wire edges from adjacency bits */
+  /* Bit encoding for 2-node: bit0=0→1, bit1=1→0
+     Bit encoding for 3-node: bit0=0→1,bit1=0→2,bit2=1→0,bit3=1→2,bit4=2→0,bit5=2→1 */
+  size_t ei = 0;
+  if (m->size == 2) {
+    if (m->edge_bits & 1) {
+      strncpy(def->edges[ei].origin, "node0", 63);
+      strncpy(def->edges[ei].target, "node1", 63);
+      strncpy(def->edges[ei].logic, "linear", 31);
+      def->edges[ei].k = 1.0; ei++;
+    }
+    if (m->edge_bits & 2) {
+      strncpy(def->edges[ei].origin, "node1", 63);
+      strncpy(def->edges[ei].target, "node0", 63);
+      strncpy(def->edges[ei].logic, "linear", 31);
+      def->edges[ei].k = 1.0; ei++;
+    }
+  } else {
+    static const int src3[6] = {0,0,1,1,2,2};
+    static const int tgt3[6] = {1,2,0,2,0,1};
+    for (int b = 0; b < 6; b++) {
+      if (!(m->edge_bits & (1u << b))) continue;
+      snprintf(def->edges[ei].origin, sizeof(def->edges[ei].origin), "node%d", src3[b]);
+      snprintf(def->edges[ei].target, sizeof(def->edges[ei].target), "node%d", tgt3[b]);
+      strncpy(def->edges[ei].logic, "linear", 31);
+      def->edges[ei].k = 1.0; ei++;
+    }
+  }
+  def->edge_count = ei;
+
+  /* Default ports */
+  strncpy(def->default_in,  def->nodes[0].id, sizeof(def->default_in) - 1);
+  strncpy(def->default_out, def->nodes[m->size-1].id, sizeof(def->default_out) - 1);
+  inst->arch_count++;
+
+  /* Log to mutation log */
+  append_mutation(inst, GSSK_MUT_ARCHETYPE_PROPOSAL, name, m->canon);
+
+  return GSSK_SUCCESS;
 }
 
 /* =========================================================================
@@ -3647,6 +3957,7 @@ GSSK_Status GSSK_StepAdaptive(GSSK_Instance *inst) {
 
   inst->current_t += h;
   inst->step_count++;
+  scan_motifs_internal(inst);
   return st;
 }
 
@@ -3761,6 +4072,16 @@ static void apply_mutation_record(GSSK_Instance *inst,
         GSSK_SetEdgeK(inst, (size_t)idx, atof(r->payload));
       break;
     }
+    case GSSK_MUT_ARCHETYPE_PROPOSAL:
+      /* Replay: find motif by canon string stored in payload and propose */
+      for (size_t mi = 0; mi < inst->motif_count; mi++) {
+        if (strcmp(inst->motifs[mi].canon, r->payload) == 0) {
+          inst->motifs[mi].is_candidate = true; /* mark candidate for replay */
+          GSSK_ProposeArchetype(inst, mi, r->target_id);
+          break;
+        }
+      }
+      break;
   }
 }
 

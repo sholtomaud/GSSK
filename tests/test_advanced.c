@@ -332,6 +332,126 @@ void test_user_archetype() {
     printf("  User archetype test PASSED\n");
 }
 
+void test_phase9_motif_detection() {
+    printf("Testing Phase 9 motif detection...\n");
+
+    /* Simple 3-node model: source → storage → sink.
+     * After 10+ steps the source→storage and storage→sink 2-node motifs
+     * each appear once per step, so their stable_steps should reach ≥ 10
+     * and both should become candidates (occurrence 1 < MIN_COUNT=3,
+     * so they remain NOT candidates — but we can still verify detection). */
+
+    /* Use a model with multiple instances of the same motif type.
+     * Two parallel source→storage drain chains gives occurrence=2 per step.
+     * occurrence must reach MIN_COUNT=3 to increment stable_steps,
+     * so use THREE parallel chains. */
+    const char *model_json =
+        "{"
+        "  \"nodes\": ["
+        "    {\"id\": \"s1\", \"type\": \"source\",  \"value\": 10.0},"
+        "    {\"id\": \"b1\", \"type\": \"storage\", \"value\": 0.0},"
+        "    {\"id\": \"s2\", \"type\": \"source\",  \"value\": 10.0},"
+        "    {\"id\": \"b2\", \"type\": \"storage\", \"value\": 0.0},"
+        "    {\"id\": \"s3\", \"type\": \"source\",  \"value\": 10.0},"
+        "    {\"id\": \"b3\", \"type\": \"storage\", \"value\": 0.0}"
+        "  ],"
+        "  \"edges\": ["
+        "    {\"origin\": \"s1\", \"target\": \"b1\", \"logic\": \"linear\", \"params\": {\"k\": 0.1}},"
+        "    {\"origin\": \"s2\", \"target\": \"b2\", \"logic\": \"linear\", \"params\": {\"k\": 0.1}},"
+        "    {\"origin\": \"s3\", \"target\": \"b3\", \"logic\": \"linear\", \"params\": {\"k\": 0.1}}"
+        "  ],"
+        "  \"config\": {\"t_start\": 0, \"t_end\": 20, \"dt\": 1.0}"
+        "}";
+
+    GSSK_Instance *inst = NULL;
+    assert(GSSK_Init(model_json, &inst) == GSSK_SUCCESS);
+
+    /* Run 15 steps — past MIN_STEPS=10 */
+    for (int i = 0; i < 15; i++) {
+        GSSK_Status st = GSSK_Step(inst, GSSK_GetDt(inst));
+        assert(st == GSSK_SUCCESS || st == GSSK_WARN_SOLVER_DIVERGENCE);
+    }
+
+    size_t mc = GSSK_GetMotifCount(inst);
+    printf("  Motifs detected: %zu\n", mc);
+    assert(mc > 0);
+
+    /* Find the source→storage motif and verify it became a candidate */
+    bool found_candidate = false;
+    for (size_t mi = 0; mi < mc; mi++) {
+        const char *canon = GSSK_GetMotifCanon(inst, mi);
+        size_t stable = GSSK_GetMotifStableSteps(inst, mi);
+        printf("  motif[%zu]: %s  stable=%zu  occ=%zu  candidate=%s\n",
+               mi, canon ? canon : "?", stable,
+               GSSK_GetMotifOccurrence(inst, mi),
+               GSSK_IsMotifCandidate(inst, mi) ? "YES" : "no");
+        if (GSSK_IsMotifCandidate(inst, mi)) found_candidate = true;
+    }
+    assert(found_candidate);
+
+    /* Generativity index may be 0 at end (no *new* candidates last step) */
+    double g = GSSK_GetGenerativityIndex(inst);
+    printf("  Generativity index: %.6f\n", g);
+
+    GSSK_Free(inst);
+    printf("  Motif detection test PASSED\n");
+}
+
+void test_phase9_propose_archetype() {
+    printf("Testing Phase 9 ProposeArchetype...\n");
+
+    /* Same 3-chain model, run 15 steps so the motif is a candidate */
+    const char *model_json =
+        "{"
+        "  \"nodes\": ["
+        "    {\"id\": \"s1\", \"type\": \"source\",  \"value\": 10.0},"
+        "    {\"id\": \"b1\", \"type\": \"storage\", \"value\": 0.0},"
+        "    {\"id\": \"s2\", \"type\": \"source\",  \"value\": 10.0},"
+        "    {\"id\": \"b2\", \"type\": \"storage\", \"value\": 0.0},"
+        "    {\"id\": \"s3\", \"type\": \"source\",  \"value\": 10.0},"
+        "    {\"id\": \"b3\", \"type\": \"storage\", \"value\": 0.0}"
+        "  ],"
+        "  \"edges\": ["
+        "    {\"origin\": \"s1\", \"target\": \"b1\", \"logic\": \"linear\", \"params\": {\"k\": 0.1}},"
+        "    {\"origin\": \"s2\", \"target\": \"b2\", \"logic\": \"linear\", \"params\": {\"k\": 0.1}},"
+        "    {\"origin\": \"s3\", \"target\": \"b3\", \"logic\": \"linear\", \"params\": {\"k\": 0.1}}"
+        "  ],"
+        "  \"config\": {\"t_start\": 0, \"t_end\": 20, \"dt\": 1.0}"
+        "}";
+
+    GSSK_Instance *inst = NULL;
+    assert(GSSK_Init(model_json, &inst) == GSSK_SUCCESS);
+    for (int i = 0; i < 15; i++) GSSK_Step(inst, GSSK_GetDt(inst));
+
+    /* Find first candidate motif */
+    size_t candidate_idx = (size_t)-1;
+    for (size_t mi = 0; mi < GSSK_GetMotifCount(inst); mi++) {
+        if (GSSK_IsMotifCandidate(inst, mi)) { candidate_idx = mi; break; }
+    }
+    assert(candidate_idx != (size_t)-1);
+
+    size_t arch_before = GSSK_GetArchetypeCount(inst);
+    GSSK_Status st = GSSK_ProposeArchetype(inst, candidate_idx, "drain_pair");
+    assert(st == GSSK_SUCCESS);
+    assert(GSSK_GetArchetypeCount(inst) == arch_before + 1);
+
+    /* Duplicate name should fail */
+    st = GSSK_ProposeArchetype(inst, candidate_idx, "drain_pair");
+    assert(st == GSSK_ERR_SCHEMA_VIOLATION);
+
+    /* Mutation log should contain an archetype_proposal record */
+    size_t mut_count = GSSK_GetMutationCount(inst);
+    bool found_proposal = false;
+    for (size_t mi = 0; mi < mut_count; mi++) {
+        const GSSK_MutationRecord *r = GSSK_GetMutationRecord(inst, mi);
+        if (r && r->op == GSSK_MUT_ARCHETYPE_PROPOSAL) { found_proposal = true; break; }
+    }
+    assert(found_proposal);
+    printf("  ProposeArchetype test PASSED (archetype 'drain_pair' registered)\n");
+
+    GSSK_Free(inst);
+}
+
 int main() {
     test_calibration();
     test_ensemble();
@@ -340,5 +460,7 @@ int main() {
     test_producer_composite();
     test_consumer_composite();
     test_user_archetype();
+    test_phase9_motif_detection();
+    test_phase9_propose_archetype();
     return 0;
 }

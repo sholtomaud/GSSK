@@ -291,6 +291,29 @@ export class GSSKSimulator {
     return ptr ? readString(this.#mod, ptr) : null;
   }
 
+  // ── Phase 9 — Pattern discovery / generativity ─────────────────────────────
+
+  get motifCount()          { return this.#mod._GSSK_GetMotifCount(this.#inst); }
+  get generativityIndex()   { return this.#mod._GSSK_GetGenerativityIndex(this.#inst); }
+
+  motifCanon(index) {
+    const ptr = this.#mod._GSSK_GetMotifCanon(this.#inst, index);
+    return ptr ? readString(this.#mod, ptr) : null;
+  }
+
+  motifOccurrence(index)  { return this.#mod._GSSK_GetMotifOccurrence(this.#inst, index); }
+  motifStableSteps(index) { return this.#mod._GSSK_GetMotifStableSteps(this.#inst, index); }
+  isMotifCandidate(index) { return !!this.#mod._GSSK_IsMotifCandidate(this.#inst, index); }
+  motifSize(index)        { return this.#mod._GSSK_GetMotifSize(this.#inst, index); }
+  motifComplexity(index)  { return this.#mod._GSSK_GetMotifComplexity(this.#inst, index); }
+
+  proposeArchetype(motifIndex, name) {
+    const p = writeString(this.#mod, name);
+    const st = this.#mod._GSSK_ProposeArchetype(this.#inst, motifIndex, p);
+    this.#mod._free(p);
+    if (st !== 0) throw new Error(`ProposeArchetype failed: status=${st}`);
+  }
+
   // ── Lifecycle ───────────────────────────────────────────────────────────────
 
   /** Release kernel memory. Call when done — not called automatically. */

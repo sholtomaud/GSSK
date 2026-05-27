@@ -425,6 +425,67 @@ public final class GSSKSimulator {
         return String(cString: cStr)
     }
 
+    // MARK: - Phase 9: Pattern discovery / generativity
+
+    /// Number of distinct structural motifs detected across all steps so far.
+    public var motifCount: Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetMotifCount(p))
+    }
+
+    /// Canonical pattern string for motif at `index`, or `nil` if OOB.
+    public func motifCanon(at index: Int) -> String? {
+        guard let p = instPtr,
+              let cStr = GSSK_GetMotifCanon(p, index) else { return nil }
+        return String(cString: cStr)
+    }
+
+    /// Occurrences of motif at `index` in the most recent step.
+    public func motifOccurrence(at index: Int) -> Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetMotifOccurrence(p, index))
+    }
+
+    /// Consecutive stable steps for motif at `index`.
+    public func motifStableSteps(at index: Int) -> Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetMotifStableSteps(p, index))
+    }
+
+    /// Whether the motif at `index` has been promoted to an archetype candidate.
+    public func isMotifCandidate(at index: Int) -> Bool {
+        guard let p = instPtr else { return false }
+        return GSSK_IsMotifCandidate(p, index)
+    }
+
+    /// Node count for the motif at `index` (2 or 3).
+    public func motifSize(at index: Int) -> Int {
+        guard let p = instPtr else { return 0 }
+        return Int(GSSK_GetMotifSize(p, index))
+    }
+
+    /// Complexity weight (edges / nodes) for the motif at `index`.
+    public func motifComplexity(at index: Int) -> Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetMotifComplexity(p, index)
+    }
+
+    /// Scalar generativity index G(t): new candidates × mean complexity / dt.
+    public var generativityIndex: Double {
+        guard let p = instPtr else { return 0.0 }
+        return GSSK_GetGenerativityIndex(p)
+    }
+
+    /// Promote a candidate motif to a named archetype.
+    /// - Throws: `GSSKError` if the motif is not a candidate or the name clashes.
+    public func proposeArchetype(at motifIndex: Int, name: String) throws {
+        guard let p = instPtr else { throw GSSKError.noInstance }
+        let status = name.withCString { GSSK_ProposeArchetype(p, motifIndex, $0) }
+        guard status == GSSK_SUCCESS else {
+            throw Self.map(status: status, message: "ProposeArchetype failed")
+        }
+    }
+
     // MARK: - Edge access
 
     /// Number of edges (flows) in the model.

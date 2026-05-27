@@ -775,7 +775,8 @@ typedef enum {
   GSSK_MUT_ADD_EDGE,
   GSSK_MUT_DEACTIVATE_EDGE,
   GSSK_MUT_DEACTIVATE_NODE,
-  GSSK_MUT_SET_EDGE_K
+  GSSK_MUT_SET_EDGE_K,
+  GSSK_MUT_ARCHETYPE_PROPOSAL  /**< Phase 9: motif promoted to archetype */
 } GSSK_MutationOp;
 
 /**
@@ -882,6 +883,77 @@ size_t GSSK_GetCompositeCount(GSSK_Instance *inst);
  * @return Pointer to internal string, or NULL if OOB.
  */
 const char *GSSK_GetCompositeID(GSSK_Instance *inst, size_t composite_idx);
+
+/* =========================================================================
+ * Phase 9 — Runtime Pattern Discovery (Generativity)
+ *
+ * After each GSSK_Step the kernel scans the live graph for recurring
+ * connected subgraph motifs (2–3 nodes) defined by node-type composition
+ * and directed connectivity.  Motifs that appear ≥ GSSK_MOTIF_MIN_COUNT
+ * times per step for ≥ GSSK_MOTIF_MIN_STEPS consecutive steps become
+ * archetype candidates, implementing Giannantoni's generativity principle.
+ * ========================================================================= */
+
+/**
+ * @brief Number of distinct structural motifs detected across all steps so far.
+ */
+size_t GSSK_GetMotifCount(GSSK_Instance *inst);
+
+/**
+ * @brief Canonical description of motif at idx.
+ * Format: "N:type0:type1[…]:adj_bits" — N is node count, types are sorted
+ * lexicographically (ties broken by smallest adjacency encoding), adj_bits
+ * encodes the directed adjacency matrix in canonical node order.
+ * @return Internal string valid for instance lifetime; NULL if OOB.
+ */
+const char *GSSK_GetMotifCanon(GSSK_Instance *inst, size_t motif_idx);
+
+/**
+ * @brief Times the motif appeared in the most recent step scan.
+ */
+size_t GSSK_GetMotifOccurrence(GSSK_Instance *inst, size_t motif_idx);
+
+/**
+ * @brief Consecutive steps where the motif met the min-occurrence threshold.
+ */
+size_t GSSK_GetMotifStableSteps(GSSK_Instance *inst, size_t motif_idx);
+
+/**
+ * @brief True if stable_steps >= GSSK_MOTIF_MIN_STEPS (default 10).
+ */
+bool GSSK_IsMotifCandidate(GSSK_Instance *inst, size_t motif_idx);
+
+/**
+ * @brief Number of nodes in the motif (2 or 3).
+ */
+size_t GSSK_GetMotifSize(GSSK_Instance *inst, size_t motif_idx);
+
+/**
+ * @brief Complexity weight: edge_count / node_count.
+ */
+double GSSK_GetMotifComplexity(GSSK_Instance *inst, size_t motif_idx);
+
+/**
+ * @brief Promote a detected motif to a named archetype in the instance's
+ *        registry and append a GSSK_MUT_ARCHETYPE_PROPOSAL mutation record.
+ *
+ * The generated archetype has generic internal node ids "node0" … "nodeN-1"
+ * typed per the motif pattern and wired with linear edges matching the
+ * motif's directed adjacency.  It can then be instantiated via GSSK_AddNode
+ * using the proposed name as "type".
+ *
+ * @return GSSK_SUCCESS, GSSK_ERR_NOT_FOUND (bad idx or not yet a candidate),
+ *         or GSSK_ERR_SCHEMA_VIOLATION (name already registered).
+ */
+GSSK_Status GSSK_ProposeArchetype(GSSK_Instance *inst, size_t motif_idx,
+                                   const char *name);
+
+/**
+ * @brief Scalar generativity index G(t): new candidate motifs this step ×
+ *        mean complexity / dt.  Inspired by Giannantoni 2023 §4.
+ *        Zero when no new candidates emerged in the last step.
+ */
+double GSSK_GetGenerativityIndex(GSSK_Instance *inst);
 
 #ifdef __cplusplus
 }

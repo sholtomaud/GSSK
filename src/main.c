@@ -30,11 +30,31 @@ static char *read_file(const char *path) {
 
 static int cmd_run(int argc, char **argv) {
   if (argc < 1) {
-    fprintf(stderr, "Usage: gssk [run] <model.json> [output.csv]\n");
+    fprintf(stderr, "Usage: gssk [run] <model.json> [output.csv] [--report generativity]\n");
     return EXIT_FAILURE;
   }
 
-  char *data = read_file(argv[0]);
+  /* Parse flags */
+  int report_generativity = 0;
+  const char *model_path  = NULL;
+  const char *output_path = NULL;
+  for (int i = 0; i < argc; i++) {
+    if (strcmp(argv[i], "--report") == 0 && i + 1 < argc &&
+        strcmp(argv[i+1], "generativity") == 0) {
+      report_generativity = 1;
+      i++;
+    } else if (!model_path) {
+      model_path = argv[i];
+    } else if (!output_path) {
+      output_path = argv[i];
+    }
+  }
+  if (!model_path) {
+    fprintf(stderr, "Usage: gssk [run] <model.json> [output.csv] [--report generativity]\n");
+    return EXIT_FAILURE;
+  }
+
+  char *data = read_file(model_path);
   if (!data) return EXIT_FAILURE;
 
   GSSK_Instance *kernel = NULL;
@@ -49,8 +69,8 @@ static int cmd_run(int argc, char **argv) {
   }
 
   FILE *out = stdout;
-  if (argc > 1) {
-    out = fopen(argv[1], "w");
+  if (output_path) {
+    out = fopen(output_path, "w");
     if (!out) {
       perror("Error opening output file");
       GSSK_Free(kernel);
@@ -85,6 +105,37 @@ static int cmd_run(int argc, char **argv) {
   }
 
   if (out != stdout) fclose(out);
+
+  /* --report generativity: print motif summary to stderr */
+  if (report_generativity) {
+    size_t motif_count = GSSK_GetMotifCount(kernel);
+    fprintf(stderr, "\n=== Generativity Report ===\n");
+    fprintf(stderr, "Distinct motifs detected: %zu\n", motif_count);
+    fprintf(stderr, "Generativity index G(t): %.6f\n",
+            GSSK_GetGenerativityIndex(kernel));
+    size_t candidates = 0;
+    for (size_t mi = 0; mi < motif_count; mi++) {
+      if (GSSK_IsMotifCandidate(kernel, mi)) candidates++;
+    }
+    fprintf(stderr, "Archetype candidates:     %zu\n", candidates);
+    if (motif_count > 0) {
+      fprintf(stderr, "\nTop motifs (by stable steps):\n");
+      fprintf(stderr, "  %-50s  %5s  %8s  %8s  %s\n",
+              "pattern", "nodes", "occ/step", "stable", "candidate");
+      /* Print up to 10 motifs, sorted informally (linear scan picks first 10) */
+      size_t printed = 0;
+      for (size_t mi = 0; mi < motif_count && printed < 10; mi++, printed++) {
+        fprintf(stderr, "  %-50s  %5zu  %8zu  %8zu  %s\n",
+                GSSK_GetMotifCanon(kernel, mi),
+                GSSK_GetMotifSize(kernel, mi),
+                GSSK_GetMotifOccurrence(kernel, mi),
+                GSSK_GetMotifStableSteps(kernel, mi),
+                GSSK_IsMotifCandidate(kernel, mi) ? "YES" : "no");
+      }
+    }
+    fprintf(stderr, "===========================\n");
+  }
+
   GSSK_Free(kernel);
   return EXIT_SUCCESS;
 }

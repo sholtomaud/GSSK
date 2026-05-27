@@ -469,28 +469,38 @@ general-purpose ODE library. The wedge is:
 
 ### 9.1 Structural Pattern Detection
 
-- [ ] After each `GSSK_Step`, scan the live graph for recurring subgraph
-      motifs (node-type sequences + connectivity) using a lightweight
-      subgraph isomorphism scan (VF2 or colour-coding for small motifs).
-- [ ] Maintain a motif frequency table; motifs that appear ≥ N times (default
-      N=3) and remain stable across ≥ M consecutive steps (default M=10)
-      are flagged as candidates.
-- [ ] `GSSK_GetMotifCount(inst)` / `GSSK_GetMotif(inst, idx)` accessors.
+- [x] After each `GSSK_Step`, scan the live graph for recurring subgraph
+      motifs (2–3 node connected subgraphs) using canonical form enumeration.
+      Adjacency matrix built from active edges; all pairs (O(N²)) and triples
+      (O(N³), capped at N=64) enumerated per step.
+- [x] Motif canonical form is isomorphism-invariant: type strings sorted,
+      adjacency bits determined by picking the lex-smallest permutation.
+      Handles same-type nodes correctly (up to 6 permutations for 3-node).
+- [x] Motif frequency table (up to 256 entries); motifs appearing ≥ 3 times
+      per step for ≥ 10 consecutive steps become archetype candidates.
+- [x] `GSSK_GetMotifCount`, `GSSK_GetMotifCanon`, `GSSK_GetMotifOccurrence`,
+      `GSSK_GetMotifStableSteps`, `GSSK_IsMotifCandidate`, `GSSK_GetMotifSize`,
+      `GSSK_GetMotifComplexity` accessors added to public API.
 
 ### 9.2 Archetype Proposal API
 
-- [ ] `GSSK_ProposeArchetype(inst, motif_idx, name)` — promotes a detected
-      motif to a named archetype, added to the instance's archetype registry.
-- [ ] Proposed archetypes are included in `GSSK_ExportMutationLog` with
-      `"op": "archetype_proposal"` records.
-- [ ] Serialised in the snapshot block; replayable via `GSSK_Replay`.
+- [x] `GSSK_ProposeArchetype(inst, motif_idx, name)` — promotes a detected
+      candidate motif to a named archetype in the instance's registry.
+      Generates generic node ids (node0…nodeN-1), wires linear edges per
+      adjacency bits, sets default_in/default_out ports.
+- [x] Proposed archetypes logged with `GSSK_MUT_ARCHETYPE_PROPOSAL` op;
+      payload = motif canonical string; replayable via `GSSK_Replay`.
+- [x] Python/JS/Swift bindings: `motifCount`, `motifCanon`, `motifOccurrence`,
+      `motifStableSteps`, `isMotifCandidate`, `motifSize`, `motifComplexity`,
+      `generativityIndex`, `proposeArchetype`.
 
 ### 9.3 Generativity Metric
 
-- [ ] Define a scalar *generativity index* G(t): rate of new stable motifs
-      emerging per unit time, weighted by motif complexity.
-- [ ] `GSSK_GetGenerativityIndex(inst)` — inspired by Giannantoni 2023 §4.
-- [ ] Expose in CLI: `gssk run model.json --report generativity`.
+- [x] Scalar generativity index G(t) = new_candidates × mean_complexity / dt.
+      Zero when no new candidates emerge; spikes when a new motif stabilises.
+- [x] `GSSK_GetGenerativityIndex(inst)` — inspired by Giannantoni 2023 §4.
+- [x] Exposed in CLI: `gssk run model.json --report generativity` prints
+      motif count, G(t), candidate count, and top-10 motifs table to stderr.
 - [ ] Document the metric and its theoretical grounding in
       `docs/giannantoni_assessment.md`.
 
