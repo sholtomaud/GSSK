@@ -475,35 +475,90 @@ static void compute_switch_node(GSSK_Instance *inst, size_t ni,
   }
 }
 
-static void compute_exchange_node(GSSK_Instance *inst, size_t ni,
-                                  const double *state, double *deriv) {
-  /* Transaction exchange diamond.  Distinguish "money" carrier from "goods"
-   * (anything else).  goods_in and money_in are upstream stocks; goods_out
-   * and money_out are downstream stocks. */
-  int goods_in_orig  = -1, money_in_orig  = -1;
-  int goods_out_tgt  = -1, money_out_tgt  = -1;
+/* ---- Transaction diamond: shared physics primitive (ADR 0001) -------------
+ *
+ * Odum's small diamond is both a junction and a coupling ratio.  It has two
+ * authoring forms — the NODE_EXCHANGE hub and the inline `coupled_edge` — and
+ * per ADR 0001 both are backed by the helpers below so their behaviour cannot
+ * diverge.  Three seams are shared, not one:
+ *
+ *   resolve_exchange_legs()      which edges form the diamond
+ *   exchange_primary_flow()      the forward flow, including its money gate
+ *   apply_transaction_coupling() the counter-flow F_money = price x F_primary
+ *
+ * The leg-discovery seam matters because the hand-written NODE_EXCHANGE
+ * Jacobian block re-derived it independently; sharing it is what keeps the RK4
+ * and incipient paths from drifting apart.
+ */
+
+typedef struct {
+  int goods_in;   /* upstream goods stock, -1 if absent */
+  int money_in;   /* upstream money stock, -1 if absent */
+  int goods_out;  /* downstream goods stock, -1 if absent */
+  int money_out;  /* downstream money stock, -1 if absent */
+} ExchangeLegs;
+
+/* Classify the edges incident on exchange node `ni` by carrier.  "money" is a
+ * magic carrier string; anything else counts as goods.  Single-valued and
+ * last-wins — a second same-carrier leg silently replaces the first. */
+static ExchangeLegs resolve_exchange_legs(const GSSK_Instance *inst, size_t ni) {
+  ExchangeLegs L = { -1, -1, -1, -1 };
   for (size_t ei = 0; ei < inst->edge_count; ei++) {
-    GSSK_EdgeInternal *e = &inst->edges[ei];
+    const GSSK_EdgeInternal *e = &inst->edges[ei];
     if (!e->active) continue;
     bool is_money = (strcmp(e->carrier, "money") == 0);
     if ((size_t)e->target_idx == ni) {
-      if (is_money) money_in_orig = e->origin_idx;
-      else          goods_in_orig = e->origin_idx;
+      if (is_money) L.money_in  = e->origin_idx;
+      else          L.goods_in  = e->origin_idx;
     } else if ((size_t)e->origin_idx == ni) {
-      if (is_money) money_out_tgt = e->target_idx;
-      else          goods_out_tgt = e->target_idx;
+      if (is_money) L.money_out = e->target_idx;
+      else          L.goods_out = e->target_idx;
     }
   }
-  if (goods_in_orig < 0) return;
+  return L;
+}
 
-  double F_goods = inst->nodes[ni].node_k * state[goods_in_orig];
-  if (money_in_orig >= 0) F_goods *= state[money_in_orig];
-  double F_money = inst->nodes[ni].node_price * F_goods;
+/* The price this diamond trades at.  Single accessor so Phase C.0 can make
+ * price a node reference in one place and have every path — derivative,
+ * incipient forcing and Jacobian — pick the change up together. */
+static double exchange_price(const GSSK_Instance *inst, size_t ni) {
+  return inst->nodes[ni].node_price;
+}
 
-  deriv[goods_in_orig] -= F_goods;
-  if (goods_out_tgt >= 0) deriv[goods_out_tgt] += F_goods;
-  if (money_in_orig >= 0) deriv[money_in_orig] -= F_money;
-  if (money_out_tgt >= 0) deriv[money_out_tgt] += F_money;
+/* Forward (real) flow through the diamond.  The buyer's money stock gates the
+ * flow as an interaction multiplier — it is not merely the debited account —
+ * so this is shared with the inline form too, not just the coupling ratio. */
+static double exchange_primary_flow(const GSSK_Instance *inst, size_t ni,
+                                    const ExchangeLegs *L, const double *state) {
+  if (L->goods_in < 0) return 0.0;
+  double F = inst->nodes[ni].node_k * state[L->goods_in];
+  if (L->money_in >= 0) F *= state[L->money_in];
+  return F;
+}
+
+/* Apply the money counter-flow paired to a forward flow of F_primary.  Money
+ * runs backwards along the diamond: debited from `money_from`, credited to
+ * `money_to`.  Either endpoint may be absent (-1). */
+static void apply_transaction_coupling(double F_primary, double price,
+                                       int money_from, int money_to,
+                                       double *deriv) {
+  double F_money = price * F_primary;
+  if (money_from >= 0) deriv[money_from] -= F_money;
+  if (money_to   >= 0) deriv[money_to]   += F_money;
+}
+
+static void compute_exchange_node(GSSK_Instance *inst, size_t ni,
+                                  const double *state, double *deriv) {
+  ExchangeLegs L = resolve_exchange_legs(inst, ni);
+  if (L.goods_in < 0) return;
+
+  double F_goods = exchange_primary_flow(inst, ni, &L, state);
+
+  deriv[L.goods_in] -= F_goods;
+  if (L.goods_out >= 0) deriv[L.goods_out] += F_goods;
+
+  apply_transaction_coupling(F_goods, exchange_price(inst, ni),
+                             L.money_in, L.money_out, deriv);
 }
 
 static void compute_derivatives(GSSK_Instance *inst, const double *state,
@@ -1832,23 +1887,17 @@ static void build_jacobian(GSSK_Instance *inst, const double *state, double *J) 
     }
 
     case NODE_EXCHANGE: {
-      /* F_goods = node_k × Q_goods_in (× Q_money_in if present) */
-      int gi = -1, mi = -1, go = -1, mo = -1;
-      for (size_t ei = 0; ei < inst->edge_count; ei++) {
-        GSSK_EdgeInternal *e = &inst->edges[ei];
-        if (!e->active) continue;
-        bool is_m = (strcmp(e->carrier, "money") == 0);
-        if ((size_t)e->target_idx == ni) {
-          if (is_m) mi = e->origin_idx; else gi = e->origin_idx;
-        } else if ((size_t)e->origin_idx == ni) {
-          if (is_m) mo = e->target_idx; else go = e->target_idx;
-        }
-      }
+      /* F_goods = node_k × Q_goods_in (× Q_money_in if present).
+       * Legs and price come from the shared primitive (ADR 0001) so this
+       * Jacobian cannot disagree with compute_exchange_node about which edges
+       * form the diamond or what it trades at. */
+      ExchangeLegs L = resolve_exchange_legs(inst, ni);
+      int gi = L.goods_in, mi = L.money_in, go = L.goods_out, mo = L.money_out;
       if (gi < 0) break;
       double Qg = state[gi];
       double Qm = (mi >= 0) ? state[mi] : 1.0;
       double k  = inst->nodes[ni].node_k;
-      double p  = inst->nodes[ni].node_price;
+      double p  = exchange_price(inst, ni);
       /* ∂/∂Q_goods_in */
       double dFg_dQg = k * Qm;
       J[(size_t)gi * n + (size_t)gi] -= dFg_dQg;
@@ -3186,6 +3235,14 @@ post_step:
 /* Build canonical form for a 3-node motif.  Enumerates all 6 permutations,
  * keeps only those that maintain non-decreasing type order, and picks the
  * lexicographically smallest — giving a proper isomorphism-invariant form. */
+static void safe_str_copy(char *dst, const char *src, size_t cap) {
+  if (!dst || cap == 0) return;
+  size_t len = (src && *src) ? strlen(src) : 0;
+  if (len >= cap) len = cap - 1;
+  if (len > 0) memcpy(dst, src, len);
+  dst[len] = '\0';
+}
+
 static void make_canon_3(char *out, size_t cap,
                           const char *t[3], const bool e[3][3],
                           char best_types[3][32], uint8_t *out_bits) {
@@ -3209,18 +3266,18 @@ static void make_canon_3(char *out, size_t cap,
     char cand[128];
     snprintf(cand, sizeof(cand), "3:%s:%s:%s:%u", t[p0], t[p1], t[p2], (unsigned)bits);
     if (best[0] == '\0' || strcmp(cand, best) < 0) {
-      strncpy(best, cand, sizeof(best) - 1);
+      safe_str_copy(best, cand, sizeof(best));
       best_bits = bits;
-      strncpy(best_t[0], t[p0], 31); best_t[0][31] = '\0';
-      strncpy(best_t[1], t[p1], 31); best_t[1][31] = '\0';
-      strncpy(best_t[2], t[p2], 31); best_t[2][31] = '\0';
+      safe_str_copy(best_t[0], t[p0], sizeof(best_t[0]));
+      safe_str_copy(best_t[1], t[p1], sizeof(best_t[1]));
+      safe_str_copy(best_t[2], t[p2], sizeof(best_t[2]));
     }
   }
-  strncpy(out, best[0] ? best : "3:?:?:?:0", cap - 1); out[cap - 1] = '\0';
+  safe_str_copy(out, best[0] ? best : "3:?:?:?:0", cap);
   if (best_types) {
-    strncpy(best_types[0], best_t[0], 31); best_types[0][31] = '\0';
-    strncpy(best_types[1], best_t[1], 31); best_types[1][31] = '\0';
-    strncpy(best_types[2], best_t[2], 31); best_types[2][31] = '\0';
+    safe_str_copy(best_types[0], best_t[0], 32);
+    safe_str_copy(best_types[1], best_t[1], 32);
+    safe_str_copy(best_types[2], best_t[2], 32);
   }
   if (out_bits) *out_bits = best_bits;
 }
@@ -3237,14 +3294,14 @@ static void record_motif_internal(GSSK_Instance *inst, const char *canon,
   if (inst->motif_count >= GSSK_MOTIF_TABLE_CAP) return;
   GSSK_MotifEntry *m = &inst->motifs[inst->motif_count++];
   memset(m, 0, sizeof(*m));
-  strncpy(m->canon, canon, sizeof(m->canon) - 1);
+  safe_str_copy(m->canon, canon, sizeof(m->canon));
   m->size = size;
   m->edge_bits = edge_bits;
   int ec = 0;
   for (int b = 0; b < 8; b++) if (edge_bits & (1u << b)) ec++;
   m->complexity = (double)ec / size;
   for (int j = 0; j < size && j < 3; j++) {
-    strncpy(m->node_types[j], node_types[j], sizeof(m->node_types[j]) - 1);
+    safe_str_copy(m->node_types[j], node_types[j], sizeof(m->node_types[j]));
   }
   m->occurrence = 1;
 }
