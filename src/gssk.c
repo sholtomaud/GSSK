@@ -3258,18 +3258,18 @@ static void make_canon_3(char *out, size_t cap,
     char cand[128];
     snprintf(cand, sizeof(cand), "3:%s:%s:%s:%u", t[p0], t[p1], t[p2], (unsigned)bits);
     if (best[0] == '\0' || strcmp(cand, best) < 0) {
-      strncpy(best, cand, sizeof(best) - 1);
+      snprintf(best, sizeof(best), "%s", cand);
       best_bits = bits;
-      strncpy(best_t[0], t[p0], 31); best_t[0][31] = '\0';
-      strncpy(best_t[1], t[p1], 31); best_t[1][31] = '\0';
-      strncpy(best_t[2], t[p2], 31); best_t[2][31] = '\0';
+      snprintf(best_t[0], sizeof(best_t[0]), "%s", t[p0]);
+      snprintf(best_t[1], sizeof(best_t[1]), "%s", t[p1]);
+      snprintf(best_t[2], sizeof(best_t[2]), "%s", t[p2]);
     }
   }
-  strncpy(out, best[0] ? best : "3:?:?:?:0", cap - 1); out[cap - 1] = '\0';
+  snprintf(out, cap, "%s", best[0] ? best : "3:?:?:?:0");
   if (best_types) {
-    strncpy(best_types[0], best_t[0], 31); best_types[0][31] = '\0';
-    strncpy(best_types[1], best_t[1], 31); best_types[1][31] = '\0';
-    strncpy(best_types[2], best_t[2], 31); best_types[2][31] = '\0';
+    snprintf(best_types[0], 32, "%s", best_t[0]);
+    snprintf(best_types[1], 32, "%s", best_t[1]);
+    snprintf(best_types[2], 32, "%s", best_t[2]);
   }
   if (out_bits) *out_bits = best_bits;
 }
@@ -3286,14 +3286,14 @@ static void record_motif_internal(GSSK_Instance *inst, const char *canon,
   if (inst->motif_count >= GSSK_MOTIF_TABLE_CAP) return;
   GSSK_MotifEntry *m = &inst->motifs[inst->motif_count++];
   memset(m, 0, sizeof(*m));
-  strncpy(m->canon, canon, sizeof(m->canon) - 1);
+  snprintf(m->canon, sizeof(m->canon), "%s", canon);
   m->size = size;
   m->edge_bits = edge_bits;
   int ec = 0;
   for (int b = 0; b < 8; b++) if (edge_bits & (1u << b)) ec++;
   m->complexity = (double)ec / size;
   for (int j = 0; j < size && j < 3; j++) {
-    strncpy(m->node_types[j], node_types[j], sizeof(m->node_types[j]) - 1);
+    snprintf(m->node_types[j], sizeof(m->node_types[j]), "%s", node_types[j]);
   }
   m->occurrence = 1;
 }
