@@ -61,7 +61,8 @@ typedef struct {
   double  node_k;         /* gain/rate coefficient */
   double  node_C;         /* loop_limited: saturation constant */
   double  node_threshold; /* switch: threshold */
-  double  node_price;     /* exchange: price per unit of goods */
+  double  node_price;     /* exchange: constant price per unit of goods */
+  int     price_idx;      /* exchange: node supplying price, -1 = use node_price */
 } GSSK_NodeInternal;
 
 typedef struct {
@@ -518,11 +519,17 @@ static ExchangeLegs resolve_exchange_legs(const GSSK_Instance *inst, size_t ni) 
   return L;
 }
 
-/* The price this diamond trades at.  Single accessor so Phase C.0 can make
- * price a node reference in one place and have every path — derivative,
- * incipient forcing and Jacobian — pick the change up together. */
-static double exchange_price(const GSSK_Instance *inst, size_t ni) {
-  return inst->nodes[ni].node_price;
+/* The price this diamond trades at.  Single accessor, so every path —
+ * derivative, incipient forcing and Jacobian — resolves price identically.
+ *
+ * `price_node` makes price a state variable rather than a constant: this is
+ * what lets Phase C drive it from M/W and have inflation emerge, rather than
+ * being dialled in by the author.  A price node is read from the *current*
+ * state vector, so within RK4 it is sampled at each stage like any other Q. */
+static double exchange_price(const GSSK_Instance *inst, size_t ni,
+                             const double *state) {
+  int pi = inst->nodes[ni].price_idx;
+  return (pi >= 0) ? state[pi] : inst->nodes[ni].node_price;
 }
 
 /* Forward (real) flow through the diamond.  The buyer's money stock gates the
@@ -557,7 +564,7 @@ static void compute_exchange_node(GSSK_Instance *inst, size_t ni,
   deriv[L.goods_in] -= F_goods;
   if (L.goods_out >= 0) deriv[L.goods_out] += F_goods;
 
-  apply_transaction_coupling(F_goods, exchange_price(inst, ni),
+  apply_transaction_coupling(F_goods, exchange_price(inst, ni, state),
                              L.money_in, L.money_out, deriv);
 }
 
@@ -1897,7 +1904,7 @@ static void build_jacobian(GSSK_Instance *inst, const double *state, double *J) 
       double Qg = state[gi];
       double Qm = (mi >= 0) ? state[mi] : 1.0;
       double k  = inst->nodes[ni].node_k;
-      double p  = exchange_price(inst, ni);
+      double p  = exchange_price(inst, ni, state);
       /* ∂/∂Q_goods_in */
       double dFg_dQg = k * Qm;
       J[(size_t)gi * n + (size_t)gi] -= dFg_dQg;
@@ -2610,6 +2617,9 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         N->node_C         = t->node_C;
         N->node_threshold = t->node_threshold;
         N->node_price     = t->node_price;
+        /* memset above zeroed this, and 0 is a valid node index — an archetype
+         * has no price_node, so it must mean "use the constant". */
+        N->price_idx      = -1;
         /* Built-in param overrides (producer.gate, etc.) */
         if (cJSON_IsObject(nparams)) {
           if (strcmp(def->name, "producer") == 0 && strcmp(t->id, "gate") == 0) {
@@ -2649,6 +2659,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     inst->nodes[node_slot].type          = parse_node_type(type->valuestring);
     inst->nodes[node_slot].initial_value = val->valuedouble;
     inst->nodes[node_slot].active        = true;
+    inst->nodes[node_slot].price_idx     = -1;  /* resolved in second pass */
     inst->state[node_slot]               = val->valuedouble;
 
     /* Optional v2 fields */
@@ -2682,6 +2693,22 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
   }
   /* Final node count = number of primitive slots emitted */
   inst->node_count = node_slot;
+
+  /* Second pass: resolve price_node references (after every node exists, so a
+   * price node may be declared after the exchange node that reads it).  Same
+   * pattern as the coupled_edge resolution below.  An unresolvable id leaves
+   * price_idx at -1, falling back to the constant price. */
+  for (int i = 0; i < n_json_nodes; i++) {
+    cJSON *node = cJSON_GetArrayItem(nodes_arr, i);
+    cJSON *nid  = cJSON_GetObjectItem(node, "id");
+    cJSON *np   = cJSON_GetObjectItem(node, "params");
+    if (!cJSON_IsString(nid) || !cJSON_IsObject(np)) continue;
+    cJSON *pn = cJSON_GetObjectItem(np, "price_node");
+    if (!cJSON_IsString(pn)) continue;
+    int slot = find_node_idx(inst, nid->valuestring);
+    if (slot >= 0)
+      inst->nodes[slot].price_idx = find_node_idx(inst, pn->valuestring);
+  }
 
   /* ---- 2. Edges ---- */
   cJSON *edges_arr = cJSON_GetObjectItem(root, "edges");
@@ -3644,6 +3671,7 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
   inst->nodes[idx].type          = parse_node_type(type->valuestring);
   inst->nodes[idx].initial_value = val->valuedouble;
   inst->nodes[idx].active        = true;
+  inst->nodes[idx].price_idx     = -1;  /* memset zeroed it; 0 is a valid index */
   inst->state[idx]               = val->valuedouble;
   inst->dQ[idx]                  = 0.0;
   inst->k2[idx] = inst->k3[idx] = inst->k4[idx] = 0.0;
@@ -4349,8 +4377,14 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
         cJSON_AddNumberToObject(np, "C", nd->node_C);
       else if (nd->type == NODE_SWITCH)
         cJSON_AddNumberToObject(np, "threshold", nd->node_threshold);
-      else if (nd->type == NODE_EXCHANGE)
+      else if (nd->type == NODE_EXCHANGE) {
         cJSON_AddNumberToObject(np, "price", nd->node_price);
+        /* Emit the reference too, so a price_node survives round-trip rather
+         * than silently collapsing to the constant fallback. */
+        if (nd->price_idx >= 0 && (size_t)nd->price_idx < inst->node_count)
+          cJSON_AddStringToObject(np, "price_node",
+                                  inst->nodes[nd->price_idx].id);
+      }
       cJSON_AddItemToObject(n, "params", np);
     }
 

@@ -1,0 +1,27 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "exchange-price-node-x2",
+    "description": "Phase C.0 — same model as exchange_price_node.json with the price node at 10.0 instead of 5.0, proving the exchange reads the node's value rather than ignoring it. Note the trajectory is NOT simply doubled: the buyer's money stock gates the forward goods flow, so a higher price drains money faster and throttles goods. The invariant that does hold exactly is spent/inventory == price."
+  },
+  "carriers": [
+    { "id": "money", "unit": "AUD", "conserved": true },
+    { "id": "goods", "unit": "kg", "conserved": true }
+  ],
+  "nodes": [
+    { "id": "seller", "type": "source", "value": 1.0, "carrier": "goods" },
+    { "id": "buyer", "type": "storage", "value": 1000.0, "carrier": "money" },
+    { "id": "ex", "type": "exchange", "value": 0.0, "carrier": "goods",
+      "params": { "k": 0.01, "price": 999.0, "price_node": "price" } },
+    { "id": "inventory", "type": "storage", "value": 0.0, "carrier": "goods" },
+    { "id": "spent", "type": "sink", "value": 0.0, "carrier": "money" },
+    { "id": "price", "type": "constant", "value": 10.0, "carrier": "money" }
+  ],
+  "edges": [
+    { "id": "e1", "origin": "seller", "target": "ex", "carrier": "goods" },
+    { "id": "e2", "origin": "buyer", "target": "ex", "carrier": "money" },
+    { "id": "e3", "origin": "ex", "target": "inventory", "carrier": "goods" },
+    { "id": "e4", "origin": "ex", "target": "spent", "carrier": "money" }
+  ],
+  "config": { "t_start": 0, "t_end": 1, "dt": 0.1, "method": "rk4" }
+}

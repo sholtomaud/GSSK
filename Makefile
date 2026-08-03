@@ -25,7 +25,7 @@ TARGET_LIB = $(LIB_DIR)/libgssk.a
 TARGET_CLI = $(BIN_DIR)/gssk
 TARGET_COMPARE = $(BIN_DIR)/csv_compare
 
-.PHONY: all clean test test-update test-advanced test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen
 
@@ -114,6 +114,16 @@ $(TARGET_TEST_ADV): $(TEST_DIR)/test_advanced.c $(TARGET_LIB)
 test-advanced: all $(TARGET_TEST_ADV)
 	@echo "Running advanced API tests..."
 	@./$(TARGET_TEST_ADV)
+
+# Phase C.0 — price_node reference resolution, round-trip, constant fallback
+TARGET_TEST_PRICE = $(BIN_DIR)/test_price_node
+
+$(TARGET_TEST_PRICE): $(TEST_DIR)/test_price_node.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-price-node: all $(TARGET_TEST_PRICE)
+	@echo "Running price_node tests..."
+	@./$(TARGET_TEST_PRICE)
 
 clean: swift-clean
 	rm -rf $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results coverage/

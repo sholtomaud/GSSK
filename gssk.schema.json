@@ -89,8 +89,40 @@
         },
         "type": {
           "type": "string",
-          "enum": ["storage", "source", "sink", "constant"],
-          "description": "storage: dQ/dt computed. source/constant: Q fixed at value. sink: accumulates inflows, not depleted."
+          "enum": ["storage", "source", "sink", "constant",
+                   "interaction", "gain", "loop_limited", "exchange", "switch"],
+          "description": "storage: dQ/dt computed. source/constant: Q fixed at value. sink: accumulates inflows, not depleted. The remaining types are v4 processing nodes: they do not accumulate Q, they compute a flow from their incident edges, and they take a `params` block."
+        },
+        "carrier": {
+          "type": "string",
+          "description": "Odum Position 1 (Code): what substance or entity this node holds. Free string. Does NOT affect ODE integration; used by the carrier-conservation pass, and by the exchange node to tell the money leg from the goods leg."
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Processing-node parameters (v4). Only meaningful for interaction/gain/loop_limited/exchange/switch nodes.",
+          "properties": {
+            "k": {
+              "type": "number",
+              "description": "Rate/gain coefficient for the node's flow."
+            },
+            "C": {
+              "type": "number",
+              "description": "loop_limited: saturation constant."
+            },
+            "threshold": {
+              "type": "number",
+              "description": "switch: the threshold the control stock is compared against."
+            },
+            "price": {
+              "type": "number",
+              "description": "exchange: constant price — units of the money carrier per unit of the goods carrier. Used when price_node is absent or unresolvable. The transaction diamond applies F_money = price x F_goods to the money counter-flow."
+            },
+            "price_node": {
+              "type": "string",
+              "description": "exchange: id of a node whose current state supplies the price, making price a state variable rather than a constant. Takes precedence over price. May refer to a node declared later in the array — references are resolved in a second pass. This is what lets price be driven endogenously (e.g. by M/W) so that inflation emerges rather than being dialled in by the author."
+            }
+          }
         },
         "value": {
           "type": "number",
