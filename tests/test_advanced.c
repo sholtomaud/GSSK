@@ -452,6 +452,124 @@ void test_phase9_propose_archetype() {
     GSSK_Free(inst);
 }
 
+/* GH #29 item 1 — membership must be recorded at expansion time, not inferred
+ * from the "{instance}__{member}" id.  `lim__c` below is declared directly and
+ * prefix-matches composite `lim`; string inference misattributes it. */
+static const char *PHASE8_MEMBERSHIP_MODEL =
+    "{\n"
+    "  \"metadata\": { \"schema_version\": 4 },\n"
+    "  \"archetypes\": {\n"
+    "    \"self_limiter\": {\n"
+    "      \"nodes\": [ { \"id\": \"a\", \"type\": \"storage\", \"value\": 5.0 },\n"
+    "                  { \"id\": \"b\", \"type\": \"storage\", \"value\": 0.0 } ],\n"
+    "      \"edges\": [ { \"id\": \"ab\", \"origin\": \"a\", \"target\": \"b\", \"logic\": \"linear\", \"params\": { \"k\": 0.2 } },\n"
+    "                  { \"id\": \"ba\", \"origin\": \"b\", \"target\": \"a\", \"logic\": \"linear\", \"params\": { \"k\": 0.1 } } ],\n"
+    "      \"ports\": { \"in\": \"a\", \"out\": \"b\" }\n"
+    "    }\n"
+    "  },\n"
+    "  \"nodes\": [\n"
+    "    { \"id\": \"sun\",    \"type\": \"source\",       \"value\": 10.0 },\n"
+    "    { \"id\": \"plant\",  \"type\": \"producer\",     \"value\": 50.0,\n"
+    "      \"params\": { \"k_production\": 0.01, \"k_respiration\": 0.02 } },\n"
+    "    { \"id\": \"lim\",    \"type\": \"self_limiter\", \"value\": 5.0 },\n"
+    "    { \"id\": \"lim__c\", \"type\": \"storage\",      \"value\": 1.0 },\n"
+    "    { \"id\": \"plain\",  \"type\": \"storage\",      \"value\": 0.0 }\n"
+    "  ],\n"
+    "  \"edges\": [\n"
+    "    { \"origin\": \"sun\", \"target\": \"plant\", \"logic\": \"constant\", \"params\": { \"k\": 1.0 } }\n"
+    "  ],\n"
+    "  \"config\": { \"t_start\": 0, \"t_end\": 10, \"dt\": 0.1 }\n"
+    "}";
+
+/* No public node-count accessor; the convention is to walk ids until NULL. */
+static size_t count_nodes(GSSK_Instance *inst) {
+    size_t n = 0;
+    while (GSSK_GetNodeID(inst, n) != NULL) n++;
+    return n;
+}
+
+void test_composite_membership() {
+    printf("Testing Phase 8 composite membership API (GH #29)...\n");
+    GSSK_Instance *inst = NULL;
+    GSSK_Status st = GSSK_Init(PHASE8_MEMBERSHIP_MODEL, &inst);
+    assert(st == GSSK_SUCCESS);
+
+    /* Two composite instances: plant (built-in) and lim (user-defined) */
+    assert(GSSK_GetCompositeCount(inst) == 2);
+
+    size_t plant_c = (size_t)-1, lim_c = (size_t)-1;
+    for (size_t c = 0; c < GSSK_GetCompositeCount(inst); c++) {
+        const char *cid = GSSK_GetCompositeID(inst, c);
+        assert(cid);
+        if (strcmp(cid, "plant") == 0) plant_c = c;
+        if (strcmp(cid, "lim")   == 0) lim_c   = c;
+    }
+    assert(plant_c != (size_t)-1 && lim_c != (size_t)-1);
+
+    /* Archetype each instance was expanded from */
+    assert(strcmp(GSSK_GetCompositeArchetype(inst, plant_c), "producer") == 0);
+    assert(strcmp(GSSK_GetCompositeArchetype(inst, lim_c), "self_limiter") == 0);
+
+    /* Forward direction: node -> owning composite, and role within template */
+    struct { const char *id; const char *role; } members[] = {
+        { "plant__body", "body" },
+        { "plant__gate", "gate" },
+        { "plant__heat", "heat" },
+    };
+    for (size_t i = 0; i < 3; i++) {
+        int ni = GSSK_FindNodeIdx(inst, members[i].id);
+        assert(ni >= 0);
+        assert(strcmp(GSSK_GetNodeComposite(inst, (size_t)ni), "plant") == 0);
+        assert(strcmp(GSSK_GetNodeRole(inst, (size_t)ni), members[i].role) == 0);
+    }
+
+    /* Directly-declared nodes report "" — including `lim__c`, which a
+     * prefix-match would wrongly attribute to composite `lim`. */
+    const char *plain_ids[] = { "sun", "lim__c", "plain" };
+    for (size_t i = 0; i < 3; i++) {
+        int ni = GSSK_FindNodeIdx(inst, plain_ids[i]);
+        assert(ni >= 0);
+        assert(strcmp(GSSK_GetNodeComposite(inst, (size_t)ni), "") == 0);
+        assert(strcmp(GSSK_GetNodeRole(inst, (size_t)ni), "") == 0);
+    }
+
+    /* Inverse direction round-trips: every member of a composite reports that
+     * same composite, and member ids carry the expected namespace prefix. */
+    assert(GSSK_GetCompositeMemberCount(inst, plant_c) == 3);
+    assert(GSSK_GetCompositeMemberCount(inst, lim_c) == 2);
+    for (size_t c = 0; c < GSSK_GetCompositeCount(inst); c++) {
+        const char *cid = GSSK_GetCompositeID(inst, c);
+        for (size_t m = 0; m < GSSK_GetCompositeMemberCount(inst, c); m++) {
+            size_t ni = GSSK_GetCompositeMemberIndex(inst, c, m);
+            assert(ni != (size_t)-1 && ni < count_nodes(inst));
+            assert(strcmp(GSSK_GetNodeComposite(inst, ni), cid) == 0);
+            assert(GSSK_GetNodeRole(inst, ni)[0] != '\0');
+        }
+    }
+
+    /* Out-of-range indices fail loudly rather than reading past the arrays */
+    size_t nc = count_nodes(inst), cc = GSSK_GetCompositeCount(inst);
+    assert(GSSK_GetNodeComposite(inst, nc) == NULL);
+    assert(GSSK_GetNodeRole(inst, nc) == NULL);
+    assert(GSSK_GetCompositeArchetype(inst, cc) == NULL);
+    assert(GSSK_GetCompositeMemberCount(inst, cc) == 0);
+    assert(GSSK_GetCompositeMemberIndex(inst, cc, 0) == (size_t)-1);
+    assert(GSSK_GetCompositeMemberIndex(inst, plant_c, 99) == (size_t)-1);
+    assert(GSSK_GetNodeComposite(NULL, 0) == NULL);
+    assert(GSSK_GetCompositeMemberCount(NULL, 0) == 0);
+
+    /* Membership survives a node added at runtime (AddNode must not inherit
+     * composite 0 from the zeroed struct). */
+    st = GSSK_AddNode(inst, "{\"id\":\"late\",\"type\":\"storage\",\"value\":0.0}");
+    assert(st == GSSK_SUCCESS);
+    int late_idx = GSSK_FindNodeIdx(inst, "late");
+    assert(late_idx >= 0);
+    assert(strcmp(GSSK_GetNodeComposite(inst, (size_t)late_idx), "") == 0);
+
+    GSSK_Free(inst);
+    printf("  Composite membership test PASSED\n");
+}
+
 int main() {
     test_calibration();
     test_ensemble();
@@ -460,6 +578,7 @@ int main() {
     test_producer_composite();
     test_consumer_composite();
     test_user_archetype();
+    test_composite_membership();
     test_phase9_motif_detection();
     test_phase9_propose_archetype();
     return 0;

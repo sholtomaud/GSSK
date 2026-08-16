@@ -62,6 +62,10 @@ typedef struct {
   double  node_C;         /* loop_limited: saturation constant */
   double  node_threshold; /* switch: threshold */
   double  node_price;     /* exchange: price per unit of goods */
+  /* Phase 8 — composite membership.  Recorded at expansion time so consumers
+   * never have to infer membership from the "{instance}__{member}" id. */
+  int     composite_idx;  /* index into inst->composites[]; -1 = declared directly */
+  char    role[64];       /* archetype template id ("body"/"gate"/…); "" if none */
 } GSSK_NodeInternal;
 
 typedef struct {
@@ -132,9 +136,12 @@ typedef struct {
 
 /* Per-instance composite expansion record */
 typedef struct {
-  char composite_id[64];
-  int  in_node_idx;
-  int  out_node_idx;
+  char   composite_id[64];
+  char   archetype[64];    /* archetype this instance was expanded from */
+  int    in_node_idx;
+  int    out_node_idx;
+  size_t first_node_idx;   /* inst->nodes[] slot of member 0 */
+  size_t node_count;       /* members occupy first_node_idx .. +node_count-1 */
 } GSSK_CompositeMap;
 
 /* -------------------------------------------------------------------------
@@ -2546,6 +2553,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     status = GSSK_ERR_MALLOC_FAILED; goto cleanup;
   }
 
+  /* calloc zeroes composite_idx, but 0 is a valid composite index — every node
+   * starts as "declared directly" and only the expansion path below claims one. */
+  for (size_t i = 0; i < inst->node_count; i++)
+    inst->nodes[i].composite_idx = -1;
+
   bool any_quality = false;
   size_t node_slot = 0;
   for (int i = 0; i < n_json_nodes; i++) {
@@ -2592,6 +2604,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
        * sized in section 2. */
       int in_idx = -1, out_idx = -1;
       size_t dummy = 0;
+      size_t this_composite = inst->composite_count;
       /* Place nodes only (edges handled in step 2 below via re-call) */
       for (size_t j = 0; j < def->node_count; j++) {
         GSSK_ANodeTmpl *t = &def->nodes[j];
@@ -2599,6 +2612,8 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         memset(N, 0, sizeof(*N));
         snprintf(N->id, sizeof(N->id), "%.29s__%.29s", id->valuestring, t->id);
         N->id[63] = '\0';
+        N->composite_idx = (int)this_composite;
+        snprintf(N->role, sizeof(N->role), "%s", t->id);
         N->type   = parse_node_type(t->type_str);
         N->initial_value = (strcmp(t->id, def->default_in) == 0)
                              ? val->valuedouble : t->value;
@@ -2623,8 +2638,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       GSSK_CompositeMap *cm = &inst->composites[inst->composite_count++];
       strncpy(cm->composite_id, id->valuestring, 63);
       cm->composite_id[63] = '\0';
-      cm->in_node_idx  = in_idx;
-      cm->out_node_idx = out_idx;
+      snprintf(cm->archetype, sizeof(cm->archetype), "%s", def->name);
+      cm->in_node_idx    = in_idx;
+      cm->out_node_idx   = out_idx;
+      cm->first_node_idx = node_slot;
+      cm->node_count     = def->node_count;
       node_slot += def->node_count;
       (void)dummy;
       continue;
@@ -3639,6 +3657,7 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
 
   size_t idx = inst->node_count;
   memset(&inst->nodes[idx], 0, sizeof(GSSK_NodeInternal));
+  inst->nodes[idx].composite_idx = -1;  /* declared directly, not expanded */
   strncpy(inst->nodes[idx].id, id->valuestring, 63);
   inst->nodes[idx].id[63]        = '\0';
   inst->nodes[idx].type          = parse_node_type(type->valuestring);
@@ -4253,6 +4272,37 @@ size_t GSSK_GetCompositeCount(GSSK_Instance *inst) {
 const char *GSSK_GetCompositeID(GSSK_Instance *inst, size_t composite_idx) {
   if (!inst || composite_idx >= inst->composite_count) return NULL;
   return inst->composites[composite_idx].composite_id;
+}
+
+const char *GSSK_GetCompositeArchetype(GSSK_Instance *inst,
+                                       size_t composite_idx) {
+  if (!inst || composite_idx >= inst->composite_count) return NULL;
+  return inst->composites[composite_idx].archetype;
+}
+
+const char *GSSK_GetNodeComposite(GSSK_Instance *inst, size_t node_idx) {
+  if (!inst || node_idx >= inst->node_count) return NULL;
+  int ci = inst->nodes[node_idx].composite_idx;
+  if (ci < 0 || (size_t)ci >= inst->composite_count) return "";
+  return inst->composites[ci].composite_id;
+}
+
+const char *GSSK_GetNodeRole(GSSK_Instance *inst, size_t node_idx) {
+  if (!inst || node_idx >= inst->node_count) return NULL;
+  return inst->nodes[node_idx].role;
+}
+
+size_t GSSK_GetCompositeMemberCount(GSSK_Instance *inst, size_t composite_idx) {
+  if (!inst || composite_idx >= inst->composite_count) return 0;
+  return inst->composites[composite_idx].node_count;
+}
+
+size_t GSSK_GetCompositeMemberIndex(GSSK_Instance *inst, size_t composite_idx,
+                                    size_t member_idx) {
+  if (!inst || composite_idx >= inst->composite_count) return SIZE_MAX;
+  GSSK_CompositeMap *cm = &inst->composites[composite_idx];
+  if (member_idx >= cm->node_count) return SIZE_MAX;
+  return cm->first_node_idx + member_idx;
 }
 
 /* =========================================================================
