@@ -1,24 +1,26 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://gssk.io/schema/v3/model.json",
-  "title": "GSK Model (Schema v3)",
-  "description": "Schema for General Systems Kernel (GSK) models. Based on Odum's Energy Systems Language. Each inter-block connection carries four channels (Odum 2000, Appendix A): Code (carrier), Force (driving potential, implicit in logic+Q), Flow (rate, computed by logic), and Transformity (quality ratio, computed from quality_input). Schema v3 adds metadata versioning, snapshot support for deterministic replay, topology mutation logging, and multi-carrier declarations.",
+  "$id": "https://gssk.io/schema/v4/model.json",
+  "title": "GSSK Model (Schema v4)",
+  "description": "Schema for General Systems Simulation Kernel (GSSK) models. Based on Odum's Energy Systems Language. Each inter-block connection carries four channels (Odum 2000, Appendix A): Code (carrier), Force (driving potential, implicit in logic+Q), Flow (rate, computed by logic), and Transformity (quality ratio, computed from quality_input).\n\nThis schema describes the PRE-EXPANSION model surface — what a consumer writes and hands to GSSK_Init. It is NOT the post-expansion vocabulary. Composite nodes (see Node.type) are expanded at GSSK_Init time into namespaced primitives, so the node set reported by GSSK_GetNodeID/GSSK_GetNodeTypeString after init is larger than, and typed differently from, the 'nodes' array here. In particular the post-expansion set can contain 'interaction' nodes that no model declared. Query membership with GSSK_GetNodeComposite/GSSK_GetNodeRole rather than parsing the '{instance}__{member}' id convention.\n\nv4 adds the 'archetypes' block and composite node types. v3 added metadata versioning, snapshot support for deterministic replay, topology mutation logging, and multi-carrier declarations. v2 models auto-migrate to v3 with a warning.\n\nAny property whose name begins with an underscore is permitted anywhere and ignored, both by this schema and by the kernel. See examples/household_model_annotated.json, which uses '_note' throughout.",
   "type": "object",
   "required": ["nodes"],
   "additionalProperties": false,
+  "patternProperties": { "^_": true },
 
   "properties": {
     "metadata": { "$ref": "#/$defs/Metadata" },
+    "archetypes": { "$ref": "#/$defs/Archetypes" },
     "nodes":    {
       "type": "array",
       "items": { "$ref": "#/$defs/Node" },
       "minItems": 1,
-      "description": "Ordered array of compartments. The index of each node here is its column index in GSK_GetState()."
+      "description": "Ordered array of compartments. For models with no composite nodes, the index of each node here is its column index in GSSK_GetState(). Composite nodes expand to several state columns, so once any composite is present, resolve indices with GSSK_FindNodeIdx() instead of assuming positional correspondence."
     },
     "edges":    {
       "type": "array",
       "items": { "$ref": "#/$defs/Edge" },
-      "description": "Directed flows between nodes. Omit for a single isolated storage."
+      "description": "Directed flows between nodes. Omit for a single isolated storage. An endpoint naming a composite instance resolves to that composite's declared 'in'/'out' port."
     },
     "config":   { "$ref": "#/$defs/Config" },
     "snapshot": { "$ref": "#/$defs/Snapshot" },
@@ -30,43 +32,192 @@
 
     "Metadata": {
       "type": "object",
-      "description": "Model provenance, versioning, and identity. schema_version is required in v3.",
+      "description": "Model provenance, versioning, and identity.",
       "required": ["schema_version"],
       "additionalProperties": false,
+      "patternProperties": { "^_": true },
       "properties": {
         "schema_version": {
           "type": "integer",
-          "const": 3,
-          "description": "Schema version. v3 supports snapshot/mutation_log/carriers blocks and metadata extensions. v2 models will auto-migrate with warning."
+          "enum": [2, 3, 4],
+          "description": "Schema version. v4 supports the archetypes block and composite node types. v3 supports snapshot/mutation_log/carriers. v2 models auto-migrate to v3 with a warning. Any other value is rejected by GSSK_Init. Defaults to 3 when the metadata block is absent."
         },
         "name":            { "type": "string", "description": "Friendly model name." },
         "description":     { "type": "string", "description": "Prose model description." },
         "author":          { "type": "string", "description": "Serialiser or author name." },
         "created_at":      { "type": "string", "format": "date-time", "description": "ISO8601 creation timestamp. Auto-generated if not provided." },
-        "kernel_version":  { "type": "string", "description": "Semver of GSK kernel that created this model. Defaults to current kernel version at init time." },
+        "kernel_version":  { "type": "string", "description": "Semver of GSSK kernel that created this model. Defaults to current kernel version at init time." },
         "model_hash":      { "type": "string", "description": "SHA256 hex hash of the topology (nodes+edges) for reproducibility check. Auto-computed if not provided." }
       }
     },
 
+    "Archetypes": {
+      "type": "object",
+      "description": "User-defined composite templates, keyed by archetype name. The key becomes a usable value for Node.type. User archetype names are registered after the four built-ins (producer, consumer, misc_box, system_frame) and may not exceed 32 archetypes in total. A user archetype whose name collides with a built-in shadows nothing — the built-in is found first.",
+      "additionalProperties": { "$ref": "#/$defs/ArchetypeDefn" },
+      "propertyNames": { "maxLength": 63 }
+    },
+
+    "ArchetypeDefn": {
+      "type": "object",
+      "description": "One composite template. At expansion time each template node becomes a state node with id '{instance_id}__{template_node_id}', and each template edge becomes an edge with id '{instance_id}__{template_edge_id}'.",
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "maxItems": 16,
+          "description": "Template nodes. Max 16 per archetype.",
+          "items": {
+            "type": "object",
+            "required": ["id", "type"],
+            "additionalProperties": false,
+            "patternProperties": { "^_": true },
+            "properties": {
+              "id":      { "type": "string", "maxLength": 63, "description": "Internal id within the archetype namespace. Becomes the node's 'role' (GSSK_GetNodeRole)." },
+              "type":    { "$ref": "#/$defs/PrimitiveNodeType" },
+              "value":   { "type": "number", "default": 0.0, "description": "Initial state. Overridden by the instance's 'value' for the node named by ports.in." },
+              "carrier": { "type": "string", "description": "Odum Position 1 carrier label. Falls back to the instance's carrier if omitted." },
+              "params":  { "$ref": "#/$defs/NodeParams" }
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 32,
+          "description": "Template edges, wired between template node ids. Max 32 per archetype.",
+          "items": {
+            "type": "object",
+            "required": ["origin", "target"],
+            "additionalProperties": false,
+            "patternProperties": { "^_": true },
+            "properties": {
+              "id":      { "type": "string", "maxLength": 63, "description": "Internal edge id within the archetype namespace." },
+              "origin":  { "type": "string", "description": "Template node id the flow leaves." },
+              "target":  { "type": "string", "description": "Template node id the flow enters." },
+              "logic":   { "$ref": "#/$defs/EdgeLogic", "default": "linear" },
+              "carrier": { "type": "string", "description": "Odum Position 1 carrier label." },
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "patternProperties": { "^_": true },
+                "properties": {
+                  "k":         { "type": "number", "default": 1.0, "description": "Conductance/rate coefficient. Defaults to 1.0 within archetype templates." },
+                  "threshold": { "type": "number", "default": 0.0 }
+                }
+              }
+            }
+          }
+        },
+        "ports": {
+          "type": "object",
+          "description": "Named external attachment points, mapping port name to internal template node id. The 'in' and 'out' ports are special: an external edge naming the composite instance as its target resolves to 'in', and as its origin resolves to 'out'. Without them the composite cannot be wired to the rest of the model, and the instance's declared 'value' is not applied to any member.",
+          "additionalProperties": { "type": "string", "maxLength": 63 },
+          "properties": {
+            "in":  { "type": "string", "description": "Template node id receiving inbound external flows." },
+            "out": { "type": "string", "description": "Template node id supplying outbound external flows." }
+          }
+        }
+      }
+    },
+
+    "PrimitiveNodeType": {
+      "type": "string",
+      "description": "A fundamental (non-composite) node type. storage: dQ/dt computed. source/constant: Q fixed at value. sink: accumulates inflows, not depleted. interaction/gain/loop_limited/exchange/switch: Phase 7 processing nodes, parameterised via the node 'params' block. NOTE: the kernel does not reject unrecognised type strings — parse_node_type() falls back to 'storage'. This enum is therefore advisory for authoring, not a description of what GSSK_Init will refuse.",
+      "enum": [
+        "storage",
+        "source",
+        "sink",
+        "constant",
+        "interaction",
+        "gain",
+        "loop_limited",
+        "exchange",
+        "switch"
+      ]
+    },
+
     "Snapshot": {
       "type": "object",
-      "description": "State snapshot for deterministic replay (implemented in Phase 0.3). Contains full state vector, solver state, and RNG seed.",
-      "additionalProperties": false
+      "description": "State snapshot for deterministic replay, as emitted by GSSK_SerializeSnapshot.",
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "t":     { "type": "number", "description": "Simulation time at capture." },
+        "dt":    { "type": "number", "description": "Time step in force at capture." },
+        "step":  { "type": "number", "description": "Steps taken since init." },
+        "state": {
+          "type": "array",
+          "description": "Live state keyed by post-expansion node id — one entry per state node, so composite members appear individually under their '{instance}__{member}' ids.",
+          "items": {
+            "type": "object",
+            "required": ["id", "Q"],
+            "additionalProperties": false,
+            "patternProperties": { "^_": true },
+            "properties": {
+              "id": { "type": "string", "description": "Post-expansion node id." },
+              "Q":  { "type": "number", "description": "Current state value." },
+              "Tr": { "type": "number", "description": "Transformity; 0.0 when quality accounting is disabled." }
+            }
+          }
+        },
+        "edge_k": {
+          "type": "array",
+          "description": "Live conductance of every NAMED edge, including composite-internal edges (which are named '{instance}__{template_edge}'). Edges declared without an 'id' are omitted entirely, so this array is not positionally aligned with the model's 'edges' array.",
+          "items": {
+            "type": "object",
+            "required": ["id", "k"],
+            "additionalProperties": false,
+            "patternProperties": { "^_": true },
+            "properties": {
+              "id": { "type": "string", "description": "Edge id." },
+              "k":  { "type": "number", "description": "Current conductance." }
+            }
+          }
+        },
+        "solver": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": { "^_": true },
+          "properties": {
+            "confidence":         { "type": "string", "enum": ["high", "degraded"] },
+            "incipient_eligible": { "type": "boolean" }
+          }
+        },
+        "rng_state": {
+          "type": ["object", "null"],
+          "default": null,
+          "description": "Reserved. The kernel currently emits null — the stochastic entry points (GSSK_EnsembleForecast, GSSK_CalibrateMonteCarlo) are not yet seedable, so a snapshot does not make them reproducible."
+        },
+        "mutation_log": { "$ref": "#/$defs/MutationLog" }
+      }
     },
 
     "MutationLog": {
       "type": "array",
-      "description": "Topology mutation history (implemented in Phase 4). Each entry records a successful AddNode/AddEdge/SetEdgeK operation with causality.",
-      "items": { "type": "object" }
+      "description": "Topology mutation history. Each entry records a successful AddNode/AddEdge/DeactivateEdge/DeactivateNode/SetEdgeK operation with causality.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^_": true },
+        "properties": {
+          "t":         { "type": "number", "description": "Simulation time the mutation was applied." },
+          "op":        { "type": "string", "enum": ["add_node", "add_edge", "deactivate_edge", "deactivate_node", "set_edge_k"] },
+          "target_id": { "type": "string", "description": "Node or edge id the operation acted on." },
+          "payload":   { "type": "string", "description": "Operation-specific detail (e.g. the JSON fragment added)." },
+          "cause":     { "type": "string", "description": "Attribution string; defaults to 'user'." }
+        }
+      }
     },
 
     "Carriers": {
       "type": "array",
-      "description": "Multi-carrier type definitions (implemented in Phase 5). Each carrier can be conserved independently.",
+      "description": "Multi-carrier type definitions. Each carrier can be conserved independently.",
       "items": {
         "type": "object",
         "required": ["id"],
         "additionalProperties": false,
+        "patternProperties": { "^_": true },
         "properties": {
           "id":        { "type": "string", "description": "Unique carrier identifier (e.g. 'money', 'energy', 'material')." },
           "unit":      { "type": "string", "description": "Physical unit (e.g. 'AUD', 'kWh', 'kg')." },
@@ -77,25 +228,30 @@
 
     "Node": {
       "type": "object",
-      "description": "A compartment (storage, source, sink, or constant reference value).",
+      "description": "A compartment. Either a fundamental type (storage/source/sink/constant or a Phase 7 processing node) or a composite that expands at GSSK_Init time.",
       "required": ["id", "type", "value"],
       "additionalProperties": false,
+      "patternProperties": { "^_": true },
       "properties": {
         "id": {
           "type": "string",
           "minLength": 1,
           "maxLength": 63,
-          "description": "Unique identifier. Max 63 chars (C internal limit). Stable across model mutations."
+          "description": "Unique identifier. Max 63 chars (C internal limit). Stable across model mutations. For composite nodes the id becomes the namespace prefix for expanded members, which truncates to 29 chars in member ids. An id may legitimately contain '__' — that does not make it a composite member."
         },
         "type": {
           "type": "string",
-          "enum": ["storage", "source", "sink", "constant"],
-          "description": "storage: dQ/dt computed. source/constant: Q fixed at value. sink: accumulates inflows, not depleted."
+          "description": "Node type. One of: (a) a fundamental type — storage, source, sink, constant, interaction, gain, loop_limited, exchange, switch; (b) a built-in composite — producer (expands to body/gate/heat), consumer (body/heat), misc_box (box), system_frame (structural only, recorded as a single constant node); or (c) the name of any archetype declared in the top-level 'archetypes' block. Because (c) is open-ended this cannot be a closed enum. Unrecognised strings are NOT rejected — the kernel falls back to 'storage'."
         },
         "value": {
           "type": "number",
-          "description": "Initial state Q at t_start, or fixed value for source/constant nodes."
+          "description": "Initial state Q at t_start, or fixed value for source/constant nodes. For a composite, this is applied to the member named by the archetype's 'in' port."
         },
+        "carrier": {
+          "type": "string",
+          "description": "Odum Position 1 (Code) carrier label for this node. Metadata only; does not affect ODE integration. For a composite, applied to every expanded member that does not declare its own."
+        },
+        "params": { "$ref": "#/$defs/NodeParams" },
         "quality_input": {
           "type": "number",
           "minimum": 0.0,
@@ -115,33 +271,47 @@
       }
     },
 
+    "NodeParams": {
+      "type": "object",
+      "description": "Node-level parameters. The first four configure Phase 7 processing nodes; the remainder override internal edge conductances on built-in composites and are ignored on other node types.",
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "k":         { "type": "number", "description": "Gain/rate coefficient for processing nodes." },
+        "C":         { "type": "number", "description": "Saturation constant for loop_limited nodes: F = k·Q/(1 + Q/C)." },
+        "threshold": { "type": "number", "description": "Switching threshold for switch nodes." },
+        "price":     { "type": "number", "description": "Price per unit of goods for exchange nodes." },
+        "k_production":  { "type": "number", "description": "producer composites only: gain of the internal 'gate' interaction node. Default 0.01." },
+        "k_respiration": { "type": "number", "description": "producer composites only: conductance of the internal body→heat 'resp' edge. Default 0.05." },
+        "k_metabolism":  { "type": "number", "description": "consumer composites only: conductance of the internal body→heat 'metab' edge. Default 0.1." }
+      }
+    },
+
     "Edge": {
       "type": "object",
-      "description": "A directed flow between two nodes. Implements Odum's four-position inter-block connection: carrier (Code), logic+Q (Force+Flow), quality_input on origin node (Transformity).",
-      "required": ["origin", "target", "logic", "params"],
+      "description": "A directed flow between two nodes. Implements Odum's four-position inter-block connection: carrier (Code), logic+Q (Force+Flow), quality_input on origin node (Transformity).\n\nOnly 'origin' and 'target' are unconditionally required. 'logic' and 'params.k' are required UNLESS the edge touches a Phase 7 processing node (interaction, gain, loop_limited, exchange, switch), in which case logic defaults to 'linear' and k defaults to 1.0. That condition depends on the types of the referenced nodes, which JSON Schema cannot resolve, so both fields are declared optional here and the rule is enforced by GSSK_Init.",
+      "required": ["origin", "target"],
       "additionalProperties": false,
+      "patternProperties": { "^_": true },
       "properties": {
         "id": {
           "type": "string",
+          "maxLength": 63,
           "description": "Stable identifier. Required for GSSK_SetEdgeK(), GSSK_DeactivateEdge(), and coupled_edge references."
         },
         "origin": {
           "type": "string",
-          "description": "ID of the node the flow leaves."
+          "description": "ID of the node the flow leaves. May name a composite instance, resolving to its 'out' port."
         },
         "target": {
           "type": "string",
-          "description": "ID of the node the flow enters."
+          "description": "ID of the node the flow enters. May name a composite instance, resolving to its 'in' port."
         },
         "carrier": {
           "type": "string",
           "description": "Odum Position 1 (Code): what substance or entity is flowing. Free string — use domain conventions: 'energy', 'money', 'material', 'information', 'force', or specific types ('H2O', 'GBP', 'bits'). Does NOT affect ODE integration. Used by quality accounting pass and UI."
         },
-        "logic": {
-          "type": "string",
-          "enum": ["constant", "linear", "interaction", "limit", "threshold"],
-          "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly."
-        },
+        "logic": { "$ref": "#/$defs/EdgeLogic" },
         "params": { "$ref": "#/$defs/EdgeParams" },
         "output_mode": {
           "type": "string",
@@ -162,15 +332,21 @@
       }
     },
 
+    "EdgeLogic": {
+      "type": "string",
+      "enum": ["constant", "linear", "interaction", "limit", "threshold"],
+      "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly. Unlike node types, an unrecognised logic string IS rejected by GSSK_Init."
+    },
+
     "EdgeParams": {
       "type": "object",
       "description": "Logic-specific flow parameters.",
-      "required": ["k"],
       "additionalProperties": false,
+      "patternProperties": { "^_": true },
       "properties": {
         "k": {
           "type": "number",
-          "description": "Conductance/rate coefficient. Modifiable at runtime via GSSK_SetEdgeK(). For constant logic: flow = k. For linear: flow = k × Q_origin."
+          "description": "Conductance/rate coefficient. Modifiable at runtime via GSSK_SetEdgeK(). For constant logic: flow = k. For linear: flow = k × Q_origin. Required unless the edge touches a Phase 7 processing node, where it defaults to 1.0."
         },
         "control_node": {
           "type": "string",
@@ -188,6 +364,7 @@
       "type": "object",
       "description": "Simulation parameters. All fields optional — defaults shown.",
       "additionalProperties": false,
+      "patternProperties": { "^_": true },
       "properties": {
         "t_start": {
           "type": "number",

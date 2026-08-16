@@ -18,18 +18,23 @@ This is analogous to the distinction in dimensional analysis between *fundamenta
 
 ## Fundamental Node Types (Odum Fig 1.2a)
 
-Odum identifies seven fundamental symbol types. GSSK currently implements three natively; the remainder are on the Phase 7 roadmap.
+Odum identifies seven fundamental symbol types. All are implemented, along with a `constant` type that has no Odum symbol.
 
 | Odum symbol | Name | GSSK status | GSSK `type` |
 |---|---|---|---|
 | Circle with arrow | **Source** — outside source of inflows | ✓ implemented | `"source"` |
 | Closed tank | **Storage** — accumulates state Q | ✓ implemented | `"storage"` |
 | Ground symbol | **Heat Sink** — pathway of used energy | ✓ implemented | `"sink"` |
-| Arrowhead (×) | **Interaction** — production process, work gate | ⚠ Phase 7 | `"interaction"` *(planned)* |
-| Triangle | **Constant Gain Amplifier** — output ∝ control input | ⚠ Phase 7 | `"gain"` *(planned)* |
-| D-shape | **Loop-Limited Converter** — Michaelis-Menten recycling | ⚠ Phase 7 | `"loop_limited"` *(planned)* |
-| Diamond | **Exchange** — couples two carrier flows via price | ⚠ Phase 7 | `"exchange"` *(planned)* |
-| Hourglass | **Switch / Digital Box** — on/off threshold process | ⚠ Phase 7 | `"switch"` *(planned)* |
+| Arrowhead (×) | **Interaction** — production process, work gate | ✓ implemented | `"interaction"` |
+| Triangle | **Constant Gain Amplifier** — output ∝ control input | ✓ implemented | `"gain"` |
+| D-shape | **Loop-Limited Converter** — Michaelis-Menten recycling | ✓ implemented | `"loop_limited"` |
+| Diamond | **Exchange** — couples two carrier flows via price | ✓ implemented | `"exchange"` |
+| Hourglass | **Switch / Digital Box** — on/off threshold process | ✓ implemented | `"switch"` |
+| *(none)* | **Constant** — fixed reference value | ✓ implemented | `"constant"` |
+
+The five processing types (`interaction`, `gain`, `loop_limited`, `exchange`, `switch`) are configured through the node's `params` block — `k`, `C`, `threshold`, `price` — rather than through edge parameters. An edge touching a processing node may therefore omit `logic` and `params.k`, which default to `"linear"` and `1.0`; every other edge must supply both.
+
+Note that an unrecognised `type` string is **not** rejected. The kernel falls back to `"storage"`, so a typo produces a silently wrong model rather than an error.
 
 ### Implemented node types
 
@@ -87,18 +92,77 @@ An on/off process node controlled by one or more threshold conditions (Odum Fig 
 
 Odum's *composite symbols* are aggregates — each is a named combination of fundamental nodes and flows that recurs frequently enough to warrant its own shorthand. Like derived dimensions, they decompose into fundamentals.
 
-| Odum symbol | Name | Composition | GSSK status |
-|---|---|---|---|
-| Rounded rectangle | **Producer** | `storage` + autocatalytic `interaction` + `sink` | ⚠ Phase 8 |
-| Hexagon | **Consumer** | `storage` + multiple `interaction` inputs + `sink` | ⚠ Phase 8 |
-| Dashed rectangle | **System / Sub-system Frame** | Encapsulation boundary over a named subgraph | ⚠ Phase 8 |
-| Plain rectangle | **Miscellaneous Box** | Generic unspecified processing unit | ⚠ Phase 8 |
-| Hourglass group | **Switching Box** | `switch` + internal subgraph with named control | ⚠ Phase 8 |
+Composites are **shipped** as of Phase 8. A composite node is written like any other node — `{"id": "plant", "type": "producer", "value": 50.0}` — and is expanded into its constituent primitives at `GSSK_Init` time. Nothing composite survives into the solver; by the time you can step the model, only fundamentals exist.
 
-Phase 8 will introduce:
-1. Built-in composite types expanding at `GSSK_Init` time.
-2. User-defined archetypes in the model JSON (`"archetypes"` block).
-3. Runtime pattern discovery — self-stabilising motifs proposed as new archetypes (Phase 9, see below).
+| Odum symbol | `type` | Expands to | GSSK status |
+|---|---|---|---|
+| Rounded rectangle | `producer` | `body` (storage) + `gate` (interaction, autocatalytic) + `heat` (sink) | ✅ shipped |
+| Hexagon | `consumer` | `body` (storage) + `heat` (sink) | ✅ shipped |
+| Plain rectangle | `misc_box` | `box` (storage) | ✅ shipped |
+| Dashed rectangle | `system_frame` | *(nothing)* — recorded as a single `constant` node | ⚠ partial |
+| Hourglass group | **Switching Box** | `switch` + internal subgraph with named control | ❌ not implemented |
+
+`system_frame` is structural only: it reserves the name but expands to no subgraph, so it cannot yet encapsulate a named set of nodes. Treat it as a placeholder.
+
+### Expansion and naming
+
+Each expanded member is named `{instance_id}__{template_node_id}`, and each internal edge `{instance_id}__{template_edge_id}`. Both halves truncate to 29 characters. So `plant` above becomes three state nodes — `plant__body`, `plant__gate`, `plant__heat` — wired by four internal edges `plant__feed_a`, `plant__feed_b`, `plant__prod`, `plant__resp`.
+
+Two consequences worth internalising:
+
+- **Node indices are no longer positional.** Without composites, the *n*th entry of the model's `nodes` array is column *n* of `GSSK_GetState()`. Once any composite is present that correspondence breaks. Resolve indices with `GSSK_FindNodeIdx()`.
+- **Never infer membership from the id.** A node declared directly may legitimately contain `__`, and a composite id containing `__` cannot be split unambiguously. Use the membership API below.
+
+An edge naming a composite instance as an endpoint resolves to that composite's declared port: `{"origin": "sun", "target": "plant"}` attaches to `plant`'s `in` port (`body`), not to some aggregate.
+
+### Built-in parameter overrides
+
+The instance's `params` block tunes internal conductances:
+
+| `type` | Parameter | Overrides | Default |
+|---|---|---|---|
+| `producer` | `k_production` | gain of the internal `gate` node | 0.01 |
+| `producer` | `k_respiration` | `body → heat` edge (`resp`) | 0.05 |
+| `consumer` | `k_metabolism` | `body → heat` edge (`metab`) | 0.1 |
+
+### User-defined archetypes
+
+A top-level `"archetypes"` block registers your own templates; the key becomes a usable `type`. Ports define external attachment — without an `in`/`out` port the composite cannot be wired to the rest of the model, and the instance's `value` is not applied to any member.
+
+```jsonc
+{
+  "metadata": { "schema_version": 4 },
+  "archetypes": {
+    "self_limiter": {
+      "nodes": [ { "id": "a", "type": "storage", "value": 5 },
+                 { "id": "b", "type": "storage", "value": 0 } ],
+      "edges": [ { "id": "ab", "origin": "a", "target": "b", "logic": "linear", "params": { "k": 0.2 } },
+                 { "id": "ba", "origin": "b", "target": "a", "logic": "linear", "params": { "k": 0.1 } } ],
+      "ports": { "in": "a", "out": "b" }
+    }
+  },
+  "nodes": [ { "id": "lim", "type": "self_limiter", "value": 5.0 } ]
+}
+```
+
+Limits: 32 archetypes (4 built-ins included), 16 nodes and 32 edges per archetype, 128 composite instances per model. Built-ins are matched first, so a user archetype cannot shadow one. An unrecognised `type` is **not** an error — the kernel falls back to `storage`.
+
+### Querying the expansion
+
+Membership is recorded during expansion and exposed in both directions, so consumers never parse ids:
+
+| Function | Returns |
+|---|---|
+| `GSSK_GetCompositeCount` / `GSSK_GetCompositeID` | enumerate composite instances |
+| `GSSK_GetCompositeArchetype` | which archetype an instance came from |
+| `GSSK_GetNodeComposite` | owning instance id, or `""` if declared directly |
+| `GSSK_GetNodeRole` | member's role in the template (`body`, `gate`, `heat`) |
+| `GSSK_GetCompositeMemberCount` / `GSSK_GetCompositeMemberIndex` | iterate an instance's members |
+| `GSSK_GetArchetypeCount` / `GSSK_GetArchetypeName` | enumerate registered archetypes |
+
+`GSSK_GetNodeRole` is what you want to aggregate "the storage of every producer" — it is stable across renamings of the instance, which string-matching is not.
+
+Runtime pattern discovery — self-stabilising motifs proposed as new archetypes — is Phase 9, see below.
 
 ---
 
@@ -171,7 +235,11 @@ For longer chains and cyclic interaction networks, GSSK applies a Padé-(3,3) ma
 
 ### Generativity (Phase 9)
 
-Giannantoni's deeper claim is that systems do not merely *transform* — they *originate* new qualities. Structural patterns that recur and self-stabilise in a live graph are candidates for higher-order composite types. Phase 9 will implement a motif-detection layer that operationalises this principle computationally: detecting recurring subgraph patterns, proposing them as named archetypes, and computing a *generativity index* G(t) that measures the rate at which new stable patterns emerge.
+Giannantoni's deeper claim is that systems do not merely *transform* — they *originate* new qualities. Structural patterns that recur and self-stabilise in a live graph are candidates for higher-order composite types.
+
+Phase 9 is **shipped**. After each `GSSK_Step` the kernel scans the live graph for recurring connected subgraph motifs of 2–3 nodes, identified by node-type composition and directed connectivity. A motif seen at least 3 times per step for 10 consecutive steps becomes a *candidate* — inspect the table with `GSSK_GetMotifCount`, `GSSK_GetMotifCanon`, `GSSK_GetMotifOccurrence`, `GSSK_GetMotifStableSteps` and `GSSK_IsMotifCandidate`. `GSSK_ProposeArchetype` promotes a candidate to a named archetype registered in the running instance, which is then usable as a node `type` exactly like a user-declared one. `GSSK_GetGenerativityIndex` reports G(t), the rate at which new stable patterns emerge.
+
+The scan is skipped for graphs above 64 nodes, so on large models the motif table stays empty by design.
 
 ---
 
@@ -210,7 +278,17 @@ Every structural change (add node, add edge, deactivate, reclassify, set k) is a
 
 ## Schema Versioning
 
-The JSON model must include `"schema_version": 3` in `metadata`. Older versions are rejected. Phase 7 will introduce `schema_version: 4` with the corrected node type taxonomy; a migration tool will convert v3 models automatically.
+The JSON model declares `"schema_version"` in `metadata`. The kernel accepts **2, 3 or 4**; any other value is rejected with an error naming the supported set. A v2 model is auto-migrated to v3 at init with a warning. When the `metadata` block is absent entirely, the version defaults to 3.
+
+| Version | Adds |
+|---|---|
+| 2 | baseline; auto-migrates to 3 |
+| 3 | `snapshot`, `mutation_log`, `carriers`, metadata versioning |
+| 4 | `archetypes` block and composite node types |
+
+`GSSK_GetSchemaVersion` reports the version of the loaded model. The CLI migrates in place: `gssk migrate --from 2 in.json out.json` and `gssk migrate --from 3 in.json out.json`.
+
+The published `gssk.schema.json` validates the **pre-expansion** surface — the document you hand to `GSSK_Init`. It is not the post-expansion vocabulary: after init the node set is larger and can contain `interaction` nodes no model declared. Documents emitted by `GSSK_SerializeSnapshot` validate against the same schema, but their `nodes` array is the expanded one.
 
 ---
 

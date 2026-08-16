@@ -45,7 +45,7 @@ export interface GSSKModule {
   /** Free a string returned by SerializeModel/SerializeSnapshot. */
   _GSSK_FreeString(ptr: number): void;
 
-  /** Schema version of the loaded model (2 or 3). */
+  /** Schema version of the loaded model (2, 3, or 4). v2 auto-migrates to 3 at init. */
   _GSSK_GetSchemaVersion(kernelPtr: number): number;
   /** Model name from metadata.name. Returns pointer to C string. */
   _GSSK_GetModelName(kernelPtr: number): number;
