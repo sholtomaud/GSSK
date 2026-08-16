@@ -6,8 +6,21 @@
 
 // --- Helper Functions ---
 
-static double get_random_double(double min, double max) {
-  return min + ((double)rand() / RAND_MAX) * (max - min);
+/* All randomness routes through the instance PRNG (see GSSK_SetSeed).  Using
+ * libc rand() here would make results depend on process-global state that any
+ * other instance — or the host application — could reset underneath us. */
+static double get_random_double(GSSK_Instance *inst, double min, double max) {
+  return GSSK_NextRandomUniform(inst, min, max);
+}
+
+/* Unbiased index in [0, n) via rejection sampling; the modulo of a 64-bit draw
+ * would skew toward low indices. */
+static int rand_index(GSSK_Instance *inst, int n) {
+  uint64_t bound = (uint64_t)n;
+  uint64_t limit = UINT64_MAX - (UINT64_MAX % bound);
+  uint64_t r;
+  do { r = GSSK_NextRandom(inst); } while (r >= limit);
+  return (int)(r % bound);
 }
 
 static double interpolate(double t, double t1, double v1, double t2, double v2) {
@@ -67,12 +80,10 @@ GSSK_EnsembleResult *GSSK_EnsembleForecast(GSSK_Instance *inst, size_t runs,
     original_ks[i] = GSSK_GetEdgeK(inst, i);
   }
 
-  // srand is handled at higher level or by system in WASM
-
   for (size_t r = 0; r < runs; r++) {
     // Perturb parameters
     for (size_t i = 0; i < edge_count; i++) {
-      double p = get_random_double(1.0 - perturbation, 1.0 + perturbation);
+      double p = get_random_double(inst, 1.0 - perturbation, 1.0 + perturbation);
       GSSK_SetEdgeK(inst, i, original_ks[i] * p);
     }
 
@@ -203,13 +214,11 @@ GSSK_Status GSSK_CalibrateMonteCarlo(GSSK_Instance *inst,
   double *best_params = malloc(ctx.param_count * sizeof(double));
   double best_fitness = INFINITY;
 
-  // srand handled globally
-
   // Initialize Population
   for (int i = 0; i < pop_size; i++) {
     for (size_t j = 0; j < ctx.param_count; j++) {
       // Assuming k is in range [0, 10] for now as a heuristic
-      population[i * ctx.param_count + j] = get_random_double(0.0, 10.0);
+      population[i * ctx.param_count + j] = get_random_double(inst, 0.0, 10.0);
     }
     fitness[i] = calculate_fitness(&ctx, &population[i * ctx.param_count]);
     if (fitness[i] < best_fitness) {
@@ -224,14 +233,14 @@ GSSK_Status GSSK_CalibrateMonteCarlo(GSSK_Instance *inst,
     for (int i = 0; i < pop_size; i++) {
       // Mutation
       int a, b, c;
-      do { a = rand() % pop_size; } while (a == i);
-      do { b = rand() % pop_size; } while (b == i || b == a);
-      do { c = rand() % pop_size; } while (c == i || c == a || c == b);
+      do { a = rand_index(inst, pop_size); } while (a == i);
+      do { b = rand_index(inst, pop_size); } while (b == i || b == a);
+      do { c = rand_index(inst, pop_size); } while (c == i || c == a || c == b);
 
       double *trial = malloc(ctx.param_count * sizeof(double));
-      int R = rand() % ctx.param_count;
+      int R = rand_index(inst, (int)ctx.param_count);
       for (size_t j = 0; j < ctx.param_count; j++) {
-        if (get_random_double(0, 1) < CR || j == (size_t)R) {
+        if (get_random_double(inst, 0, 1) < CR || j == (size_t)R) {
           trial[j] = population[a * ctx.param_count + j] +
                      F * (population[b * ctx.param_count + j] -
                           population[c * ctx.param_count + j]);

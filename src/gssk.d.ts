@@ -138,6 +138,21 @@ export interface GSSKModule {
    */
   _GSSK_Replay(initialJsonPtr: number, mutationsJsonPtr: number, targetT: number, outInstPtrPtr: number): number;
 
+  /**
+   * Randomness. Only _GSSK_EnsembleForecast and _GSSK_CalibrateMonteCarlo
+   * consume it; stepping and gradient calibration are fully deterministic.
+   * The generator is per-instance and seeded at init, so same model + same
+   * seed gives bit-identical results. Seeds are uint64 and exceed the exact
+   * range of a JS number — pass them as BigInt.
+   */
+  _GSSK_SetSeed(kernelPtr: number, seed: bigint): void;
+  /** Seed last set (BigInt). Capture this in a run manifest. */
+  _GSSK_GetSeed(kernelPtr: number): bigint;
+  /** Next 64-bit draw on the instance stream. Advances it. */
+  _GSSK_NextRandom(kernelPtr: number): bigint;
+  /** Next draw uniformly in [min, max). Advances the stream. */
+  _GSSK_NextRandomUniform(kernelPtr: number, min: number, max: number): number;
+
   /** Phase 8 — Composite node types & archetypes. */
   /** Number of archetypes registered (built-in + user-defined). */
   _GSSK_GetArchetypeCount(kernelPtr: number): number;

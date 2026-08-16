@@ -276,7 +276,8 @@ WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_
 "_GSSK_GetArchetypeCount","_GSSK_GetArchetypeName",\
 "_GSSK_GetCompositeCount","_GSSK_GetCompositeID",\
 "_GSSK_GetCompositeArchetype","_GSSK_GetNodeComposite","_GSSK_GetNodeRole",\
-"_GSSK_GetCompositeMemberCount","_GSSK_GetCompositeMemberIndex"]
+"_GSSK_GetCompositeMemberCount","_GSSK_GetCompositeMemberIndex",\
+"_GSSK_SetSeed","_GSSK_GetSeed","_GSSK_NextRandom","_GSSK_NextRandomUniform"]
 
 wasm: dist
 	emcc $(SRC_DIR)/gssk.c $(SRC_DIR)/advanced.c $(SRC_DIR)/cJSON.c -Iinclude -O3 -s WASM=1 \

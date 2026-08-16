@@ -186,8 +186,13 @@
         },
         "rng_state": {
           "type": ["object", "null"],
-          "default": null,
-          "description": "Reserved. The kernel currently emits null — the stochastic entry points (GSSK_EnsembleForecast, GSSK_CalibrateMonteCarlo) are not yet seedable, so a snapshot does not make them reproducible."
+          "description": "PRNG seed and live stream position for the stochastic entry points (GSSK_EnsembleForecast, GSSK_CalibrateMonteCarlo). Both are hex strings, not numbers: a uint64 exceeds the 53-bit exact-integer range of a JSON number. Restoring a snapshot restores both, so a stochastic result is reproducible from the snapshot alone. Null is accepted for snapshots written before seeding existed; the kernel then falls back to GSSK_DEFAULT_SEED.",
+          "additionalProperties": false,
+          "patternProperties": { "^_": true },
+          "properties": {
+            "seed":  { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,16}$", "description": "Seed last passed to GSSK_SetSeed. This is the value to pin in a run manifest." },
+            "state": { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,16}$", "description": "Live SplitMix64 stream position. Differs from 'seed' once any draw has been taken." }
+          }
         },
         "mutation_log": { "$ref": "#/$defs/MutationLog" }
       }

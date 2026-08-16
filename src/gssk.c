@@ -261,6 +261,11 @@ struct GSSK_Instance {
   GSSK_MotifEntry motifs[GSSK_MOTIF_TABLE_CAP];
   size_t          motif_count;
   double          generativity_index;
+
+  /* Stochastic entry points — instance-owned PRNG so two instances cannot
+   * perturb each other's draws, and so a run is reproducible from its seed. */
+  uint64_t rng_seed;   /* seed as last set; recorded in snapshots */
+  uint64_t rng_state;  /* live SplitMix64 state */
 };
 
 /* =========================================================================
@@ -2410,6 +2415,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
   if (!inst) return GSSK_ERR_MALLOC_FAILED;
 
   inst->confidence = GSSK_CONFIDENCE_HIGH;
+  GSSK_SetSeed(inst, GSSK_DEFAULT_SEED);
 
   if (!json_data) {
     snprintf(inst->error_msg, sizeof(inst->error_msg), "JSON data is NULL");
@@ -3081,6 +3087,19 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         if (idx < 0) continue;
         inst->edges[idx].k = ek->valuedouble;
       }
+    }
+
+    /* Restore PRNG seed and stream position (hex strings — see serialiser). */
+    cJSON *rng = cJSON_GetObjectItem(snap, "rng_state");
+    if (cJSON_IsObject(rng)) {
+      cJSON *rs = cJSON_GetObjectItem(rng, "seed");
+      cJSON *rt = cJSON_GetObjectItem(rng, "state");
+      if (cJSON_IsString(rs))
+        inst->rng_seed = strtoull(rs->valuestring, NULL, 0);
+      if (cJSON_IsString(rt))
+        inst->rng_state = strtoull(rt->valuestring, NULL, 0);
+      else
+        inst->rng_state = inst->rng_seed;
     }
 
     if (cJSON_IsObject(solver)) {
@@ -4274,6 +4293,40 @@ const char *GSSK_GetCompositeID(GSSK_Instance *inst, size_t composite_idx) {
   return inst->composites[composite_idx].composite_id;
 }
 
+/* =========================================================================
+ * Deterministic PRNG for the stochastic entry points
+ *
+ * SplitMix64 (Steele et al. 2014).  Chosen because it is stateless beyond a
+ * single uint64, has no libc dependency, and produces identical streams on
+ * every platform and under WASM — none of which is true of rand(), whose
+ * sequence is implementation-defined and whose state is process-global.
+ * ========================================================================= */
+
+void GSSK_SetSeed(GSSK_Instance *inst, uint64_t seed) {
+  if (!inst) return;
+  inst->rng_seed  = seed;
+  inst->rng_state = seed;
+}
+
+uint64_t GSSK_GetSeed(GSSK_Instance *inst) {
+  return inst ? inst->rng_seed : 0;
+}
+
+uint64_t GSSK_NextRandom(GSSK_Instance *inst) {
+  if (!inst) return 0;
+  uint64_t z = (inst->rng_state += 0x9E3779B97F4A7C15ULL);
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  return z ^ (z >> 31);
+}
+
+double GSSK_NextRandomUniform(GSSK_Instance *inst, double min, double max) {
+  /* Top 53 bits → [0,1); 53 is the mantissa width of a double, so every
+   * representable value in the range is reachable and none is favoured. */
+  double u = (double)(GSSK_NextRandom(inst) >> 11) / 9007199254740992.0;
+  return min + u * (max - min);
+}
+
 const char *GSSK_GetCompositeArchetype(GSSK_Instance *inst,
                                        size_t composite_idx) {
   if (!inst || composite_idx >= inst->composite_count) return NULL;
@@ -4680,7 +4733,19 @@ GSSK_Status GSSK_SerializeSnapshot(GSSK_Instance *inst, char **out_json) {
   cJSON_AddBoolToObject(slvr, "incipient_eligible", inst->incipient_eligible);
   cJSON_AddItemToObject(snap, "solver", slvr);
 
-  cJSON_AddNullToObject(snap, "rng_state");
+  /* PRNG state.  Emitted as hex strings, not numbers: a uint64 exceeds the
+   * 53-bit exact-integer range of a JSON number and would round-trip wrong. */
+  {
+    cJSON *rng = cJSON_CreateObject();
+    char sbuf[24], tbuf[24];
+    snprintf(sbuf, sizeof(sbuf), "0x%016llx",
+             (unsigned long long)inst->rng_seed);
+    snprintf(tbuf, sizeof(tbuf), "0x%016llx",
+             (unsigned long long)inst->rng_state);
+    cJSON_AddStringToObject(rng, "seed",  sbuf);
+    cJSON_AddStringToObject(rng, "state", tbuf);
+    cJSON_AddItemToObject(snap, "rng_state", rng);
+  }
 
   /* mutation_log: [{t, op, target_id, payload, cause}] */
   static const char *op_names_snap[] = {
