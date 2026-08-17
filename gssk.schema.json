@@ -285,7 +285,8 @@
         "k":         { "type": "number", "description": "Gain/rate coefficient for processing nodes." },
         "C":         { "type": "number", "description": "Saturation constant for loop_limited nodes: F = k·Q/(1 + Q/C)." },
         "threshold": { "type": "number", "description": "Switching threshold for switch nodes." },
-        "price":     { "type": "number", "description": "Price per unit of goods for exchange nodes." },
+        "price":     { "type": "number", "description": "exchange: constant price — units of the money carrier per unit of the goods carrier. Used when price_node is absent or unresolvable. The transaction diamond applies F_money = price x F_goods to the money counter-flow." },
+        "price_node": { "type": "string", "description": "exchange: id of a node whose current state supplies the price, making price a state variable rather than a constant. Takes precedence over price. May refer to a node declared later in the array — references are resolved in a second pass. This is what lets price be driven endogenously (e.g. by M/W) so inflation emerges rather than being dialled in by the author." },
         "k_production":  { "type": "number", "description": "producer composites only: gain of the internal 'gate' interaction node. Default 0.01." },
         "k_respiration": { "type": "number", "description": "producer composites only: conductance of the internal body→heat 'resp' edge. Default 0.05." },
         "k_metabolism":  { "type": "number", "description": "consumer composites only: conductance of the internal body→heat 'metab' edge. Default 0.1." }
