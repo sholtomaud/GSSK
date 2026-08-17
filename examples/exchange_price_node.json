@@ -1,0 +1,27 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "exchange-price-node",
+    "description": "Phase C.0 — exchange price supplied by a node reference rather than a constant. Equivalence fixture: with the price node held at 5.0 this must reproduce tests/fuzz_corpus/seed_exchange_node.json exactly. The scalar 'price' is set to a poison value of 999.0, so if price_node resolution fails the trajectory diverges obviously instead of subtly. The price node is declared AFTER the exchange node that reads it, exercising second-pass reference resolution."
+  },
+  "carriers": [
+    { "id": "money", "unit": "AUD", "conserved": true },
+    { "id": "goods", "unit": "kg", "conserved": true }
+  ],
+  "nodes": [
+    { "id": "seller", "type": "source", "value": 1.0, "carrier": "goods" },
+    { "id": "buyer", "type": "storage", "value": 1000.0, "carrier": "money" },
+    { "id": "ex", "type": "exchange", "value": 0.0, "carrier": "goods",
+      "params": { "k": 0.01, "price": 999.0, "price_node": "price" } },
+    { "id": "inventory", "type": "storage", "value": 0.0, "carrier": "goods" },
+    { "id": "spent", "type": "sink", "value": 0.0, "carrier": "money" },
+    { "id": "price", "type": "constant", "value": 5.0, "carrier": "money" }
+  ],
+  "edges": [
+    { "id": "e1", "origin": "seller", "target": "ex", "carrier": "goods" },
+    { "id": "e2", "origin": "buyer", "target": "ex", "carrier": "money" },
+    { "id": "e3", "origin": "ex", "target": "inventory", "carrier": "goods" },
+    { "id": "e4", "origin": "ex", "target": "spent", "carrier": "money" }
+  ],
+  "config": { "t_start": 0, "t_end": 1, "dt": 0.1, "method": "rk4" }
+}
