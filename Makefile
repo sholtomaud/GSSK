@@ -3,11 +3,29 @@ CC      ?= gcc
 CFLAGS  = -Wall -Wextra -Werror -std=c99 -Iinclude -fPIC
 LDFLAGS = -lm
 
+# Architecture flags.
+#
+# -march=native was previously unconditional. It bakes the build machine's CPU
+# into the binary, which is wrong for anything distributed, and it is actively
+# fragile: clang rejects some auto-detected feature combinations outright, so a
+# CI job landing on an AVX10.1-capable runner fails with
+#   error: invalid feature combination: +avx10.1-256 ... [-Winvalid-feature-combination]
+# under -Werror, while the identical source builds fine on an older runner.
+# That made green-ness depend on which machine picked the job up.
+#
+# Default is now portable. Opt in with NATIVE=1 for local benchmarking, where
+# tuning to the host is the point and reproducibility across machines is not.
+ifeq ($(NATIVE), 1)
+	ARCH_FLAGS = -march=native
+else
+	ARCH_FLAGS =
+endif
+
 # Optimization levels (Use 'make DEBUG=1' for debugging)
 ifeq ($(DEBUG), 1)
 	CFLAGS += -g -O0 -DDEBUG
 else
-	CFLAGS += -O3 -march=native
+	CFLAGS += -O3 $(ARCH_FLAGS)
 endif
 
 # Directories
