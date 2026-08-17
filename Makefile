@@ -47,7 +47,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -148,6 +148,17 @@ $(TARGET_TEST_PRICE): $(TEST_DIR)/test_price_node.c $(TARGET_LIB)
 test-price-node: all $(TARGET_TEST_PRICE)
 	@echo "Running price_node tests..."
 	@./$(TARGET_TEST_PRICE)
+
+# Phase C.1 — ratio (division) logic: hand-calculated quotient, epsilon floor,
+# RK4 vs IDC agreement.
+TARGET_TEST_RATIO = $(BIN_DIR)/test_ratio
+
+$(TARGET_TEST_RATIO): $(TEST_DIR)/test_ratio.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-ratio: all $(TARGET_TEST_RATIO)
+	@echo "Running ratio logic tests..."
+	@./$(TARGET_TEST_RATIO)
 
 clean: swift-clean
 	rm -rf $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results coverage/
