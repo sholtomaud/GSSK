@@ -1,0 +1,84 @@
+\documentclass[11pt,a4paper]{article}
+
+\input{preamble}
+
+\title{Reproducible Simulation of Energy Systems Language Models: Design and Evaluation of the \gssk{} Kernel}
+\author{Sholto Maud}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Systems-ecology models expressed in Odum's Energy Systems Language (\esl) are widely drawn but inconsistently executed: implementations are typically bespoke, tied to a single environment, and rarely reproducible across machines or over time. We present \gssk, a portable C99 kernel that executes \esl{} models as ordinary differential equations while treating exact reproducibility as a correctness requirement rather than a convenience. Three design commitments distinguish it. First, structural identity is recorded rather than inferred, eliminating a class of silent aggregation errors that corrupt goodness-of-fit statistics without failing. Second, all sources of nondeterminism are enumerated, isolated to two entry points, and made seedable from instance-owned state, so a result is reproducible from a manifest rather than from an archived trajectory. Third, Giannantoni's Incipient Differential Calculus is applied where it is exact and verified against Runge--Kutta where it is not, converting a silent accuracy failure into an observable confidence state. We describe the design, report the properties it guarantees, and state its limits.
+\end{abstract}
+
+\section{Introduction}
+
+Odum's Energy Systems Language provides a diagrammatic vocabulary for flows of energy, matter, money and information through coupled ecological and economic systems \citep{odum1994,odum2000}. Its symbols carry precise dynamical meaning, and a diagram is in principle a specification of a system of differential equations. In practice the translation from diagram to executable model has been done ad hoc, and the resulting simulations are difficult to reproduce: they depend on the machine, the toolchain, and often on unrecorded random state.
+
+This is not a cosmetic problem. Emergy accounting derives policy-relevant figures from simulated trajectories \citep{odum1996,brown2025}, and a figure that cannot be regenerated cannot be audited. The difficulty compounds when models are calibrated against observations, since calibration introduces both parameter estimates that must be recorded and, in stochastic variants, random draws that usually are not.
+
+We take the position that a simulation kernel for this domain must guarantee bit-identical reproduction of any result it produces, given the same inputs, and that this constraint should drive its design rather than be retrofitted. This paper describes the resulting system.
+
+\section{Design}
+
+\subsection{Structural identity}
+
+\esl{} composite symbols --- producers, consumers, and user-defined archetypes --- are aggregates of fundamental units. \gssk{} expands them at initialisation into namespaced primitives, so that only fundamentals reach the solver. Expanded members receive identifiers of the form \code{\{instance\}\_\_\{member\}}.
+
+A naive consumer wishing to aggregate a composite's storages might recover membership by matching that prefix. This inference is unsound in both directions: a node declared directly may legitimately contain the separator, and a composite whose own identifier contains it cannot be split unambiguously. Because aggregation feeds goodness-of-fit scoring, a misattribution does not raise an error --- it shifts a fit statistic. We therefore record membership during expansion and expose it directly, in both directions, together with each member's role within its template. Roles are stable under renaming of the instance, which string matching is not.
+
+The general principle is that identity should be recorded at the point where it is known rather than reconstructed later from a naming convention, and this is the same reasoning that motivates content addressing elsewhere in reproducible-computation practice.
+
+\subsection{Enumerated nondeterminism}
+
+We treat sources of randomness as a closed, documented set. In \gssk{} exactly two entry points consume random draws: ensemble forecasting and Monte Carlo calibration by differential evolution \citep{storn1997}. Stepping, gradient calibration and sensitivity analysis are deterministic.
+
+Those two draw from an instance-owned SplitMix64 generator \citep{steele2014}, seeded at initialisation with a documented default. Instance ownership is as important as seedability. A process-global generator --- the C standard library's, for instance --- allows a second kernel instance or the host application to shift results without any change to the model, and its sequence is implementation-defined, so identical seeds yield different trajectories across platforms and under WebAssembly. A seed parameter alone addresses neither. Both the seed and the live stream position are captured in serialised snapshots, so a stochastic result is reproducible from the snapshot and not merely from the seed.
+
+\subsection{Verified integration}
+
+Giannantoni's Incipient Differential Calculus offers exact trajectories for a class of interaction systems \citep{giannantoni2006}. For an isolated two-node interaction with conserved sum $S = Q_{A_0} + Q_{B_0}$, the closed-form solution is available and \gssk{} uses it directly, bypassing numerical integration. For longer chains and cyclic interaction networks it applies a Padé-(3,3) matrix exponential, A-stable and free of the step-size restrictions of explicit schemes.
+
+Outside that class the kernel runs both an \idc{} and a fourth-order Runge--Kutta step and compares them. Relative divergence beyond a configured tolerance degrades a confidence flag and freezes cybernetic coefficient adjustment. The cost is roughly a factor of two in throughput; the benefit is that a silent accuracy failure becomes an observable state transition that a consumer can test on.
+
+\subsection{Reproducible structural change}
+
+Models that rewire themselves during a run pose an obvious reproducibility problem. \gssk{} appends every structural mutation --- node and edge addition, deactivation, reclassification, conductance change --- to a log recording time, operation, target, payload and an attributable cause. The log serialises into snapshots and replays exactly, so a self-modifying run reproduces as reliably as a static one.
+
+\section{Generativity}
+
+Giannantoni argues that self-organising systems originate qualities not present in their components \citep{giannantoni2023}. We operationalise this claim computationally rather than treating it as interpretive commentary. After each step the kernel scans the live graph for recurring connected subgraph motifs of two or three nodes, canonicalised by node-type composition and directed connectivity. A motif recurring above a frequency threshold for a sustained number of consecutive steps is marked a candidate, and candidates may be promoted to named archetypes registered in the running instance, thereafter usable as node types indistinguishable from user-declared ones. A generativity index reports the rate of emergence of new stable patterns.
+
+We regard this as a modest but concrete operationalisation: it makes the claim testable within a simulation, without asserting that the detected motifs carry the full philosophical weight Giannantoni intends. The scan is bounded to graphs of at most 64 nodes, since motif detection scales poorly with neighbourhood size, and we prefer a bounded scan that reports nothing on large models to an unbounded one that stalls the step loop.
+
+\section{Evaluation}
+
+The kernel is validated by trajectory-level regression: full CSV output for a suite of reference models is compared against committed expected results, so that any change in integration order or accumulation behaviour surfaces as a diff. This is deliberately stronger than unit testing individual node types, which would not detect the errors that most threaten a solver.
+
+Determinism is verified directly. Repeated runs and runs resumed from snapshots produce bit-identical trajectories. Seeded stochastic runs reproduce bit-identically across independent kernel instances, diverge under different seeds, and are unaffected by the host's standard-library seeding. Cross-platform agreement has been checked between macOS and Linux builds under distinct compilers.
+
+Memory safety is checked under AddressSanitizer, UndefinedBehaviorSanitizer and Valgrind, with a fuzzing target over the JSON model surface and a line-coverage gate.
+
+\section{Limitations}
+
+Several limits are worth stating plainly.
+
+Unrecognised node types are not rejected; the parser falls back to a storage node. This tolerance exists to accommodate user-defined archetype names, but it means a typographical error yields a silently incorrect model. Validation against the published schema is therefore not optional for consumers, and the schema describes the pre-expansion surface only --- the post-expansion node set is larger and contains types no model declared.
+
+Structural capacities are fixed at compile time: 32 archetypes, 128 composite instances, bounded nodes and edges per archetype. This keeps allocation auditable at the cost of an upper bound on model size.
+
+The \code{system\_frame} composite is presently structural only --- it reserves a name but expands to no subgraph --- and the switching-box composite is unimplemented. Motif detection is limited to motifs of two or three nodes.
+
+Finally, the generativity index measures the rate of emergence of \emph{detected} motifs under a specific canonicalisation. It should not be read as a domain-independent measure of organisation.
+
+\section{Conclusion}
+
+\gssk{} shows that a simulation kernel for \esl{} can offer exact reproducibility without sacrificing portability, and that the constraint is productive rather than merely restrictive: enumerating nondeterminism exposed a process-global generator that would otherwise have coupled unrelated model instances, and recording structural identity eliminated an aggregation error that would have degraded fit statistics without ever failing. Both were latent defects that the reproducibility requirement surfaced. We suggest that treating reproducibility as a correctness property, rather than as a reporting practice layered on afterwards, is the more useful posture for computational systems ecology generally.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

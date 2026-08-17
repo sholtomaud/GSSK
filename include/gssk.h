@@ -884,6 +884,102 @@ size_t GSSK_GetCompositeCount(GSSK_Instance *inst);
  */
 const char *GSSK_GetCompositeID(GSSK_Instance *inst, size_t composite_idx);
 
+/**
+ * @brief Name of the archetype composite_idx was expanded from.
+ * @return Pointer to internal string, or NULL if OOB.
+ */
+const char *GSSK_GetCompositeArchetype(GSSK_Instance *inst,
+                                       size_t composite_idx);
+
+/**
+ * @brief Composite instance a state node belongs to.
+ *
+ * Membership is recorded during expansion, so consumers must never infer it
+ * by splitting the "{composite_id}__{template_id}" node id — a node declared
+ * directly with an id containing "__" is not a composite member, and a
+ * composite id containing "__" cannot be split unambiguously.
+ *
+ * @return Composite instance id, "" if the node was declared directly in the
+ *         model, or NULL if inst is NULL or node_idx is OOB.
+ */
+const char *GSSK_GetNodeComposite(GSSK_Instance *inst, size_t node_idx);
+
+/**
+ * @brief Role of a node within its archetype template ("body", "gate", "heat").
+ *
+ * Lets a consumer find "the storage of this producer" without parsing ids.
+ * @return Template id, "" for a directly-declared node, NULL if OOB.
+ */
+const char *GSSK_GetNodeRole(GSSK_Instance *inst, size_t node_idx);
+
+/**
+ * @brief Number of state nodes the composite at composite_idx expanded to.
+ * @return Member count, or 0 if OOB.
+ */
+size_t GSSK_GetCompositeMemberCount(GSSK_Instance *inst, size_t composite_idx);
+
+/**
+ * @brief Node index of member_idx within the composite at composite_idx.
+ * @return Index into the node arrays, or SIZE_MAX if OOB.
+ */
+size_t GSSK_GetCompositeMemberIndex(GSSK_Instance *inst, size_t composite_idx,
+                                    size_t member_idx);
+
+/* =========================================================================
+ * Randomness
+ *
+ * Exactly two entry points consume randomness:
+ *   - GSSK_EnsembleForecast   (parameter perturbation per run)
+ *   - GSSK_CalibrateMonteCarlo (differential-evolution population + mutation)
+ *
+ * Nothing else does.  GSSK_Step, GSSK_Calibrate and GSSK_CalibrateGradient
+ * are fully deterministic and never touch the PRNG.
+ *
+ * The generator is instance-owned, so two instances in one process cannot
+ * disturb each other's draws, and it is seeded to GSSK_DEFAULT_SEED at
+ * GSSK_Init.  Both stochastic entry points are therefore reproducible out
+ * of the box: same model + same seed ⇒ bit-identical results, on any
+ * platform and under WASM.  Call GSSK_SetSeed for a different stream (e.g.
+ * GSSK_SetSeed(inst, (uint64_t)time(NULL)) for run-to-run variation).
+ * ========================================================================= */
+
+/** Default PRNG seed applied by GSSK_Init. */
+#define GSSK_DEFAULT_SEED 0x9E3779B97F4A7C15ULL
+
+/**
+ * @brief Seed the instance PRNG.  Resets the stream to the start.
+ *
+ * Record the seed alongside the model hash and kernel version to make a
+ * stochastic result reproducible.  No-op if inst is NULL.
+ *
+ * Note GSSK_Reset does NOT rewind the stream: GSSK_EnsembleForecast resets
+ * model state between runs, and rewinding there would make every run in the
+ * ensemble identical.  Call this explicitly to rewind.
+ */
+void GSSK_SetSeed(GSSK_Instance *inst, uint64_t seed);
+
+/**
+ * @brief Seed last passed to GSSK_SetSeed (or GSSK_DEFAULT_SEED).
+ *
+ * This is the value to capture in a run manifest. Note it is the seed, not
+ * the live stream position — restoring it rewinds to the first draw.
+ * @return The seed, or 0 if inst is NULL.
+ */
+uint64_t GSSK_GetSeed(GSSK_Instance *inst);
+
+/**
+ * @brief Draw the next 64-bit value from the instance PRNG (SplitMix64).
+ *
+ * Exposed for the kernel's own stochastic paths and for consumers that need
+ * draws on the same reproducible stream. Advances the stream.
+ */
+uint64_t GSSK_NextRandom(GSSK_Instance *inst);
+
+/**
+ * @brief Draw the next value uniformly from [min, max). Advances the stream.
+ */
+double GSSK_NextRandomUniform(GSSK_Instance *inst, double min, double max);
+
 /* =========================================================================
  * Phase 9 — Runtime Pattern Discovery (Generativity)
  *

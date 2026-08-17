@@ -62,7 +62,10 @@ general-purpose ODE library. The wedge is:
   - Full `Q[]` and `Tr[]` vectors keyed by stable node ID, not index.
   - Per-edge `k` (captures cybernetic adjustments).
   - Solver state: confidence, IDC eligibility flags, last divergence event.
-  - RNG state (null placeholder — no RNG in core yet).
+  - RNG state: `{seed, state}` as hex strings (GH #29 item 5). Core now owns
+    a per-instance SplitMix64 seeded at init; `GSSK_SetSeed`/`GSSK_GetSeed`
+    control and report it. Consumed only by `GSSK_EnsembleForecast` and
+    `GSSK_CalibrateMonteCarlo` — everything else is deterministic.
   - Optional event queue (for adaptive solver mid-step).
 - [x] `GSSK_Init(json, ...)` must accept a snapshot-bearing JSON and resume
       from `t = snapshot.t` rather than `t = config.t_start`.

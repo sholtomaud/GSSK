@@ -62,6 +62,10 @@ typedef struct {
   double  node_C;         /* loop_limited: saturation constant */
   double  node_threshold; /* switch: threshold */
   double  node_price;     /* exchange: price per unit of goods */
+  /* Phase 8 — composite membership.  Recorded at expansion time so consumers
+   * never have to infer membership from the "{instance}__{member}" id. */
+  int     composite_idx;  /* index into inst->composites[]; -1 = declared directly */
+  char    role[64];       /* archetype template id ("body"/"gate"/…); "" if none */
 } GSSK_NodeInternal;
 
 typedef struct {
@@ -132,9 +136,12 @@ typedef struct {
 
 /* Per-instance composite expansion record */
 typedef struct {
-  char composite_id[64];
-  int  in_node_idx;
-  int  out_node_idx;
+  char   composite_id[64];
+  char   archetype[64];    /* archetype this instance was expanded from */
+  int    in_node_idx;
+  int    out_node_idx;
+  size_t first_node_idx;   /* inst->nodes[] slot of member 0 */
+  size_t node_count;       /* members occupy first_node_idx .. +node_count-1 */
 } GSSK_CompositeMap;
 
 /* -------------------------------------------------------------------------
@@ -254,6 +261,11 @@ struct GSSK_Instance {
   GSSK_MotifEntry motifs[GSSK_MOTIF_TABLE_CAP];
   size_t          motif_count;
   double          generativity_index;
+
+  /* Stochastic entry points — instance-owned PRNG so two instances cannot
+   * perturb each other's draws, and so a run is reproducible from its seed. */
+  uint64_t rng_seed;   /* seed as last set; recorded in snapshots */
+  uint64_t rng_state;  /* live SplitMix64 state */
 };
 
 /* =========================================================================
@@ -2403,6 +2415,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
   if (!inst) return GSSK_ERR_MALLOC_FAILED;
 
   inst->confidence = GSSK_CONFIDENCE_HIGH;
+  GSSK_SetSeed(inst, GSSK_DEFAULT_SEED);
 
   if (!json_data) {
     snprintf(inst->error_msg, sizeof(inst->error_msg), "JSON data is NULL");
@@ -2546,6 +2559,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     status = GSSK_ERR_MALLOC_FAILED; goto cleanup;
   }
 
+  /* calloc zeroes composite_idx, but 0 is a valid composite index — every node
+   * starts as "declared directly" and only the expansion path below claims one. */
+  for (size_t i = 0; i < inst->node_count; i++)
+    inst->nodes[i].composite_idx = -1;
+
   bool any_quality = false;
   size_t node_slot = 0;
   for (int i = 0; i < n_json_nodes; i++) {
@@ -2592,6 +2610,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
        * sized in section 2. */
       int in_idx = -1, out_idx = -1;
       size_t dummy = 0;
+      size_t this_composite = inst->composite_count;
       /* Place nodes only (edges handled in step 2 below via re-call) */
       for (size_t j = 0; j < def->node_count; j++) {
         GSSK_ANodeTmpl *t = &def->nodes[j];
@@ -2599,6 +2618,8 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         memset(N, 0, sizeof(*N));
         snprintf(N->id, sizeof(N->id), "%.29s__%.29s", id->valuestring, t->id);
         N->id[63] = '\0';
+        N->composite_idx = (int)this_composite;
+        snprintf(N->role, sizeof(N->role), "%s", t->id);
         N->type   = parse_node_type(t->type_str);
         N->initial_value = (strcmp(t->id, def->default_in) == 0)
                              ? val->valuedouble : t->value;
@@ -2623,8 +2644,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       GSSK_CompositeMap *cm = &inst->composites[inst->composite_count++];
       strncpy(cm->composite_id, id->valuestring, 63);
       cm->composite_id[63] = '\0';
-      cm->in_node_idx  = in_idx;
-      cm->out_node_idx = out_idx;
+      snprintf(cm->archetype, sizeof(cm->archetype), "%s", def->name);
+      cm->in_node_idx    = in_idx;
+      cm->out_node_idx   = out_idx;
+      cm->first_node_idx = node_slot;
+      cm->node_count     = def->node_count;
       node_slot += def->node_count;
       (void)dummy;
       continue;
@@ -3063,6 +3087,19 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         if (idx < 0) continue;
         inst->edges[idx].k = ek->valuedouble;
       }
+    }
+
+    /* Restore PRNG seed and stream position (hex strings — see serialiser). */
+    cJSON *rng = cJSON_GetObjectItem(snap, "rng_state");
+    if (cJSON_IsObject(rng)) {
+      cJSON *rs = cJSON_GetObjectItem(rng, "seed");
+      cJSON *rt = cJSON_GetObjectItem(rng, "state");
+      if (cJSON_IsString(rs))
+        inst->rng_seed = strtoull(rs->valuestring, NULL, 0);
+      if (cJSON_IsString(rt))
+        inst->rng_state = strtoull(rt->valuestring, NULL, 0);
+      else
+        inst->rng_state = inst->rng_seed;
     }
 
     if (cJSON_IsObject(solver)) {
@@ -3639,6 +3676,7 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
 
   size_t idx = inst->node_count;
   memset(&inst->nodes[idx], 0, sizeof(GSSK_NodeInternal));
+  inst->nodes[idx].composite_idx = -1;  /* declared directly, not expanded */
   strncpy(inst->nodes[idx].id, id->valuestring, 63);
   inst->nodes[idx].id[63]        = '\0';
   inst->nodes[idx].type          = parse_node_type(type->valuestring);
@@ -4256,6 +4294,71 @@ const char *GSSK_GetCompositeID(GSSK_Instance *inst, size_t composite_idx) {
 }
 
 /* =========================================================================
+ * Deterministic PRNG for the stochastic entry points
+ *
+ * SplitMix64 (Steele et al. 2014).  Chosen because it is stateless beyond a
+ * single uint64, has no libc dependency, and produces identical streams on
+ * every platform and under WASM — none of which is true of rand(), whose
+ * sequence is implementation-defined and whose state is process-global.
+ * ========================================================================= */
+
+void GSSK_SetSeed(GSSK_Instance *inst, uint64_t seed) {
+  if (!inst) return;
+  inst->rng_seed  = seed;
+  inst->rng_state = seed;
+}
+
+uint64_t GSSK_GetSeed(GSSK_Instance *inst) {
+  return inst ? inst->rng_seed : 0;
+}
+
+uint64_t GSSK_NextRandom(GSSK_Instance *inst) {
+  if (!inst) return 0;
+  uint64_t z = (inst->rng_state += 0x9E3779B97F4A7C15ULL);
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  return z ^ (z >> 31);
+}
+
+double GSSK_NextRandomUniform(GSSK_Instance *inst, double min, double max) {
+  /* Top 53 bits → [0,1); 53 is the mantissa width of a double, so every
+   * representable value in the range is reachable and none is favoured. */
+  double u = (double)(GSSK_NextRandom(inst) >> 11) / 9007199254740992.0;
+  return min + u * (max - min);
+}
+
+const char *GSSK_GetCompositeArchetype(GSSK_Instance *inst,
+                                       size_t composite_idx) {
+  if (!inst || composite_idx >= inst->composite_count) return NULL;
+  return inst->composites[composite_idx].archetype;
+}
+
+const char *GSSK_GetNodeComposite(GSSK_Instance *inst, size_t node_idx) {
+  if (!inst || node_idx >= inst->node_count) return NULL;
+  int ci = inst->nodes[node_idx].composite_idx;
+  if (ci < 0 || (size_t)ci >= inst->composite_count) return "";
+  return inst->composites[ci].composite_id;
+}
+
+const char *GSSK_GetNodeRole(GSSK_Instance *inst, size_t node_idx) {
+  if (!inst || node_idx >= inst->node_count) return NULL;
+  return inst->nodes[node_idx].role;
+}
+
+size_t GSSK_GetCompositeMemberCount(GSSK_Instance *inst, size_t composite_idx) {
+  if (!inst || composite_idx >= inst->composite_count) return 0;
+  return inst->composites[composite_idx].node_count;
+}
+
+size_t GSSK_GetCompositeMemberIndex(GSSK_Instance *inst, size_t composite_idx,
+                                    size_t member_idx) {
+  if (!inst || composite_idx >= inst->composite_count) return SIZE_MAX;
+  GSSK_CompositeMap *cm = &inst->composites[composite_idx];
+  if (member_idx >= cm->node_count) return SIZE_MAX;
+  return cm->first_node_idx + member_idx;
+}
+
+/* =========================================================================
  * Serialization helpers
  * ========================================================================= */
 
@@ -4630,7 +4733,19 @@ GSSK_Status GSSK_SerializeSnapshot(GSSK_Instance *inst, char **out_json) {
   cJSON_AddBoolToObject(slvr, "incipient_eligible", inst->incipient_eligible);
   cJSON_AddItemToObject(snap, "solver", slvr);
 
-  cJSON_AddNullToObject(snap, "rng_state");
+  /* PRNG state.  Emitted as hex strings, not numbers: a uint64 exceeds the
+   * 53-bit exact-integer range of a JSON number and would round-trip wrong. */
+  {
+    cJSON *rng = cJSON_CreateObject();
+    char sbuf[24], tbuf[24];
+    snprintf(sbuf, sizeof(sbuf), "0x%016llx",
+             (unsigned long long)inst->rng_seed);
+    snprintf(tbuf, sizeof(tbuf), "0x%016llx",
+             (unsigned long long)inst->rng_state);
+    cJSON_AddStringToObject(rng, "seed",  sbuf);
+    cJSON_AddStringToObject(rng, "state", tbuf);
+    cJSON_AddItemToObject(snap, "rng_state", rng);
+  }
 
   /* mutation_log: [{t, op, target_id, payload, cause}] */
   static const char *op_names_snap[] = {

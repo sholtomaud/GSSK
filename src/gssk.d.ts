@@ -45,7 +45,7 @@ export interface GSSKModule {
   /** Free a string returned by SerializeModel/SerializeSnapshot. */
   _GSSK_FreeString(ptr: number): void;
 
-  /** Schema version of the loaded model (2 or 3). */
+  /** Schema version of the loaded model (2, 3, or 4). v2 auto-migrates to 3 at init. */
   _GSSK_GetSchemaVersion(kernelPtr: number): number;
   /** Model name from metadata.name. Returns pointer to C string. */
   _GSSK_GetModelName(kernelPtr: number): number;
@@ -137,6 +137,47 @@ export interface GSSKModule {
    * stopping at target_t. out_inst_ptr receives the new kernel pointer.
    */
   _GSSK_Replay(initialJsonPtr: number, mutationsJsonPtr: number, targetT: number, outInstPtrPtr: number): number;
+
+  /**
+   * Randomness. Only _GSSK_EnsembleForecast and _GSSK_CalibrateMonteCarlo
+   * consume it; stepping and gradient calibration are fully deterministic.
+   * The generator is per-instance and seeded at init, so same model + same
+   * seed gives bit-identical results. Seeds are uint64 and exceed the exact
+   * range of a JS number — pass them as BigInt.
+   */
+  _GSSK_SetSeed(kernelPtr: number, seed: bigint): void;
+  /** Seed last set (BigInt). Capture this in a run manifest. */
+  _GSSK_GetSeed(kernelPtr: number): bigint;
+  /** Next 64-bit draw on the instance stream. Advances it. */
+  _GSSK_NextRandom(kernelPtr: number): bigint;
+  /** Next draw uniformly in [min, max). Advances the stream. */
+  _GSSK_NextRandomUniform(kernelPtr: number, min: number, max: number): number;
+
+  /** Phase 8 — Composite node types & archetypes. */
+  /** Number of archetypes registered (built-in + user-defined). */
+  _GSSK_GetArchetypeCount(kernelPtr: number): number;
+  /** Pointer to archetype name at idx, or 0 if out of range. */
+  _GSSK_GetArchetypeName(kernelPtr: number, idx: number): number;
+  /** Number of composite instances expanded at GSSK_Init time. */
+  _GSSK_GetCompositeCount(kernelPtr: number): number;
+  /** Pointer to the original (unexpanded) composite id, or 0 if out of range. */
+  _GSSK_GetCompositeID(kernelPtr: number, compositeIdx: number): number;
+  /** Pointer to the archetype name this composite expanded from, or 0 if OOB. */
+  _GSSK_GetCompositeArchetype(kernelPtr: number, compositeIdx: number): number;
+  /**
+   * Pointer to the composite instance id owning this node — empty string if
+   * the node was declared directly, 0 if nodeIdx is out of range.
+   * Use this instead of splitting `{instance}__{member}` node ids: a directly
+   * declared node may legitimately contain "__", and a composite id containing
+   * "__" cannot be split unambiguously.
+   */
+  _GSSK_GetNodeComposite(kernelPtr: number, nodeIdx: number): number;
+  /** Pointer to the node's role in its archetype ("body"/"gate"/"heat"); empty if none. */
+  _GSSK_GetNodeRole(kernelPtr: number, nodeIdx: number): number;
+  /** Number of state nodes this composite expanded to; 0 if out of range. */
+  _GSSK_GetCompositeMemberCount(kernelPtr: number, compositeIdx: number): number;
+  /** Node index of memberIdx within this composite; SIZE_MAX (2^32-1 in wasm32) if OOB. */
+  _GSSK_GetCompositeMemberIndex(kernelPtr: number, compositeIdx: number, memberIdx: number): number;
 
   stringToUTF8(str: string, outPtr: number, maxBytes: number): void;
   UTF8ToString(ptr: number): string;

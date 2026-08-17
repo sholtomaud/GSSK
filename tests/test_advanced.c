@@ -69,7 +69,7 @@ void test_ensemble() {
     GSSK_Instance *inst = NULL;
     assert(GSSK_Init(model_json, &inst) == GSSK_SUCCESS);
 
-    srand(42); // Seed for deterministic test
+    GSSK_SetSeed(inst, 42); // Seed for deterministic test (libc srand no longer applies)
     GSSK_EnsembleResult *res = GSSK_EnsembleForecast(inst, 10, 0.2); // 20% perturbation
     assert(res != NULL);
     assert(res->node_count == 2);
@@ -452,6 +452,248 @@ void test_phase9_propose_archetype() {
     GSSK_Free(inst);
 }
 
+/* GH #29 item 1 — membership must be recorded at expansion time, not inferred
+ * from the "{instance}__{member}" id.  `lim__c` below is declared directly and
+ * prefix-matches composite `lim`; string inference misattributes it. */
+static const char *PHASE8_MEMBERSHIP_MODEL =
+    "{\n"
+    "  \"metadata\": { \"schema_version\": 4 },\n"
+    "  \"archetypes\": {\n"
+    "    \"self_limiter\": {\n"
+    "      \"nodes\": [ { \"id\": \"a\", \"type\": \"storage\", \"value\": 5.0 },\n"
+    "                  { \"id\": \"b\", \"type\": \"storage\", \"value\": 0.0 } ],\n"
+    "      \"edges\": [ { \"id\": \"ab\", \"origin\": \"a\", \"target\": \"b\", \"logic\": \"linear\", \"params\": { \"k\": 0.2 } },\n"
+    "                  { \"id\": \"ba\", \"origin\": \"b\", \"target\": \"a\", \"logic\": \"linear\", \"params\": { \"k\": 0.1 } } ],\n"
+    "      \"ports\": { \"in\": \"a\", \"out\": \"b\" }\n"
+    "    }\n"
+    "  },\n"
+    "  \"nodes\": [\n"
+    "    { \"id\": \"sun\",    \"type\": \"source\",       \"value\": 10.0 },\n"
+    "    { \"id\": \"plant\",  \"type\": \"producer\",     \"value\": 50.0,\n"
+    "      \"params\": { \"k_production\": 0.01, \"k_respiration\": 0.02 } },\n"
+    "    { \"id\": \"lim\",    \"type\": \"self_limiter\", \"value\": 5.0 },\n"
+    "    { \"id\": \"lim__c\", \"type\": \"storage\",      \"value\": 1.0 },\n"
+    "    { \"id\": \"plain\",  \"type\": \"storage\",      \"value\": 0.0 }\n"
+    "  ],\n"
+    "  \"edges\": [\n"
+    "    { \"origin\": \"sun\", \"target\": \"plant\", \"logic\": \"constant\", \"params\": { \"k\": 1.0 } }\n"
+    "  ],\n"
+    "  \"config\": { \"t_start\": 0, \"t_end\": 10, \"dt\": 0.1 }\n"
+    "}";
+
+/* No public node-count accessor; the convention is to walk ids until NULL. */
+static size_t count_nodes(GSSK_Instance *inst) {
+    size_t n = 0;
+    while (GSSK_GetNodeID(inst, n) != NULL) n++;
+    return n;
+}
+
+void test_composite_membership() {
+    printf("Testing Phase 8 composite membership API (GH #29)...\n");
+    GSSK_Instance *inst = NULL;
+    GSSK_Status st = GSSK_Init(PHASE8_MEMBERSHIP_MODEL, &inst);
+    assert(st == GSSK_SUCCESS);
+
+    /* Two composite instances: plant (built-in) and lim (user-defined) */
+    assert(GSSK_GetCompositeCount(inst) == 2);
+
+    size_t plant_c = (size_t)-1, lim_c = (size_t)-1;
+    for (size_t c = 0; c < GSSK_GetCompositeCount(inst); c++) {
+        const char *cid = GSSK_GetCompositeID(inst, c);
+        assert(cid);
+        if (strcmp(cid, "plant") == 0) plant_c = c;
+        if (strcmp(cid, "lim")   == 0) lim_c   = c;
+    }
+    assert(plant_c != (size_t)-1 && lim_c != (size_t)-1);
+
+    /* Archetype each instance was expanded from */
+    assert(strcmp(GSSK_GetCompositeArchetype(inst, plant_c), "producer") == 0);
+    assert(strcmp(GSSK_GetCompositeArchetype(inst, lim_c), "self_limiter") == 0);
+
+    /* Forward direction: node -> owning composite, and role within template */
+    struct { const char *id; const char *role; } members[] = {
+        { "plant__body", "body" },
+        { "plant__gate", "gate" },
+        { "plant__heat", "heat" },
+    };
+    for (size_t i = 0; i < 3; i++) {
+        int ni = GSSK_FindNodeIdx(inst, members[i].id);
+        assert(ni >= 0);
+        assert(strcmp(GSSK_GetNodeComposite(inst, (size_t)ni), "plant") == 0);
+        assert(strcmp(GSSK_GetNodeRole(inst, (size_t)ni), members[i].role) == 0);
+    }
+
+    /* Directly-declared nodes report "" — including `lim__c`, which a
+     * prefix-match would wrongly attribute to composite `lim`. */
+    const char *plain_ids[] = { "sun", "lim__c", "plain" };
+    for (size_t i = 0; i < 3; i++) {
+        int ni = GSSK_FindNodeIdx(inst, plain_ids[i]);
+        assert(ni >= 0);
+        assert(strcmp(GSSK_GetNodeComposite(inst, (size_t)ni), "") == 0);
+        assert(strcmp(GSSK_GetNodeRole(inst, (size_t)ni), "") == 0);
+    }
+
+    /* Inverse direction round-trips: every member of a composite reports that
+     * same composite, and member ids carry the expected namespace prefix. */
+    assert(GSSK_GetCompositeMemberCount(inst, plant_c) == 3);
+    assert(GSSK_GetCompositeMemberCount(inst, lim_c) == 2);
+    for (size_t c = 0; c < GSSK_GetCompositeCount(inst); c++) {
+        const char *cid = GSSK_GetCompositeID(inst, c);
+        for (size_t m = 0; m < GSSK_GetCompositeMemberCount(inst, c); m++) {
+            size_t ni = GSSK_GetCompositeMemberIndex(inst, c, m);
+            assert(ni != (size_t)-1 && ni < count_nodes(inst));
+            assert(strcmp(GSSK_GetNodeComposite(inst, ni), cid) == 0);
+            assert(GSSK_GetNodeRole(inst, ni)[0] != '\0');
+        }
+    }
+
+    /* Out-of-range indices fail loudly rather than reading past the arrays */
+    size_t nc = count_nodes(inst), cc = GSSK_GetCompositeCount(inst);
+    assert(GSSK_GetNodeComposite(inst, nc) == NULL);
+    assert(GSSK_GetNodeRole(inst, nc) == NULL);
+    assert(GSSK_GetCompositeArchetype(inst, cc) == NULL);
+    assert(GSSK_GetCompositeMemberCount(inst, cc) == 0);
+    assert(GSSK_GetCompositeMemberIndex(inst, cc, 0) == (size_t)-1);
+    assert(GSSK_GetCompositeMemberIndex(inst, plant_c, 99) == (size_t)-1);
+    assert(GSSK_GetNodeComposite(NULL, 0) == NULL);
+    assert(GSSK_GetCompositeMemberCount(NULL, 0) == 0);
+
+    /* Membership survives a node added at runtime (AddNode must not inherit
+     * composite 0 from the zeroed struct). */
+    st = GSSK_AddNode(inst, "{\"id\":\"late\",\"type\":\"storage\",\"value\":0.0}");
+    assert(st == GSSK_SUCCESS);
+    int late_idx = GSSK_FindNodeIdx(inst, "late");
+    assert(late_idx >= 0);
+    assert(strcmp(GSSK_GetNodeComposite(inst, (size_t)late_idx), "") == 0);
+
+    GSSK_Free(inst);
+    printf("  Composite membership test PASSED\n");
+}
+
+/* GH #29 item 5 — the stochastic entry points must be reproducible from a
+ * recorded seed, and must not depend on process-global libc state. */
+static const char *RNG_MODEL =
+    "{"
+    "\"nodes\": ["
+    "  {\"id\": \"Source\", \"type\": \"source\", \"value\": 10.0},"
+    "  {\"id\": \"Stock\", \"type\": \"storage\", \"value\": 0.0}"
+    "],"
+    "\"edges\": ["
+    "  {\"id\": \"e0\", \"origin\": \"Source\", \"target\": \"Stock\", \"logic\": \"linear\", \"params\": {\"k\": 1.0}}"
+    "],"
+    "\"config\": {\"t_start\": 0, \"t_end\": 10, \"dt\": 1.0}"
+    "}";
+
+/* Run an ensemble under `seed` and copy out the mean envelope. */
+static double *ensemble_under_seed(uint64_t seed, size_t *out_len) {
+    GSSK_Instance *inst = NULL;
+    assert(GSSK_Init(RNG_MODEL, &inst) == GSSK_SUCCESS);
+    GSSK_SetSeed(inst, seed);
+    GSSK_EnsembleResult *res = GSSK_EnsembleForecast(inst, 10, 0.2);
+    assert(res != NULL);
+    size_t n = res->node_count * res->step_count;
+    double *copy = malloc(n * sizeof(double));
+    memcpy(copy, res->mean_envelope, n * sizeof(double));
+    *out_len = n;
+    GSSK_FreeEnsembleResult(res);
+    GSSK_Free(inst);
+    return copy;
+}
+
+void test_rng_seeding() {
+    printf("Testing RNG seeding / reproducibility (GH #29)...\n");
+
+    /* Default seed: two fresh instances agree with no seeding call at all. */
+    size_t n_d1 = 0, n_d2 = 0;
+    double *d1 = ensemble_under_seed(GSSK_DEFAULT_SEED, &n_d1);
+    GSSK_Instance *bare = NULL;
+    assert(GSSK_Init(RNG_MODEL, &bare) == GSSK_SUCCESS);
+    assert(GSSK_GetSeed(bare) == GSSK_DEFAULT_SEED);
+    GSSK_EnsembleResult *rb = GSSK_EnsembleForecast(bare, 10, 0.2);
+    assert(rb != NULL);
+    n_d2 = rb->node_count * rb->step_count;
+    assert(n_d1 == n_d2);
+    for (size_t i = 0; i < n_d1; i++) assert(d1[i] == rb->mean_envelope[i]);
+    GSSK_FreeEnsembleResult(rb);
+    GSSK_Free(bare);
+    free(d1);
+    printf("  default seed is reproducible without an explicit GSSK_SetSeed\n");
+
+    /* Same seed => bit-identical across two independent instances. */
+    size_t n_a = 0, n_b = 0;
+    double *a = ensemble_under_seed(12345, &n_a);
+    double *b = ensemble_under_seed(12345, &n_b);
+    assert(n_a == n_b && n_a > 0);
+    for (size_t i = 0; i < n_a; i++) assert(a[i] == b[i]);
+    printf("  same seed -> bit-identical over %zu values\n", n_a);
+
+    /* Different seed => a different stream. */
+    size_t n_c = 0;
+    double *c = ensemble_under_seed(99999, &n_c);
+    assert(n_c == n_a);
+    bool differs = false;
+    for (size_t i = 0; i < n_a; i++) if (a[i] != c[i]) { differs = true; break; }
+    assert(differs);
+    printf("  different seed -> different trajectory\n");
+    free(a); free(b); free(c);
+
+    /* libc srand must no longer influence anything. */
+    size_t n_e = 0, n_f = 0;
+    srand(1);
+    double *e = ensemble_under_seed(777, &n_e);
+    srand(999999);
+    double *f = ensemble_under_seed(777, &n_f);
+    assert(n_e == n_f);
+    for (size_t i = 0; i < n_e; i++) assert(e[i] == f[i]);
+    free(e); free(f);
+    printf("  libc srand() no longer perturbs results\n");
+
+    /* Two live instances must not share a stream: interleaved draws on one
+     * must not shift the other. */
+    GSSK_Instance *i1 = NULL, *i2 = NULL;
+    assert(GSSK_Init(RNG_MODEL, &i1) == GSSK_SUCCESS);
+    assert(GSSK_Init(RNG_MODEL, &i2) == GSSK_SUCCESS);
+    GSSK_SetSeed(i1, 4242);
+    GSSK_SetSeed(i2, 4242);
+    for (int k = 0; k < 5; k++) GSSK_NextRandom(i2);   /* disturb i2 only */
+    GSSK_SetSeed(i2, 4242);                            /* rewind i2 */
+    for (int k = 0; k < 8; k++)
+        assert(GSSK_NextRandom(i1) == GSSK_NextRandom(i2));
+    printf("  instances hold independent streams\n");
+
+    /* Seeding rewinds the stream. */
+    GSSK_SetSeed(i1, 31337);
+    uint64_t first = GSSK_NextRandom(i1);
+    GSSK_NextRandom(i1);
+    GSSK_SetSeed(i1, 31337);
+    assert(GSSK_NextRandom(i1) == first);
+    assert(GSSK_GetSeed(i1) == 31337);
+
+    /* Snapshot captures seed AND stream position, and restores both. */
+    GSSK_SetSeed(i1, 0xDEADBEEFCAFEULL);
+    for (int k = 0; k < 3; k++) GSSK_NextRandom(i1);
+    uint64_t expect_next = GSSK_NextRandom(i1);
+    GSSK_SetSeed(i1, 0xDEADBEEFCAFEULL);
+    for (int k = 0; k < 3; k++) GSSK_NextRandom(i1);   /* back to pre-draw point */
+
+    char *snap = NULL;
+    assert(GSSK_SerializeSnapshot(i1, &snap) == GSSK_SUCCESS);
+    assert(strstr(snap, "\"rng_state\"") != NULL);
+    assert(strstr(snap, "\"seed\"") != NULL);
+
+    GSSK_Instance *restored = NULL;
+    assert(GSSK_Init(snap, &restored) == GSSK_SUCCESS);
+    assert(GSSK_GetSeed(restored) == 0xDEADBEEFCAFEULL);
+    assert(GSSK_NextRandom(restored) == expect_next);
+    printf("  snapshot round-trip preserves seed and stream position\n");
+
+    GSSK_FreeString(snap);
+    GSSK_Free(restored);
+    GSSK_Free(i1);
+    GSSK_Free(i2);
+    printf("  RNG seeding test PASSED\n");
+}
+
 int main() {
     test_calibration();
     test_ensemble();
@@ -460,6 +702,8 @@ int main() {
     test_producer_composite();
     test_consumer_composite();
     test_user_archetype();
+    test_composite_membership();
+    test_rng_seeding();
     test_phase9_motif_detection();
     test_phase9_propose_archetype();
     return 0;

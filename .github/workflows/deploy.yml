@@ -113,6 +113,55 @@ jobs:
         run: make bench-check
 
   # ────────────────────────────────────────────────────────────
+  # WASM build — runs on pull requests too.
+  #
+  # The deploy job below also builds WASM, but it is gated on push to
+  # main/tags, so before this job existed a change to WASM_EXPORTS was
+  # unverified until after merge — at which point a push to main also
+  # republishes the rolling `latest` release that consumers pin. An
+  # undefined exported symbol would surface there rather than on the PR.
+  # ────────────────────────────────────────────────────────────
+  wasm:
+    name: WASM build (emscripten)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+
+      - name: Build WASM
+        run: make wasm
+
+      # emcc errors on an undefined exported symbol, so a successful build is
+      # already meaningful. This asserts the stronger property that every
+      # symbol named in WASM_EXPORTS actually reached the artifact.
+      - name: Verify every declared export reached the artifact
+        run: |
+          missing=0
+          for sym in $(grep -o '"_GSSK_[A-Za-z0-9_]*"' Makefile | tr -d '"' | sort -u); do
+            if ! grep -q "$sym" dist/gssk.js; then
+              echo "::error::declared in WASM_EXPORTS but absent from dist/gssk.js: $sym"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "All declared exports present in dist/gssk.js."
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-build
+          path: |
+            dist/gssk.js
+            dist/gssk.wasm
+
+  # ────────────────────────────────────────────────────────────
   # Swift package (macOS) — separate job, different OS.
   # ────────────────────────────────────────────────────────────
   swift:
@@ -132,7 +181,7 @@ jobs:
   # Requires all test jobs to pass first.
   # ────────────────────────────────────────────────────────────
   deploy:
-    needs: [ build-native, quality, swift ]
+    needs: [ build-native, quality, swift, wasm ]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     environment:
@@ -183,8 +232,15 @@ jobs:
           git commit -m "chore: distribution build [skip ci]"
           git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git dist --force
           if [[ ${{ github.ref }} == refs/tags/* ]]; then
-            git tag ${{ github.ref_name }}
-            git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git ${{ github.ref_name }} --force
+            # Tag the dist tree under its own namespace. This previously reused
+            # the bare version tag and force-pushed it, which moved vX.Y.Z off
+            # the source commit and onto this orphan dist commit — a tree with
+            # no Package.swift or src/, breaking SPM resolution, and a mutable
+            # version tag, which is precisely what pinning is meant to avoid.
+            # No --force: re-running a released tag should fail loudly rather
+            # than silently republish under an existing version.
+            git tag dist-${{ github.ref_name }}
+            git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git dist-${{ github.ref_name }}
           fi
 
       - name: Prepare Pages artifact
@@ -210,10 +266,38 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v5
 
+      # Digests let a consumer verify a download without fetching it twice,
+      # and let anyone check whether a rolling `latest` actually changed.
+      - name: Compute artifact digests
+        id: digests
+        run: |
+          {
+            echo 'table<<DIGEST_TABLE_EOF'
+            echo '| Artifact | SHA-256 |'
+            echo '| --- | --- |'
+            for f in dist/gssk.js dist/gssk.wasm dist/gssk.d.ts dist/gssk.schema.json \
+                     include/gssk.h lib/libgssk.a bin/gssk; do
+              [ -f "$f" ] || { echo "missing artifact: $f" >&2; exit 1; }
+              printf '| `%s` | `%s` |\n' "$f" "$(sha256sum "$f" | cut -d' ' -f1)"
+            done
+            echo 'DIGEST_TABLE_EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create versioned release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
+          name: "GSSK ${{ github.ref_name }}"
+          body: |
+            Immutable build of GSSK `${{ github.ref_name }}`.
+
+            Pin this tag rather than `latest` when results must be reproducible
+            against a fixed kernel. The artifacts below are byte-for-byte the
+            ones this tag was built from; verify with `sha256sum`.
+
+            ${{ steps.digests.outputs.table }}
+
+            Commit: `${{ github.sha }}`
           files: |
             bin/gssk
             lib/libgssk.a
@@ -221,20 +305,28 @@ jobs:
             dist/gssk.js
             dist/gssk.wasm
             dist/gssk.d.ts
+            dist/gssk.schema.json
           draft: false
           prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Update rolling latest pre-release
         if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
           name: "Latest (rolling)"
           body: |
-            Automated pre-release from the tip of `main`.
-            Commit: ${{ github.sha }}
+            Automated pre-release from the tip of `main`. **This tag is
+            re-published in place and its artifacts change without notice.**
+            If your results must be reproducible against a fixed kernel, pin a
+            versioned release (`vX.Y.Z`) instead.
+
+            ${{ steps.digests.outputs.table }}
+
+            Commit: `${{ github.sha }}`
           files: |
             bin/gssk
             lib/libgssk.a
@@ -242,6 +334,7 @@ jobs:
             dist/gssk.js
             dist/gssk.wasm
             dist/gssk.d.ts
+            dist/gssk.schema.json
           draft: false
           prerelease: true
           make_latest: false
