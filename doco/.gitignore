@@ -1,0 +1,15 @@
+# LaTeX build output. latexmk is pointed at build/ via -outdir, so everything
+# transient lands here and nothing else in this directory is generated.
+build/
+
+# Belt and braces, in case someone runs pdflatex directly in this directory.
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+*.toc
+*.pdf

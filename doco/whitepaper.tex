@@ -1,0 +1,149 @@
+\documentclass[11pt,a4paper]{article}
+
+\input{preamble}
+
+\title{\gssk: A General Systems Simulation Kernel for Odum's Energy Systems Language}
+\author{Sholto Maud}
+\date{Kernel version \kernelversion}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\gssk{} is a numerical kernel that executes models written in Howard T. Odum's Energy Systems Language (\esl) as systems of ordinary differential equations. It is implemented in portable C99 with no runtime dependencies beyond the C standard library, and compiles unchanged to native binaries, a shared library, and WebAssembly. This whitepaper describes what the kernel models, the design decisions that shape it, and the properties it guarantees --- in particular determinism and reproducibility, which are treated here as correctness requirements rather than conveniences. It also states plainly what the kernel does not do, since the boundary is as much a design commitment as anything inside it.
+\end{abstract}
+
+\tableofcontents
+
+\section{Scope}
+
+\gssk{} is a dynamics engine. It takes a model expressed as a directed graph of storages and flows, integrates it forward in time, and reports state trajectories along with quality accounting, sensitivity information and a log of structural changes. It is deliberately not a modelling environment: it has no user interface, no optimisation framework beyond parameter calibration, no evolutionary search, and no experiment registry. Those belong in consuming applications, and keeping them out is what allows the kernel to stay small enough to audit and to compile to WebAssembly for in-browser execution.
+
+The design premise is that a systems-ecology simulator is only useful if its results can be reproduced exactly. Every choice described below --- the fixed node taxonomy, the content-addressed model hash, the snapshot format, the instance-owned pseudorandom generator --- follows from that premise.
+
+\section{The topology rule}
+
+\esl{} draws a sharp line between what is a flow and what is a unit, and \gssk{} enforces it:
+
+\begin{quote}
+\textbf{Edges are flows only} --- pathways carrying energy, matter, money, information or code from one unit to another.
+
+\textbf{Nodes are everything else} --- processing units, storages, sources, sinks, gates, amplifiers, converters and transaction points.
+\end{quote}
+
+The consequence that most often surprises newcomers is that a coefficient attached to a processing unit is a property of the \emph{node}, not of the flow passing through it. A production gate with gain $k$ holds $k$ as node state; the edges entering and leaving it carry no coefficient of their own. This mirrors the distinction in dimensional analysis between fundamental dimensions and dimensions derived from them, and it is what makes composite types (Section~\ref{sec:composites}) decomposable in a well-defined way.
+
+\section{Node taxonomy}
+
+\subsection{Fundamental types}
+
+Odum identifies seven fundamental symbols. \gssk{} implements all seven, plus a \code{constant} type that has no Odum symbol but is useful for fixed reference values.
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Symbol} & \textbf{Type} & \textbf{Behaviour} \\
+\midrule
+Circle with arrow & \code{source}       & $Q$ fixed at \code{value}; drives unlimited outflow \\
+Closed tank       & \code{storage}      & $dQ/dt$ computed from net flow \\
+Ground symbol     & \code{sink}         & accumulates inflow, never depleted \\
+Arrowhead ($\times$) & \code{interaction} & production gate, multiplicative \\
+Triangle          & \code{gain}         & output proportional to control input \\
+D-shape           & \code{loop\_limited} & Michaelis--Menten saturating converter \\
+Diamond           & \code{exchange}     & couples two carrier flows via a price \\
+Hourglass         & \code{switch}       & threshold on/off process \\
+---               & \code{constant}     & fixed reference value \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The five processing types are parameterised through the node's \code{params} block --- \code{k}, \code{C}, \code{threshold}, \code{price} --- consistent with the topology rule. An edge touching a processing node may therefore omit \code{logic} and \code{params.k}, which default to \code{linear} and $1.0$; every other edge must supply both.
+
+One sharp edge deserves recording: an unrecognised node type is \emph{not} rejected. The parser falls back to \code{storage}, so a typo produces a silently wrong model rather than a loud failure. This is a deliberate tolerance for forward compatibility with user-defined archetype names, but it shifts the burden of validation onto the consumer, and consumers should validate against the published JSON Schema before calling the kernel.
+
+\subsection{Composite types}
+\label{sec:composites}
+
+Composite symbols are named aggregates of fundamentals that recur often enough to earn their own shorthand. A composite is written like any other node and expanded into its constituents when the instance is initialised; nothing composite survives into the solver.
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Type} & \textbf{Expands to} & \textbf{Status} \\
+\midrule
+\code{producer}     & \code{body} (storage) $+$ \code{gate} (interaction) $+$ \code{heat} (sink) & shipped \\
+\code{consumer}     & \code{body} (storage) $+$ \code{heat} (sink) & shipped \\
+\code{misc\_box}    & \code{box} (storage) & shipped \\
+\code{system\_frame} & nothing --- recorded as a single \code{constant} & partial \\
+Switching box       & \code{switch} $+$ internal subgraph & not implemented \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Expanded members are named \code{\{instance\}\_\_\{member\}}, so a producer named \code{plant} becomes \code{plant\_\_body}, \code{plant\_\_gate} and \code{plant\_\_heat}. Two consequences follow. First, node indices stop being positional: without composites the $n$th entry of the model's node array is column $n$ of the state vector, and once any composite is present that correspondence breaks. Second, and more subtly, \emph{membership must never be inferred from the identifier}. A node declared directly may legitimately contain a double underscore, and a composite whose own identifier contains one cannot be split unambiguously. The kernel therefore records membership during expansion and exposes it directly, in both directions and including each member's role within its template. Identity by naming convention is exactly the failure mode that content addressing exists to avoid, and because aggregation decisions feed goodness-of-fit scoring, a misattribution would corrupt a fit statistic silently rather than failing loudly.
+
+Users may register their own templates through a top-level \code{archetypes} block, keyed by name; the key becomes a usable node type. Ports define external attachment, and an edge naming a composite instance as an endpoint resolves to the declared \code{in} or \code{out} port rather than to some aggregate. Capacity is bounded at 32 archetypes, 16 nodes and 32 edges per archetype, and 128 composite instances per model --- fixed rather than dynamic, because bounded allocation is what keeps the kernel auditable.
+
+\section{Carriers and quality}
+
+Flows in \esl{} carry a \emph{code}: what is actually moving. \gssk{} represents this as a carrier label on nodes and edges, with optional conservation checking per carrier, so a model may track money, energy, material and information simultaneously and verify each independently.
+
+Quality accounting implements transformity in the sense of Odum's emergy framework \citep{odum1996}. A boundary transformity is declared on source nodes via \code{quality\_input}, and the kernel propagates it through the graph. At bifurcations the propagation rule follows Bastianoni's distinction \citep{bastianoni2011}: \emph{partition} divides quality proportionally to flow, while \emph{replicate} gives each downstream branch the full quality, as befits a co-product. Neither mode affects the integration of the state equations --- quality is a separate accounting pass over the same topology, and this separation is intentional, since conflating the two is a common source of error in hand-built emergy models.
+
+\section{Integration}
+
+The default solver is a fourth-order Runge--Kutta step with an adaptive embedded variant available for stiff regions \citep{dormand1980}. Alongside it, \gssk{} implements Giannantoni's Incipient Differential Calculus \citep{giannantoni2006} for the cases where it applies exactly.
+
+The motivating case is the isolated two-node interaction system, where the conserved sum $S = Q_{A_0} + Q_{B_0}$ admits a closed-form trajectory. Where the kernel detects such a system it uses the analytic path and bypasses \textsc{rk4} entirely --- this is not an approximation but the exact solution. For longer chains and cyclic interaction networks it applies a Padé-(3,3) matrix exponential, which is A-stable and captures the qualitative character of the decay without the step-size restriction of explicit methods.
+
+In automatic mode the kernel runs both an \idc{} and an \textsc{rk4} step and compares them. Divergence beyond \code{solver\_tolerance} degrades a confidence flag from \textsc{high} to \textsc{degraded} and freezes cybernetic coefficient adjustment. The dual-solver arrangement costs roughly a factor of two in throughput and is worth it: it converts a silent accuracy failure into an observable state change.
+
+\section{Reproducibility}
+
+\subsection{Determinism as a requirement}
+
+Stepping is fully deterministic. Two runs of the same model, and a run resumed from a serialised snapshot, produce bit-identical trajectories. This is a property consumers depend on: a downstream system may regenerate a trajectory from a manifest pinning kernel version, calibrated parameters, dataset hash and seed rather than storing frame buffers, and that strategy collapses the moment any part of the pipeline becomes irreproducible.
+
+\subsection{Snapshots}
+
+\code{GSSK\_SerializeSnapshot} emits the full topology plus a snapshot block containing simulation time, step counter, the state vector keyed by stable node identifier rather than by index, per-edge conductances including composite-internal edges, solver confidence flags, the pseudorandom generator state, and the mutation log. Keying by identifier rather than index is what allows a snapshot to survive the index instability that composite expansion introduces.
+
+\subsection{Randomness}
+
+Exactly two entry points consume randomness: ensemble forecasting, which perturbs parameters per run, and Monte Carlo calibration, which uses differential evolution \citep{storn1997}. Everything else --- stepping, gradient calibration, sensitivity analysis --- is deterministic.
+
+Those two entry points draw from an instance-owned SplitMix64 generator \citep{steele2014} seeded at initialisation. Instance ownership matters as much as seedability: a process-global generator lets a second kernel instance, or the host application, silently shift results, and the C standard library's generator has an implementation-defined sequence that differs across platforms and under WebAssembly. Seeding alone would not have fixed either problem. The seed is recorded in snapshots alongside the live stream position, so a stochastic result is reproducible from the snapshot rather than merely from the seed.
+
+\subsection{Mutation log}
+
+Every structural change --- adding a node or edge, deactivating one, reclassifying the network, setting a conductance --- is appended to an in-memory log recording time, operation, target identifier, payload and an attributable cause. The log serialises into snapshots and replays exactly, which makes a model that rewires itself during a run as reproducible as a static one.
+
+\section{Calibration and sensitivity}
+
+The kernel provides gradient-based calibration, a Monte Carlo variant, and forward and adjoint sensitivity analysis. Forward sensitivity maintains a matrix of state derivatives with respect to parameters, suitable when parameters are few; the adjoint method is preferable when they are many. Transformity sensitivity is available alongside state sensitivity, which allows a consumer to ask how a quality figure --- not merely a stock --- responds to a parameter.
+
+Consumers whose results must be reproducible should prefer gradient calibration, or seed the stochastic path explicitly.
+
+\section{Generativity}
+
+Giannantoni's stronger claim is that systems do not merely transform but \emph{originate} new qualities \citep{giannantoni2023}. \gssk{} operationalises this as runtime pattern discovery. After each step the kernel scans the live graph for recurring connected subgraph motifs of two or three nodes, identified by node-type composition and directed connectivity. A motif appearing at least three times per step for ten consecutive steps becomes a candidate, and a candidate may be promoted to a named archetype registered in the running instance --- at which point it is usable as a node type exactly like a user-declared one. A generativity index reports the rate at which new stable patterns emerge.
+
+The scan is skipped above 64 nodes, so on large models the motif table stays empty by design. This is a deliberate trade: motif detection is quadratic in the neighbourhood size, and a bounded scan that sometimes reports nothing is preferable to an unbounded one that stalls the step loop.
+
+\section{Engineering}
+
+\gssk{} is C99 with no dependencies beyond the standard library and a vendored JSON parser. It builds as a static library, a shared library for the Python binding, and WebAssembly for browser use, with bindings for Python, JavaScript/TypeScript and Swift.
+
+The test posture is deliberately broad for a numerical kernel: a regression suite comparing full CSV trajectories against committed expected output, an advanced API suite, AddressSanitizer and UndefinedBehaviorSanitizer runs, Valgrind, a LibFuzzer target with a corpus, a coverage gate, and benchmark regression checks. Trajectory-level regression testing is the important one --- unit tests on individual node types would not catch the integration-order and accumulation errors that actually threaten a solver.
+
+Models are validated against a published JSON Schema describing the pre-expansion surface. That qualification matters: the post-expansion node set is larger than the declared one and can contain node types no model wrote, so a schema describing what a consumer submits is necessarily not a description of what the kernel reports back.
+
+\section{What \gssk{} is not}
+
+Recorded so the boundary stays legible. The kernel does not perform causal gatekeeping, evolutionary topology search, Bayesian optimisation, multi-objective selection, walk-forward evaluation, experiment registry management, or user interface work. These belong in consuming applications. \gssk{} stays a dynamics engine, and the discipline of that boundary is what keeps it small, portable and auditable.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

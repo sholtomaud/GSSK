@@ -1,0 +1,66 @@
+% Shared preamble for the GSSK documents. Both whitepaper.tex and article.tex
+% input this so formatting, listings style and macros stay consistent.
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[round,authoryear]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+% ---------------------------------------------------------------------------
+% Listings: C and JSON. Kept monochrome-friendly so print copies stay legible.
+% ---------------------------------------------------------------------------
+\definecolor{codebg}{gray}{0.96}
+\definecolor{codecomment}{rgb}{0.35,0.40,0.35}
+\definecolor{codekeyword}{rgb}{0.10,0.15,0.45}
+\definecolor{codestring}{rgb}{0.45,0.20,0.10}
+
+\lstdefinestyle{gsskbase}{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\footnotesize,
+  commentstyle=\color{codecomment}\itshape,
+  keywordstyle=\color{codekeyword}\bfseries,
+  stringstyle=\color{codestring},
+  breaklines=true,
+  breakatwhitespace=true,
+  showstringspaces=false,
+  frame=single,
+  rulecolor=\color{gray!40},
+  framesep=4pt,
+  xleftmargin=8pt,
+  columns=fullflexible,
+  keepspaces=true
+}
+
+\lstdefinelanguage{json}{
+  morestring=[b]",
+  morecomment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  literate=
+    *{:}{{{\color{codekeyword}:}}}{1}
+     {[}{{{\color{codekeyword}[}}}{1}
+     {]}{{{\color{codekeyword}]}}}{1}
+     {\{}{{{\color{codekeyword}\{}}}{1}
+     {\}}{{{\color{codekeyword}\}}}}{1}
+}
+
+\lstset{style=gsskbase}
+\lstdefinestyle{c}{language=C}
+\lstdefinestyle{js}{language=json}
+
+% ---------------------------------------------------------------------------
+% Macros
+% ---------------------------------------------------------------------------
+\newcommand{\gssk}{\textsc{gssk}}
+\newcommand{\esl}{\textsc{esl}}
+\newcommand{\idc}{\textsc{idc}}
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\kernelversion}{4.0.0}

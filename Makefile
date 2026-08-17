@@ -383,3 +383,45 @@ shell-wasm: container-image-wasm
 
 shell-linux: container-image-linux
 	$(CONTAINER_BIN) run --rm -it --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR) $(IMAGE_LINUX) bash
+
+# ──────────────────────────────────────────────────────────────
+# Documents (LaTeX)
+#
+# Sources live in doco/. latexmk is pointed at doco/build/ via -outdir so
+# every transient file (.aux, .bbl, .fls, …) stays out of the source tree;
+# doco/.gitignore covers that directory. Requires a TeX distribution —
+# these targets are not part of `make all` and never gate a code change.
+# ──────────────────────────────────────────────────────────────
+DOCO_DIR   = doco
+DOCO_BUILD = $(DOCO_DIR)/build
+# -cd does not compose with a relative -outdir here (output lands beside the
+# source), so the recipes cd explicitly and keep -outdir relative to that.
+LATEXMK    = latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=build
+
+# Report wherever the PDF actually landed. A stock latexmk honours -outdir and
+# writes to doco/build/; a wrapper that drops caller flags (this machine has a
+# container-backed latexmk shim that passes only the filename through) writes
+# beside the source instead. Both locations are gitignored.
+report_pdf = ls -1 $(DOCO_BUILD)/$(1).pdf $(DOCO_DIR)/$(1).pdf 2>/dev/null | head -1 | sed 's/^/→ /'
+
+.PHONY: doco whitepaper article doco-clean
+
+# Build both documents
+doco: whitepaper article
+
+whitepaper:
+	@command -v latexmk >/dev/null 2>&1 || { echo "latexmk not found — install a TeX distribution (e.g. MacTeX, TeX Live)"; exit 1; }
+	cd $(DOCO_DIR) && $(LATEXMK) whitepaper.tex
+	@$(call report_pdf,whitepaper)
+
+article:
+	@command -v latexmk >/dev/null 2>&1 || { echo "latexmk not found — install a TeX distribution (e.g. MacTeX, TeX Live)"; exit 1; }
+	cd $(DOCO_DIR) && $(LATEXMK) article.tex
+	@$(call report_pdf,article)
+
+# Remove LaTeX build output only; leaves sources untouched.
+doco-clean:
+	rm -rf $(DOCO_BUILD)
+	rm -f $(DOCO_DIR)/*.aux $(DOCO_DIR)/*.bbl $(DOCO_DIR)/*.blg \
+	      $(DOCO_DIR)/*.fdb_latexmk $(DOCO_DIR)/*.fls $(DOCO_DIR)/*.log \
+	      $(DOCO_DIR)/*.out $(DOCO_DIR)/*.toc $(DOCO_DIR)/*.pdf
