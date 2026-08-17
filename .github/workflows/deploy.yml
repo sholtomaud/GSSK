@@ -177,12 +177,17 @@ jobs:
         run: make swift-test
 
   # ────────────────────────────────────────────────────────────
-  # Deploy — only on push to main or version tags.
-  # Requires all test jobs to pass first.
+  # Pages deploy — main only.
+  #
+  # This job is gated on the `github-pages` environment, whose branch policy
+  # permits `main` and nothing else. That gate applies to the WHOLE job, so
+  # anything that must also run for a tag cannot live here — a tag push is
+  # rejected before the first step executes. Release publishing therefore
+  # lives in the separate `release` job below.
   # ────────────────────────────────────────────────────────────
   deploy:
     needs: [ build-native, quality, swift, wasm ]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -217,6 +222,62 @@ jobs:
           npm install
           npm run docs:build
 
+      - name: Prepare Pages artifact
+        run: |
+          mkdir -p public/demo
+          cp -r docs/.vitepress/dist/* public/
+          cp web/index.html public/demo/
+          cp web/favicon.png public/demo/
+          cp dist/gssk.js public/demo/
+          cp dist/gssk.wasm public/demo/
+          touch public/.nojekyll
+          sed -i 's|../dist/gssk.js|gssk.js|' public/demo/index.html
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: 'public'
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  # ────────────────────────────────────────────────────────────
+  # Release — main (rolling `latest`) and version tags (immutable).
+  #
+  # Deliberately NOT gated on the `github-pages` environment. That gate is
+  # what made the versioned-release path unreachable: its branch policy
+  # allows only `main`, so a tag push failed the deploy job in about a
+  # second, before any step ran. No number of pushed tags could ever have
+  # produced a release while the release steps lived inside that job.
+  # ────────────────────────────────────────────────────────────
+  release:
+    needs: [ build-native, quality, swift, wasm ]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+
+      - name: Build native
+        run: make all
+
+      - name: Build WASM
+        run: make wasm
+
       - name: Deploy to distribution branch
         run: |
           mkdir -p tmp_dist
@@ -242,29 +303,6 @@ jobs:
             git tag dist-${{ github.ref_name }}
             git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git dist-${{ github.ref_name }}
           fi
-
-      - name: Prepare Pages artifact
-        run: |
-          mkdir -p public/demo
-          cp -r docs/.vitepress/dist/* public/
-          cp web/index.html public/demo/
-          cp web/favicon.png public/demo/
-          cp dist/gssk.js public/demo/
-          cp dist/gssk.wasm public/demo/
-          touch public/.nojekyll
-          sed -i 's|../dist/gssk.js|gssk.js|' public/demo/index.html
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: 'public'
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
 
       # Digests let a consumer verify a download without fetching it twice,
       # and let anyone check whether a rolling `latest` actually changed.
