@@ -93,9 +93,9 @@ typedef enum {
  * ========================================================================= */
 
 #define GSK_VERSION_MAJOR 4
-#define GSK_VERSION_MINOR 0
+#define GSK_VERSION_MINOR 1
 #define GSK_VERSION_PATCH 0
-#define GSK_VERSION_STRING "4.0.0"
+#define GSK_VERSION_STRING "4.1.0"
 
 /* Numeric version for comparison: (major << 16) | (minor << 8) | patch */
 #define GSK_VERSION_CODE(major, minor, patch) \
