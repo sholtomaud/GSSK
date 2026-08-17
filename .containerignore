@@ -1,0 +1,16 @@
+# The repo is bind-mounted at run time; the build context only needs to be
+# small enough to ship quickly.
+.git
+.venv
+.build
+.cache
+node_modules
+bin
+lib
+dist
+coverage
+tests/results
+*.o
+*.a
+favicon.png
+assets

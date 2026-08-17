@@ -25,9 +25,33 @@ TARGET_LIB = $(LIB_DIR)/libgssk.a
 TARGET_CLI = $(BIN_DIR)/gssk
 TARGET_COMPARE = $(BIN_DIR)/csv_compare
 
+# ──────────────────────────────────────────────────────────────
+# Containerised Linux toolchains (Apple `container` CLI)
+#
+# Two things macOS cannot verify locally:
+#   emcc — no emsdk, and CI only builds WASM in the deploy job, which does
+#          not run on pull requests.
+#   gcc  — /usr/bin/gcc here is Apple clang; real GCC emits warnings clang
+#          does not, and CFLAGS carries -Werror.
+#
+# Both emsdk and ubuntu images are amd64-only or resolve wrong on Apple
+# silicon, so --platform is explicit: without it `container run` fails with
+# "platform linux/arm64" even when the image built fine.
+# ──────────────────────────────────────────────────────────────
+CONTAINER_BIN    := container
+CONTAINER_PLATFORM := linux/amd64
+IMAGE_WASM       := gssk-wasm
+IMAGE_LINUX      := gssk-linux
+EMSDK_VERSION    := 3.1.64
+UBUNTU_VERSION   := 24.04
+CWORKDIR         := /work
+CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
+
 .PHONY: all clean test test-update test-advanced test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
-        fuzz-build fuzz-run test-valgrind bench bench-check bench-gen
+        fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
+        container-start container-image container-image-wasm container-image-linux \
+        wasm-container test-linux test-linux-clang shell-wasm shell-linux ci-local
 
 all: directories $(TARGET_LIB) $(TARGET_CLI) $(TARGET_COMPARE)
 
@@ -303,3 +327,59 @@ swift-test:
 # Remove Swift build artefacts (.build/ directory)
 swift-clean:
 	@command -v swift >/dev/null 2>&1 && swift package clean || rm -rf .build
+
+# ──────────────────────────────────────────────────────────────
+# Containerised Linux builds
+#
+# `make wasm` and a real-GCC build cannot run on macOS directly. These
+# targets run them in Linux containers via the Apple `container` CLI.
+# Artefacts land in the bind-mounted working tree exactly as a native
+# build would.
+# ──────────────────────────────────────────────────────────────
+
+# Start the container system daemon (idempotent)
+container-start:
+	@$(CONTAINER_BIN) system start >/dev/null 2>&1 || true
+
+# Build the Emscripten image (matches deploy.yml's emsdk pin)
+container-image-wasm: container-start
+	$(CONTAINER_BIN) build -f Containerfile -t $(IMAGE_WASM) \
+		--platform $(CONTAINER_PLATFORM) \
+		--build-arg EMSDK_VERSION=$(EMSDK_VERSION) .
+
+# Build the native Linux image (matches CI's ubuntu-latest)
+container-image-linux: container-start
+	$(CONTAINER_BIN) build -f Containerfile.linux -t $(IMAGE_LINUX) \
+		--platform $(CONTAINER_PLATFORM) \
+		--build-arg UBUNTU_VERSION=$(UBUNTU_VERSION) .
+
+# Build both images
+container-image: container-image-wasm container-image-linux
+
+# Build the WASM artefacts into dist/. This is the check that CI does NOT
+# run on pull requests, so run it before pushing anything that touches
+# WASM_EXPORTS or any exported symbol.
+wasm-container: container-image-wasm
+	$(CRUN) $(IMAGE_WASM) make wasm
+
+# Full native build + both test suites under real GCC with -Werror.
+test-linux: container-image-linux
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced'
+
+# Same under Linux clang, the other half of CI's build-native matrix.
+test-linux-clang: container-image-linux
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=clang all && make CC=clang test && make CC=clang test-advanced'
+
+# Everything CI would catch that macOS cannot: both Linux compilers plus WASM.
+# Leaves the tree holding Linux objects — run `make clean && make all` after.
+ci-local: test-linux test-linux-clang wasm-container
+	@echo "──────────────────────────────────────────────"
+	@echo "Linux gcc + clang and WASM all built."
+	@echo "Tree now holds Linux artefacts; run 'make clean && make all' to restore native."
+
+# Interactive shells for debugging a container build
+shell-wasm: container-image-wasm
+	$(CONTAINER_BIN) run --rm -it --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR) $(IMAGE_WASM) bash
+
+shell-linux: container-image-linux
+	$(CONTAINER_BIN) run --rm -it --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR) $(IMAGE_LINUX) bash

@@ -1,0 +1,28 @@
+# Native Linux toolchain — mirrors the `build-native` and `quality` CI jobs.
+#
+# Why this exists: /usr/bin/gcc on macOS is a symlink to Apple clang, so
+# `make all` locally has never once run real GCC. CFLAGS carries -Werror and
+# GCC emits diagnostics clang does not (see the stringop-truncation and
+# format-truncation fixes in git history), so a clean local build is not
+# evidence of a clean CI build.
+#
+# Base tracks GitHub's ubuntu-latest so the GCC major version matches what CI
+# actually runs. Pinned rather than :latest — an unpinned bump would silently
+# change which warnings fire.
+ARG UBUNTU_VERSION=24.04
+FROM ubuntu:${UBUNTU_VERSION}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        clang \
+        make \
+        valgrind \
+        python3 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+
+CMD ["bash"]
