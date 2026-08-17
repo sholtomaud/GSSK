@@ -340,8 +340,8 @@
 
     "EdgeLogic": {
       "type": "string",
-      "enum": ["constant", "linear", "interaction", "limit", "threshold"],
-      "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly. Unlike node types, an unrecognised logic string IS rejected by GSSK_Init."
+      "enum": ["constant", "linear", "interaction", "limit", "threshold", "ratio"],
+      "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly. Unlike node types, an unrecognised logic string IS rejected by GSSK_Init.\n\nratio: F = k x Q_origin / max(Q_control, epsilon) — division, requiring params.control_node as the denominator. The denominator is floored so the flow saturates rather than diverging as the control approaches zero; params.threshold sets that floor when above zero, otherwise GSSK_RATIO_EPSILON (1e-9) applies. A model whose control rides the floor is reporting a saturated constant, not a quotient."
     },
 
     "EdgeParams": {

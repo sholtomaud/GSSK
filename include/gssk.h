@@ -36,8 +36,22 @@ typedef enum {
   GSSK_LOGIC_LINEAR,      /**< Proportional to source: F = k × Q_origin */
   GSSK_LOGIC_INTERACTION, /**< Work gate / Riccati: F = k × Q_origin × Q_control */
   GSSK_LOGIC_LIMIT,       /**< Saturation (Michaelis-Menten): F = kQ/(1+Q/C) */
-  GSSK_LOGIC_THRESHOLD    /**< Boolean switch: F = k if Q > threshold, else 0 */
+  GSSK_LOGIC_THRESHOLD,   /**< Boolean switch: F = k if Q > threshold, else 0 */
+  GSSK_LOGIC_RATIO        /**< Division: F = k × Q_origin / max(Q_control, ε) */
 } GSSK_LogicType;
+
+/**
+ * @brief Denominator floor for GSSK_LOGIC_RATIO.
+ *
+ * The denominator is clamped to at least this value, so the flow saturates at
+ * k × Q_origin / ε as the control approaches zero rather than diverging.
+ *
+ * This bounds the largest ratio the primitive can express. A model whose
+ * control rides the floor is reporting a saturated constant, not a quotient —
+ * check the control's magnitude before trusting such a result. Override per
+ * edge with `params.threshold`, which is the epsilon when set above zero.
+ */
+#define GSSK_RATIO_EPSILON 1e-9
 
 /**
  * @brief Integration methods.

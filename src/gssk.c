@@ -307,12 +307,20 @@ static GSSK_OutputMode parse_output_mode(const char *s) {
   return OUTPUT_PARTITION;
 }
 
+/* Denominator for GSSK_LOGIC_RATIO, floored so the flow saturates instead of
+ * diverging as the control goes to zero.  Per-edge override via threshold. */
+static double ratio_denom(double q_control, double threshold) {
+  double eps = (threshold > 0.0) ? threshold : GSSK_RATIO_EPSILON;
+  return (q_control > eps) ? q_control : eps;
+}
+
 static int parse_logic_type(const char *s) {
   if (strcmp(s, "constant")    == 0) return GSSK_LOGIC_CONSTANT;
   if (strcmp(s, "linear")      == 0) return GSSK_LOGIC_LINEAR;
   if (strcmp(s, "interaction") == 0) return GSSK_LOGIC_INTERACTION;
   if (strcmp(s, "limit")       == 0) return GSSK_LOGIC_LIMIT;
   if (strcmp(s, "threshold")   == 0) return GSSK_LOGIC_THRESHOLD;
+  if (strcmp(s, "ratio")       == 0) return GSSK_LOGIC_RATIO;
   return -1;
 }
 
@@ -624,6 +632,11 @@ static void compute_derivatives(GSSK_Instance *inst, const double *state,
     case GSSK_LOGIC_THRESHOLD:
       flow = (Q_orig > e->threshold) ? e->k : 0.0;
       break;
+    case GSSK_LOGIC_RATIO:
+      if (e->control_idx != -1)
+        flow = e->k * Q_orig /
+               ratio_denom(state[e->control_idx], e->threshold);
+      break;
     }
 
     deriv[e->origin_idx] -= flow;
@@ -716,6 +729,14 @@ static void build_flow_matrix(GSSK_Instance *inst, const double *state,
       }
       break;
     }
+    case GSSK_LOGIC_RATIO:
+      /* Exact in Q_origin for a frozen denominator: F = (k/D)·Q_origin. */
+      if (e->control_idx != -1) {
+        conductance = e->k / ratio_denom(state[e->control_idx], e->threshold);
+        A[e->target_idx * (int)n + e->origin_idx] += conductance;
+        A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
+      }
+      break;
     default:
       break; /* threshold: handled as constant forcing in build_forcing_vector */
     }
@@ -1060,6 +1081,10 @@ static double compute_edge_flow(const GSSK_EdgeInternal *e,
   }
   case GSSK_LOGIC_THRESHOLD:
     return (Q > e->threshold) ? e->k : 0.0;
+  case GSSK_LOGIC_RATIO:
+    if (e->control_idx != -1)
+      return e->k * Q / ratio_denom(state[e->control_idx], e->threshold);
+    return 0.0;
   }
   return 0.0;
 }
@@ -1646,6 +1671,10 @@ static void compute_quality_pass(GSSK_Instance *inst, const double *state) {
     case GSSK_LOGIC_THRESHOLD:
       f = (Q > e->threshold) ? e->k : 0.0;
       break;
+    case GSSK_LOGIC_RATIO:
+      if (e->control_idx != -1)
+        f = e->k * Q / ratio_denom(state[e->control_idx], e->threshold);
+      break;
     }
     flow[i] = (f > 0.0) ? f : 0.0;
     outsum[e->origin_idx] += flow[i];
@@ -1788,6 +1817,16 @@ static void build_jacobian(GSSK_Instance *inst, const double *state, double *J) 
       }
       break;
     }
+    case GSSK_LOGIC_RATIO:
+      if (ctrl >= 0) {
+        double D = ratio_denom(state[ctrl], e->threshold);
+        dF_dQ_orig = e->k / D;
+        /* Zero once the denominator is on the floor: the flow no longer
+         * responds to the control there. */
+        if (state[ctrl] > D - 1e-300 && state[ctrl] > 0.0)
+          dF_dQ_ctrl = -e->k * Q / (D * D);
+      }
+      break;
     case GSSK_LOGIC_THRESHOLD:
       break; /* step function → 0 derivative almost everywhere */
     }
@@ -1984,6 +2023,9 @@ static void compute_param_deriv(GSSK_Instance *inst, const double *state,
   case GSSK_LOGIC_THRESHOLD:
     dF_dk = (Q > e->threshold) ? 1.0 : 0.0;
     break;
+  case GSSK_LOGIC_RATIO:
+    if (ctrl >= 0) dF_dk = Q / ratio_denom(state[ctrl], e->threshold);
+    break;
   }
 
   b[(size_t)orig] -= dF_dk;
@@ -2070,6 +2112,10 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, size_t edge_idx,
     case GSSK_LOGIC_THRESHOLD:
       f = (Q > e->threshold) ? e->k : 0.0;
       break;
+    case GSSK_LOGIC_RATIO:
+      if (e->control_idx != -1)
+        f = e->k * Q / ratio_denom(inst->state[e->control_idx], e->threshold);
+      break;
     }
     flow[ei] = f > 0.0 ? f : 0.0;
     outsum[e->origin_idx] += flow[ei];
@@ -2120,6 +2166,10 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, size_t edge_idx,
   }
   case GSSK_LOGIC_THRESHOLD:
     dflow_dk = (Q > ej->threshold) ? 1.0 : 0.0;
+    break;
+  case GSSK_LOGIC_RATIO:
+    if (ej->control_idx >= 0)
+      dflow_dk = Q / ratio_denom(inst->state[ej->control_idx], ej->threshold);
     break;
   }
 
