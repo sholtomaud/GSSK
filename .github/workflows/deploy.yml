@@ -113,6 +113,55 @@ jobs:
         run: make bench-check
 
   # ────────────────────────────────────────────────────────────
+  # WASM build — runs on pull requests too.
+  #
+  # The deploy job below also builds WASM, but it is gated on push to
+  # main/tags, so before this job existed a change to WASM_EXPORTS was
+  # unverified until after merge — at which point a push to main also
+  # republishes the rolling `latest` release that consumers pin. An
+  # undefined exported symbol would surface there rather than on the PR.
+  # ────────────────────────────────────────────────────────────
+  wasm:
+    name: WASM build (emscripten)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.64
+
+      - name: Build WASM
+        run: make wasm
+
+      # emcc errors on an undefined exported symbol, so a successful build is
+      # already meaningful. This asserts the stronger property that every
+      # symbol named in WASM_EXPORTS actually reached the artifact.
+      - name: Verify every declared export reached the artifact
+        run: |
+          missing=0
+          for sym in $(grep -o '"_GSSK_[A-Za-z0-9_]*"' Makefile | tr -d '"' | sort -u); do
+            if ! grep -q "$sym" dist/gssk.js; then
+              echo "::error::declared in WASM_EXPORTS but absent from dist/gssk.js: $sym"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "All declared exports present in dist/gssk.js."
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-build
+          path: |
+            dist/gssk.js
+            dist/gssk.wasm
+
+  # ────────────────────────────────────────────────────────────
   # Swift package (macOS) — separate job, different OS.
   # ────────────────────────────────────────────────────────────
   swift:
@@ -132,7 +181,7 @@ jobs:
   # Requires all test jobs to pass first.
   # ────────────────────────────────────────────────────────────
   deploy:
-    needs: [ build-native, quality, swift ]
+    needs: [ build-native, quality, swift, wasm ]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     environment:
