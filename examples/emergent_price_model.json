@@ -1,0 +1,56 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "emergent-price-tier1",
+    "description": "Phase C Tier 1 — price as an EMERGENT state variable rather than an authored constant, using only existing logic primitives. Price is a storage node driven by the balance between circulating money and inventory, and is fed back into the transaction diamond through the C.0 price_node hook. No new kernel logic. This is the regression anchor for Tier 2 (C.1-C.4, price = M/W): later work must reproduce or deliberately supersede this trajectory, not silently change it."
+  },
+
+  "_mechanism": "An edge drains its origin, so price cannot be 'fed' by the money stock without consuming it. Instead both price forces use interaction logic, whose control_node modulates the flow (flow = k x Q_origin x Q_control) WITHOUT debiting the control node. Demand pushes price up in proportion to circulating money M; supply pulls it down in proportion to inventory W and to price itself. dP/dt = k_demand x M - k_supply x P x W, whose equilibrium is P* = (k_demand x M) / (k_supply x W) — proportional to M/W, Odum's claim, reached here without a division primitive. C.1 will express that ratio directly.",
+
+  "carriers": [
+    { "id": "money",  "unit": "AUD", "conserved": true },
+    { "id": "goods",  "unit": "kg",  "conserved": true },
+    { "id": "signal", "unit": "AUD/kg", "conserved": false,
+      "_note": "Price is a signal, not a conserved substance. Its forces must not participate in money or goods conservation, or the balance checks would fail for a quantity that is not stock." }
+  ],
+
+  "nodes": [
+    { "id": "seller",    "type": "source",   "value": 1.0,    "carrier": "goods",
+      "_note": "Unlimited supply at the boundary; a source is not depleted." },
+    { "id": "buyer",     "type": "storage",  "value": 1000.0, "carrier": "money",
+      "_note": "Circulating money M. Depletes as trade proceeds, which is what makes price fall later in the run." },
+
+    { "id": "ex",        "type": "exchange", "value": 0.0,    "carrier": "goods",
+      "params": { "k": 0.01, "price": 999.0, "price_node": "price" },
+      "_note": "The scalar price is a poison value: if price_node resolution ever regresses, the trajectory diverges obviously rather than subtly." },
+
+    { "id": "inventory", "type": "storage",  "value": 0.0,    "carrier": "goods",
+      "_note": "Accumulated goods W. Rising inventory is the supply-side force on price." },
+    { "id": "spent",     "type": "sink",     "value": 0.0,    "carrier": "money" },
+
+    { "id": "price",     "type": "storage",  "value": 5.0,    "carrier": "signal",
+      "_note": "The emergent price. Read by `ex` each RK4 stage through price_node." },
+    { "id": "demand",    "type": "source",   "value": 1.0,    "carrier": "signal",
+      "_note": "Constant unit origin for the demand force; the magnitude comes from the control node, not from here." },
+    { "id": "clearing",  "type": "sink",     "value": 0.0,    "carrier": "signal" }
+  ],
+
+  "edges": [
+    { "id": "e1", "origin": "seller", "target": "ex",        "carrier": "goods" },
+    { "id": "e2", "origin": "buyer",  "target": "ex",        "carrier": "money" },
+    { "id": "e3", "origin": "ex",     "target": "inventory", "carrier": "goods" },
+    { "id": "e4", "origin": "ex",     "target": "spent",     "carrier": "money" },
+
+    { "id": "e5", "origin": "demand", "target": "price", "carrier": "signal",
+      "logic": "interaction",
+      "params": { "k": 0.001, "control_node": "buyer" },
+      "_note": "Demand force: k x 1.0 x M. `buyer` is the control, so money modulates price without being spent on it." },
+
+    { "id": "e6", "origin": "price", "target": "clearing", "carrier": "signal",
+      "logic": "interaction",
+      "params": { "k": 0.01, "control_node": "inventory" },
+      "_note": "Supply force: k x P x W. Proportional to price itself, so the system relaxes toward P* rather than overshooting without bound." }
+  ],
+
+  "config": { "t_start": 0, "t_end": 5, "dt": 0.1, "method": "rk4" }
+}
