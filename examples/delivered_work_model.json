@@ -1,0 +1,46 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "delivered-work-signal",
+    "description": "Phase C.2 — delivered work W as an explicit low-pass state, per ADR 0003. W tracks the real goods flow through the transaction and decays toward it, so it falls when delivery falls. Feeds M/W in C.3. No kernel change: the tap works because compute_derivatives pins sources, constants and processing nodes to dQ/dt = 0, so a parallel edge off a pinned origin costs that origin nothing."
+  },
+
+  "_mechanism": "The goods flow is F = k x Q_seller x Q_buyer, computed by the exchange node. Edge w_tap reproduces exactly that expression as an interaction edge originating at `seller`. Because `seller` is a source, its derivative is zeroed regardless, so the tap does not double-debit the supply. W then leaks at beta through w_leak, giving dW/dt = F - beta x W, which settles at W = F/beta and follows F down as trade slows.",
+
+  "_limitation": "The tap duplicates the flow EXPRESSION (k and control) rather than referencing the edge it mirrors, so changing k on the real path without changing it here silently desynchronises W. A referencing mechanism belongs with b2-coupled-edge-live, which would make coupled_edge live. The tap is also only free when its origin is pinned: off a storage origin it would double-debit.",
+
+  "carriers": [
+    { "id": "money",  "unit": "AUD",   "conserved": true },
+    { "id": "goods",  "unit": "kg",    "conserved": true },
+    { "id": "signal", "unit": "kg/t",  "conserved": false }
+  ],
+
+  "nodes": [
+    { "id": "seller",    "type": "source",   "value": 1.0,    "carrier": "goods" },
+    { "id": "buyer",     "type": "storage",  "value": 1000.0, "carrier": "money" },
+    { "id": "ex",        "type": "exchange", "value": 0.0,    "carrier": "goods",
+      "params": { "k": 0.01, "price": 5.0 } },
+    { "id": "inventory", "type": "storage",  "value": 0.0,    "carrier": "goods" },
+    { "id": "spent",     "type": "sink",     "value": 0.0,    "carrier": "money" },
+
+    { "id": "W",         "type": "storage",  "value": 0.0,    "carrier": "signal",
+      "_note": "Delivered work. Settles at F/beta and falls as F falls." },
+    { "id": "W_leak",    "type": "sink",     "value": 0.0,    "carrier": "signal" }
+  ],
+
+  "edges": [
+    { "id": "e1", "origin": "seller", "target": "ex",        "carrier": "goods" },
+    { "id": "e2", "origin": "buyer",  "target": "ex",        "carrier": "money" },
+    { "id": "e3", "origin": "ex",     "target": "inventory", "carrier": "goods" },
+    { "id": "e4", "origin": "ex",     "target": "spent",     "carrier": "money" },
+
+    { "id": "w_tap",  "origin": "seller", "target": "W", "carrier": "signal",
+      "logic": "interaction",
+      "params": { "k": 0.01, "control_node": "buyer" } },
+
+    { "id": "w_leak", "origin": "W", "target": "W_leak", "carrier": "signal",
+      "logic": "linear", "params": { "k": 0.5 } }
+  ],
+
+  "config": { "t_start": 0, "t_end": 20, "dt": 0.1, "method": "rk4" }
+}

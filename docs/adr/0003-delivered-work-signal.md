@@ -10,7 +10,9 @@
 
 Odum's claim is that price is the ratio of circulating money to real work delivered, `P = M/W`. `c1-ratio-division-primitive` (ADR 0002) supplied the division. What is still missing is `W` itself: real work delivered must be **readable inside the derivative pass**, because that is where the ratio is evaluated.
 
-The obstacle is structural rather than arithmetic. The `ratio` primitive consumes its numerator and merely reads its denominator through `control_node`. Expressing `M/W` with *neither* operand consumed therefore needs at least one of them exposed as a signal — a value a flow can be computed from without drawing substance out of it. `W` is that operand.
+The obstacle is not that `W` cannot be *read*. `ratio` already reads its denominator through `control_node` without consuming it, so any existing state node can serve. The obstacle is that **no node represents delivered work in the first place**. Delivered work is a *flow* — goods moving through the transaction — and the state vector holds stocks. Nothing in a model says "this much real work was delivered per unit time", so there is no node for the denominator to point at.
+
+`W` therefore has to be constructed: a stock whose value is driven by a flow and which falls when that flow falls. That is what makes this a design decision rather than a wiring exercise.
 
 The task left two options:
 
@@ -35,6 +37,17 @@ The lag is the lesser objection, though it is real: `W` feeds a negative feedbac
 
 **The low-pass is a modelling choice with a time constant.** `dW/dt = F_in − β·W` settles at `W ≈ F_in/β`, so `β` sets both the smoothing window and the scale of `W`. That scale is absorbed into the price coefficient, so `β` and `α` are not independent; whichever model lands first should say so explicitly rather than leaving two knobs that appear separable and are not.
 
-**The open question is how `F_in` reaches `W`.** Existing primitives can read a *stock* without consuming it — `interaction` and `ratio` both do, via `control_node` — but there is no primitive that reads a *flow* without duplicating the draw on its origin. Adding a parallel edge to `W` would double-debit the source. Resolving that is the implementation work, and the likely shape is a node type or edge mode that mirrors an existing flow into an accumulator without participating in it. That choice should be recorded here when made, since it determines whether `W` is exact or itself an approximation.
+**How `F_in` reaches `W`: a parallel edge off a pinned origin. No kernel change.**
+
+The concern was that adding a second edge to feed `W` would double-debit whatever supplies the real flow. It does not, provided that origin is *pinned*. `compute_derivatives` ends by forcing `deriv[i] = 0.0` for every source, constant and processing node — they do not accumulate `Q` — so any amount debited from such a node is discarded before integration. A tap edge off a source therefore costs the supply exactly nothing.
+
+`examples/delivered_work_model.json` uses this. The goods flow through the exchange is `F = k × Q_seller × Q_buyer`; the tap reproduces that expression as an `interaction` edge originating at `seller`, a source, with `buyer` as control. `W` then leaks at `β`, giving `dW/dt = F − β·W`.
+
+This is asserted, not assumed. `make test-delivered-work` runs the model with and without the tap and requires the observed trade to be **bit-identical** — inventory and buyer agree to `0.000e+00` across 200 steps. If the pinning rule ever changes, that test fails immediately rather than the error surfacing as a slightly wrong price three tasks downstream.
+
+Two limitations follow, and neither is hypothetical:
+
+- **The tap duplicates the flow *expression*, not the edge.** `k` and the control are written twice, so changing the real path without changing the tap silently desynchronises `W`. Referencing the mirrored edge is what `b2-coupled-edge-live` would enable — `coupled_edge` is parsed into `coupled_idx` today but never read in the derivative pass, so it is declared and inert. Until then the duplication is the cost of avoiding a new primitive.
+- **The tap is only free off a pinned origin.** Off a `storage` origin it would double-debit and quietly corrupt the very flow it is measuring. This is a real constraint on where `W` can be attached, not a detail.
 
 **Tier 1 stays the anchor.** `examples/emergent_price_model.json` reaches the ratio as the fixed point of a relaxation and remains the regression baseline. `c3-price-dynamics` should add the true `M/W` model beside it, so the difference between approximating the ratio and computing it stays visible in the suite.
