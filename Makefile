@@ -65,7 +65,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -177,6 +177,17 @@ $(TARGET_TEST_RATIO): $(TEST_DIR)/test_ratio.c $(TARGET_LIB)
 test-ratio: all $(TARGET_TEST_RATIO)
 	@echo "Running ratio logic tests..."
 	@./$(TARGET_TEST_RATIO)
+
+# Phase C.2 — delivered work signal: tracking, and non-perturbation of the
+# trade it observes.
+TARGET_TEST_DW = $(BIN_DIR)/test_delivered_work
+
+$(TARGET_TEST_DW): $(TEST_DIR)/test_delivered_work.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-delivered-work: all $(TARGET_TEST_DW)
+	@echo "Running delivered-work tests..."
+	@./$(TARGET_TEST_DW)
 
 clean: swift-clean
 	rm -rf $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results coverage/
