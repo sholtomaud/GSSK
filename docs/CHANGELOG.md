@@ -10,6 +10,8 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 - **GCC 11 can build the kernel again.** `append_mutation` used `strncpy` followed by an explicit terminator, a pattern GCC's `-Wstringop-truncation` rejects under `-Werror` even though it is correct. Every `strncpy` in `src/gssk.c` (107 sites) is now `safe_str_copy`, which always NUL-terminates and derives its bound from `sizeof(dst)` so the bound cannot drift from the field width. This removes the limitation recorded against 4.1.0.
 
+- **Schema conformance is now tested.** `make test-schema` (and `make test`) validates every model in `examples/` against `gssk.schema.json` and fails the build on a mismatch, so the schema and the parser can no longer drift apart unnoticed. CI installs `jsonschema` to make the gate real; locally it skips with a message when the dependency is absent. See [ADR 0004](adr/0004-schema-advisory.md) for why the schema stays advisory rather than being enforced inside `GSSK_Init`.
+
 ---
 
 ## [4.1.0] — 2026-08-17
