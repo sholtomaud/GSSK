@@ -6,7 +6,9 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
-### Added
+### Fixed
+
+- **GCC 11 can build the kernel again.** `append_mutation` used `strncpy` followed by an explicit terminator, a pattern GCC's `-Wstringop-truncation` rejects under `-Werror` even though it is correct. Every `strncpy` in `src/gssk.c` (107 sites) is now `safe_str_copy`, which always NUL-terminates and derives its bound from `sizeof(dst)` so the bound cannot drift from the field width. This removes the limitation recorded against 4.1.0.
 
 ---
 

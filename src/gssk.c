@@ -283,6 +283,7 @@ static const char *node_type_str(GSSK_NodeType t);          /* forward decl (Pha
 static void append_mutation(GSSK_Instance *inst, GSSK_MutationOp op,
                              const char *target_id, const char *payload); /* Phase 4, used in Phase 9 */
 static void scan_motifs_internal(GSSK_Instance *inst);                    /* Phase 9 */
+static void safe_str_copy(char *dst, const char *src, size_t cap);        /* bounded, always NUL-terminates */
 
 static GSSK_NodeType parse_node_type(const char *s) {
   if (strcmp(s, "source")       == 0) return NODE_SOURCE;
@@ -1134,7 +1135,7 @@ static void emit_event(GSSK_Instance *inst, double t,
   }
   GSSK_EventInternal *ev = &inst->events[inst->event_count++];
   ev->t = t;
-  strncpy(ev->edge_id, edge_id ? edge_id : "", 63);
+  safe_str_copy(ev->edge_id, edge_id ? edge_id : "", sizeof(ev->edge_id));
   ev->edge_id[63] = '\0';
   ev->direction = dir;
 }
@@ -2228,78 +2229,78 @@ static void register_builtin_archetypes(GSSK_Instance *inst) {
    *                 resp (body->heat linear, k_respiration). */
   d = &inst->arch_defns[inst->arch_count++];
   memset(d, 0, sizeof(*d));
-  strncpy(d->name, "producer", 63);
+  safe_str_copy(d->name, "producer", sizeof(d->name));
   d->is_structural = false;
   /* nodes */
-  strncpy(d->nodes[0].id, "body", 63);
-  strncpy(d->nodes[0].type_str, "storage", 31);
+  safe_str_copy(d->nodes[0].id, "body", sizeof(d->nodes[0].id));
+  safe_str_copy(d->nodes[0].type_str, "storage", sizeof(d->nodes[0].type_str));
   d->nodes[0].value = 0.0;
-  strncpy(d->nodes[1].id, "gate", 63);
-  strncpy(d->nodes[1].type_str, "interaction", 31);
+  safe_str_copy(d->nodes[1].id, "gate", sizeof(d->nodes[1].id));
+  safe_str_copy(d->nodes[1].type_str, "interaction", sizeof(d->nodes[1].type_str));
   d->nodes[1].node_k = 0.01;
-  strncpy(d->nodes[2].id, "heat", 63);
-  strncpy(d->nodes[2].type_str, "sink", 31);
+  safe_str_copy(d->nodes[2].id, "heat", sizeof(d->nodes[2].id));
+  safe_str_copy(d->nodes[2].type_str, "sink", sizeof(d->nodes[2].type_str));
   d->node_count = 3;
   /* edges */
-  strncpy(d->edges[0].id, "feed_a", 63);
-  strncpy(d->edges[0].origin, "body", 63);
-  strncpy(d->edges[0].target, "gate", 63);
-  strncpy(d->edges[0].logic, "linear", 31);
+  safe_str_copy(d->edges[0].id, "feed_a", sizeof(d->edges[0].id));
+  safe_str_copy(d->edges[0].origin, "body", sizeof(d->edges[0].origin));
+  safe_str_copy(d->edges[0].target, "gate", sizeof(d->edges[0].target));
+  safe_str_copy(d->edges[0].logic, "linear", sizeof(d->edges[0].logic));
   d->edges[0].k = 1.0;
-  strncpy(d->edges[1].id, "feed_b", 63);
-  strncpy(d->edges[1].origin, "body", 63);
-  strncpy(d->edges[1].target, "gate", 63);
-  strncpy(d->edges[1].logic, "linear", 31);
+  safe_str_copy(d->edges[1].id, "feed_b", sizeof(d->edges[1].id));
+  safe_str_copy(d->edges[1].origin, "body", sizeof(d->edges[1].origin));
+  safe_str_copy(d->edges[1].target, "gate", sizeof(d->edges[1].target));
+  safe_str_copy(d->edges[1].logic, "linear", sizeof(d->edges[1].logic));
   d->edges[1].k = 1.0;
-  strncpy(d->edges[2].id, "prod", 63);
-  strncpy(d->edges[2].origin, "gate", 63);
-  strncpy(d->edges[2].target, "body", 63);
-  strncpy(d->edges[2].logic, "linear", 31);
+  safe_str_copy(d->edges[2].id, "prod", sizeof(d->edges[2].id));
+  safe_str_copy(d->edges[2].origin, "gate", sizeof(d->edges[2].origin));
+  safe_str_copy(d->edges[2].target, "body", sizeof(d->edges[2].target));
+  safe_str_copy(d->edges[2].logic, "linear", sizeof(d->edges[2].logic));
   d->edges[2].k = 1.0;
-  strncpy(d->edges[3].id, "resp", 63);
-  strncpy(d->edges[3].origin, "body", 63);
-  strncpy(d->edges[3].target, "heat", 63);
-  strncpy(d->edges[3].logic, "linear", 31);
+  safe_str_copy(d->edges[3].id, "resp", sizeof(d->edges[3].id));
+  safe_str_copy(d->edges[3].origin, "body", sizeof(d->edges[3].origin));
+  safe_str_copy(d->edges[3].target, "heat", sizeof(d->edges[3].target));
+  safe_str_copy(d->edges[3].logic, "linear", sizeof(d->edges[3].logic));
   d->edges[3].k = 0.05;
   d->edge_count = 4;
-  strncpy(d->default_in,  "body", 63);
-  strncpy(d->default_out, "body", 63);
+  safe_str_copy(d->default_in, "body", sizeof(d->default_in));
+  safe_str_copy(d->default_out, "body", sizeof(d->default_out));
 
   /* ---- consumer: storage + sink (metabolism) ---- */
   d = &inst->arch_defns[inst->arch_count++];
   memset(d, 0, sizeof(*d));
-  strncpy(d->name, "consumer", 63);
+  safe_str_copy(d->name, "consumer", sizeof(d->name));
   d->is_structural = false;
-  strncpy(d->nodes[0].id, "body", 63);
-  strncpy(d->nodes[0].type_str, "storage", 31);
-  strncpy(d->nodes[1].id, "heat", 63);
-  strncpy(d->nodes[1].type_str, "sink", 31);
+  safe_str_copy(d->nodes[0].id, "body", sizeof(d->nodes[0].id));
+  safe_str_copy(d->nodes[0].type_str, "storage", sizeof(d->nodes[0].type_str));
+  safe_str_copy(d->nodes[1].id, "heat", sizeof(d->nodes[1].id));
+  safe_str_copy(d->nodes[1].type_str, "sink", sizeof(d->nodes[1].type_str));
   d->node_count = 2;
-  strncpy(d->edges[0].id, "metab", 63);
-  strncpy(d->edges[0].origin, "body", 63);
-  strncpy(d->edges[0].target, "heat", 63);
-  strncpy(d->edges[0].logic, "linear", 31);
+  safe_str_copy(d->edges[0].id, "metab", sizeof(d->edges[0].id));
+  safe_str_copy(d->edges[0].origin, "body", sizeof(d->edges[0].origin));
+  safe_str_copy(d->edges[0].target, "heat", sizeof(d->edges[0].target));
+  safe_str_copy(d->edges[0].logic, "linear", sizeof(d->edges[0].logic));
   d->edges[0].k = 0.1;
   d->edge_count = 1;
-  strncpy(d->default_in,  "body", 63);
-  strncpy(d->default_out, "body", 63);
+  safe_str_copy(d->default_in, "body", sizeof(d->default_in));
+  safe_str_copy(d->default_out, "body", sizeof(d->default_out));
 
   /* ---- misc_box: generic unspecified processing unit ---- */
   d = &inst->arch_defns[inst->arch_count++];
   memset(d, 0, sizeof(*d));
-  strncpy(d->name, "misc_box", 63);
+  safe_str_copy(d->name, "misc_box", sizeof(d->name));
   d->is_structural = false;
-  strncpy(d->nodes[0].id, "box", 63);
-  strncpy(d->nodes[0].type_str, "storage", 31);
+  safe_str_copy(d->nodes[0].id, "box", sizeof(d->nodes[0].id));
+  safe_str_copy(d->nodes[0].type_str, "storage", sizeof(d->nodes[0].type_str));
   d->node_count = 1;
   d->edge_count = 0;
-  strncpy(d->default_in,  "box", 63);
-  strncpy(d->default_out, "box", 63);
+  safe_str_copy(d->default_in, "box", sizeof(d->default_in));
+  safe_str_copy(d->default_out, "box", sizeof(d->default_out));
 
   /* ---- system_frame: structural-only namespace boundary ---- */
   d = &inst->arch_defns[inst->arch_count++];
   memset(d, 0, sizeof(*d));
-  strncpy(d->name, "system_frame", 63);
+  safe_str_copy(d->name, "system_frame", sizeof(d->name));
   d->is_structural = true;
   d->node_count = 0;
   d->edge_count = 0;
@@ -2351,7 +2352,7 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
     }
     GSSK_ADefn *def = &inst->arch_defns[inst->arch_count];
     memset(def, 0, sizeof(*def));
-    strncpy(def->name, a->string, 63);
+    safe_str_copy(def->name, a->string, sizeof(def->name));
     def->name[63] = '\0';
     def->is_structural = false;
     /* Local copy so gcc -Wrestrict doesn't flag snprintf(inst->error_msg, …, def->name)
@@ -2382,10 +2383,10 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
           return GSSK_ERR_SCHEMA_VIOLATION;
         }
         GSSK_ANodeTmpl *nt = &def->nodes[def->node_count++];
-        strncpy(nt->id, nid->valuestring, 63);
-        strncpy(nt->type_str, nty->valuestring, 31);
+        safe_str_copy(nt->id, nid->valuestring, sizeof(nt->id));
+        safe_str_copy(nt->type_str, nty->valuestring, sizeof(nt->type_str));
         nt->value = cJSON_IsNumber(nvl) ? nvl->valuedouble : 0.0;
-        if (cJSON_IsString(nca)) strncpy(nt->carrier, nca->valuestring, 31);
+        if (cJSON_IsString(nca)) safe_str_copy(nt->carrier, nca->valuestring, sizeof(nt->carrier));
         if (cJSON_IsObject(npp)) {
           cJSON *pk  = cJSON_GetObjectItem(npp, "k");
           cJSON *pC  = cJSON_GetObjectItem(npp, "C");
@@ -2424,12 +2425,12 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
           return GSSK_ERR_SCHEMA_VIOLATION;
         }
         GSSK_AEdgeTmpl *et = &def->edges[def->edge_count++];
-        if (cJSON_IsString(eid)) strncpy(et->id, eid->valuestring, 63);
-        strncpy(et->origin, eor->valuestring, 63);
-        strncpy(et->target, etg->valuestring, 63);
-        if (cJSON_IsString(elg)) strncpy(et->logic, elg->valuestring, 31);
-        else                     strncpy(et->logic, "linear", 31);
-        if (cJSON_IsString(eca)) strncpy(et->carrier, eca->valuestring, 31);
+        if (cJSON_IsString(eid)) safe_str_copy(et->id, eid->valuestring, sizeof(et->id));
+        safe_str_copy(et->origin, eor->valuestring, sizeof(et->origin));
+        safe_str_copy(et->target, etg->valuestring, sizeof(et->target));
+        if (cJSON_IsString(elg)) safe_str_copy(et->logic, elg->valuestring, sizeof(et->logic));
+        else                     safe_str_copy(et->logic, "linear", sizeof(et->logic));
+        if (cJSON_IsString(eca)) safe_str_copy(et->carrier, eca->valuestring, sizeof(et->carrier));
         et->k = 1.0;
         if (cJSON_IsObject(epp)) {
           cJSON *pk  = cJSON_GetObjectItem(epp, "k");
@@ -2447,17 +2448,17 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
       cJSON_ArrayForEach(p, aports) {
         if (!p || !p->string || !cJSON_IsString(p)) continue;
         if (def->port_count >= GSSK_MAX_ARCH_PORTS) break;
-        strncpy(def->port_names[def->port_count], p->string, 31);
-        strncpy(def->port_nodes[def->port_count], p->valuestring, 63);
+        safe_str_copy(def->port_names[def->port_count], p->string, sizeof(def->port_names[def->port_count]));
+        safe_str_copy(def->port_nodes[def->port_count], p->valuestring, sizeof(def->port_nodes[def->port_count]));
         def->port_count++;
       }
     }
     if (def->port_count > 0) {
-      strncpy(def->default_in,  def->port_nodes[0], 63);
-      strncpy(def->default_out, def->port_nodes[def->port_count - 1], 63);
+      safe_str_copy(def->default_in, def->port_nodes[0], sizeof(def->default_in));
+      safe_str_copy(def->default_out, def->port_nodes[def->port_count - 1], sizeof(def->default_out));
     } else if (def->node_count > 0) {
-      strncpy(def->default_in,  def->nodes[0].id, 63);
-      strncpy(def->default_out, def->nodes[0].id, 63);
+      safe_str_copy(def->default_in, def->nodes[0].id, sizeof(def->default_in));
+      safe_str_copy(def->default_out, def->nodes[0].id, sizeof(def->default_out));
     }
 
     inst->arch_count++;
@@ -2495,8 +2496,8 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
 
   /* ---- 0. Metadata (v3) ---- */
   inst->schema_version = 3;  /* default to v3 */
-  strncpy(inst->kernel_version, GSK_VERSION_STRING, sizeof(inst->kernel_version) - 1);
-  strncpy(inst->created_at, "2000-01-01T00:00:00Z", sizeof(inst->created_at) - 1);
+  safe_str_copy(inst->kernel_version, GSK_VERSION_STRING, sizeof(inst->kernel_version));
+  safe_str_copy(inst->created_at, "2000-01-01T00:00:00Z", sizeof(inst->created_at));
 
   cJSON *metadata = cJSON_GetObjectItem(root, "metadata");
   if (cJSON_IsObject(metadata)) {
@@ -2516,32 +2517,32 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     /* Extract optional metadata fields */
     cJSON *name = cJSON_GetObjectItem(metadata, "name");
     if (cJSON_IsString(name)) {
-      strncpy(inst->model_name, name->valuestring, sizeof(inst->model_name) - 1);
+      safe_str_copy(inst->model_name, name->valuestring, sizeof(inst->model_name));
     }
 
     cJSON *desc = cJSON_GetObjectItem(metadata, "description");
     if (cJSON_IsString(desc)) {
-      strncpy(inst->model_description, desc->valuestring, sizeof(inst->model_description) - 1);
+      safe_str_copy(inst->model_description, desc->valuestring, sizeof(inst->model_description));
     }
 
     cJSON *author = cJSON_GetObjectItem(metadata, "author");
     if (cJSON_IsString(author)) {
-      strncpy(inst->model_author, author->valuestring, sizeof(inst->model_author) - 1);
+      safe_str_copy(inst->model_author, author->valuestring, sizeof(inst->model_author));
     }
 
     cJSON *created = cJSON_GetObjectItem(metadata, "created_at");
     if (cJSON_IsString(created)) {
-      strncpy(inst->created_at, created->valuestring, sizeof(inst->created_at) - 1);
+      safe_str_copy(inst->created_at, created->valuestring, sizeof(inst->created_at));
     }
 
     cJSON *kv = cJSON_GetObjectItem(metadata, "kernel_version");
     if (cJSON_IsString(kv)) {
-      strncpy(inst->kernel_version, kv->valuestring, sizeof(inst->kernel_version) - 1);
+      safe_str_copy(inst->kernel_version, kv->valuestring, sizeof(inst->kernel_version));
     }
 
     cJSON *hash = cJSON_GetObjectItem(metadata, "model_hash");
     if (cJSON_IsString(hash)) {
-      strncpy(inst->model_hash, hash->valuestring, sizeof(inst->model_hash) - 1);
+      safe_str_copy(inst->model_hash, hash->valuestring, sizeof(inst->model_hash));
     }
   } else if (inst->schema_version == 2) {
     /* v2 model without metadata → warn and upgrade to v3 */
@@ -2567,8 +2568,8 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         cJSON *cid   = cJSON_GetObjectItem(c, "id");
         cJSON *cunit = cJSON_GetObjectItem(c, "unit");
         cJSON *ccons = cJSON_GetObjectItem(c, "conserved");
-        if (cJSON_IsString(cid))  { strncpy(inst->carriers[ci].id,   cid->valuestring,   31); }
-        if (cJSON_IsString(cunit)){ strncpy(inst->carriers[ci].unit, cunit->valuestring, 31); }
+        if (cJSON_IsString(cid))  { safe_str_copy(inst->carriers[ci].id, cid->valuestring, sizeof(inst->carriers[ci].id)); }
+        if (cJSON_IsString(cunit)){ safe_str_copy(inst->carriers[ci].unit, cunit->valuestring, sizeof(inst->carriers[ci].unit)); }
         inst->carriers[ci].conserved = cJSON_IsTrue(ccons);
       }
     }
@@ -2687,8 +2688,8 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
                              ? val->valuedouble : t->value;
         N->active = true;
         inst->state[node_slot + j] = N->initial_value;
-        if (t->carrier[0]) strncpy(N->carrier, t->carrier, 31);
-        else if (carrier_str) strncpy(N->carrier, carrier_str, 31);
+        if (t->carrier[0]) safe_str_copy(N->carrier, t->carrier, sizeof(N->carrier));
+        else if (carrier_str) safe_str_copy(N->carrier, carrier_str, sizeof(N->carrier));
         N->node_k         = t->node_k;
         N->node_C         = t->node_C;
         N->node_threshold = t->node_threshold;
@@ -2707,7 +2708,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         if (strcmp(t->id, def->default_out) == 0) out_idx = (int)(node_slot + j);
       }
       GSSK_CompositeMap *cm = &inst->composites[inst->composite_count++];
-      strncpy(cm->composite_id, id->valuestring, 63);
+      safe_str_copy(cm->composite_id, id->valuestring, sizeof(cm->composite_id));
       cm->composite_id[63] = '\0';
       snprintf(cm->archetype, sizeof(cm->archetype), "%s", def->name);
       cm->in_node_idx    = in_idx;
@@ -2721,19 +2722,19 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
 
     /* ---- system_frame: structural-only — record as NODE_CONSTANT ---- */
     if (def && def->is_structural) {
-      strncpy(inst->nodes[node_slot].id, id->valuestring, 63);
+      safe_str_copy(inst->nodes[node_slot].id, id->valuestring, sizeof(inst->nodes[node_slot].id));
       inst->nodes[node_slot].id[63] = '\0';
       inst->nodes[node_slot].type = NODE_CONSTANT;
       inst->nodes[node_slot].initial_value = val->valuedouble;
       inst->nodes[node_slot].active = true;
       inst->state[node_slot] = val->valuedouble;
-      if (carrier_str) strncpy(inst->nodes[node_slot].carrier, carrier_str, 31);
+      if (carrier_str) safe_str_copy(inst->nodes[node_slot].carrier, carrier_str, sizeof(inst->nodes[node_slot].carrier));
       node_slot++;
       continue;
     }
 
     /* ---- Primitive node parsing (storage / source / sink / processing) ---- */
-    strncpy(inst->nodes[node_slot].id, id->valuestring, 63);
+    safe_str_copy(inst->nodes[node_slot].id, id->valuestring, sizeof(inst->nodes[node_slot].id));
     inst->nodes[node_slot].id[63]        = '\0';
     inst->nodes[node_slot].type          = parse_node_type(type->valuestring);
     inst->nodes[node_slot].initial_value = val->valuedouble;
@@ -2753,7 +2754,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         cJSON_IsString(om) ? om->valuestring : NULL);
 
     if (carrier_str) {
-      strncpy(inst->nodes[node_slot].carrier, carrier_str, 31);
+      safe_str_copy(inst->nodes[node_slot].carrier, carrier_str, sizeof(inst->nodes[node_slot].carrier));
     }
 
     /* Phase 7 — processing-node params block */
@@ -2822,7 +2823,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       /* Optional id */
       cJSON *eid = cJSON_GetObjectItem(edge, "id");
       if (cJSON_IsString(eid)) {
-        strncpy(inst->edges[i].id, eid->valuestring, 63);
+        safe_str_copy(inst->edges[i].id, eid->valuestring, sizeof(inst->edges[i].id));
         inst->edges[i].id[63] = '\0';
       }
 
@@ -2930,7 +2931,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
 
       /* carrier: Odum Position 1 — metadata only, no effect on ODE */
       cJSON *ec = cJSON_GetObjectItem(edge, "carrier");
-      if (cJSON_IsString(ec)) { strncpy(inst->edges[i].carrier, ec->valuestring, 31); }
+      if (cJSON_IsString(ec)) { safe_str_copy(inst->edges[i].carrier, ec->valuestring, sizeof(inst->edges[i].carrier)); }
     }
 
     /* Second pass: resolve coupled_edge references (after all edges parsed) */
@@ -2998,7 +2999,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       E->logic     = (GSSK_LogicType)lt;
       E->k         = te->k;
       E->threshold = te->threshold;
-      if (te->carrier[0]) strncpy(E->carrier, te->carrier, 31);
+      if (te->carrier[0]) safe_str_copy(E->carrier, te->carrier, sizeof(E->carrier));
 
       /* Built-in parameter overrides */
       if (strcmp(def->name, "producer") == 0 &&
@@ -3217,9 +3218,9 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         memset(r, 0, sizeof(GSSK_MutationRecord));
         r->t  = cJSON_IsNumber(mt) ? mt->valuedouble : 0.0;
         r->op = parse_mutation_op(cJSON_IsString(mop) ? mop->valuestring : NULL);
-        if (cJSON_IsString(mti)) { strncpy(r->target_id, mti->valuestring, 63); }
-        if (cJSON_IsString(mpl)) { strncpy(r->payload,   mpl->valuestring, 255); }
-        if (cJSON_IsString(mca)) { strncpy(r->cause,     mca->valuestring, 63); }
+        if (cJSON_IsString(mti)) { safe_str_copy(r->target_id, mti->valuestring, sizeof(r->target_id)); }
+        if (cJSON_IsString(mpl)) { safe_str_copy(r->payload, mpl->valuestring, sizeof(r->payload)); }
+        if (cJSON_IsString(mca)) { safe_str_copy(r->cause, mca->valuestring, sizeof(r->cause)); }
       }
     }
 
@@ -3351,9 +3352,13 @@ post_step:
  * Phase 9 — Runtime Pattern Discovery
  * ========================================================================= */
 
-/* Build canonical form for a 3-node motif.  Enumerates all 6 permutations,
- * keeps only those that maintain non-decreasing type order, and picks the
- * lexicographically smallest — giving a proper isomorphism-invariant form. */
+/* Bounded string copy that ALWAYS NUL-terminates.
+ *
+ * Preferred over strncpy throughout this file. strncpy does not terminate when
+ * the source fills the buffer, so it needs a separate terminating assignment,
+ * and GCC's -Wstringop-truncation flags the pattern even when that assignment
+ * is present — which is fatal under -Werror. Taking the capacity rather than
+ * capacity-1 also removes the off-by-one that a literal bound invites. */
 static void safe_str_copy(char *dst, const char *src, size_t cap) {
   if (!dst || cap == 0) return;
   size_t len = (src && *src) ? strlen(src) : 0;
@@ -3362,6 +3367,9 @@ static void safe_str_copy(char *dst, const char *src, size_t cap) {
   dst[len] = '\0';
 }
 
+/* Build canonical form for a 3-node motif.  Enumerates all 6 permutations,
+ * keeps only those that maintain non-decreasing type order, and picks the
+ * lexicographically smallest — giving a proper isomorphism-invariant form. */
 static void make_canon_3(char *out, size_t cap,
                           const char *t[3], const bool e[3][3],
                           char best_types[3][32], uint8_t *out_bits) {
@@ -3461,13 +3469,13 @@ static void scan_motifs_internal(GSSK_Instance *inst) {
       snprintf(cand_ab, sizeof(cand_ab), "2:%s:%s:%u", ta, tb, (unsigned)bits_ab);
       snprintf(cand_ba, sizeof(cand_ba), "2:%s:%s:%u", tb, ta, (unsigned)bits_ba);
       if (strcmp(cand_ab, cand_ba) <= 0) {
-        strncpy(canon, cand_ab, sizeof(canon) - 1); canon[sizeof(canon)-1] = '\0';
+        safe_str_copy(canon, cand_ab, sizeof(canon)); canon[sizeof(canon)-1] = '\0';
         bits = bits_ab;
-        strncpy(types_canon[0], ta, 31); strncpy(types_canon[1], tb, 31);
+        safe_str_copy(types_canon[0], ta, sizeof(types_canon[0])); safe_str_copy(types_canon[1], tb, sizeof(types_canon[1]));
       } else {
-        strncpy(canon, cand_ba, sizeof(canon) - 1); canon[sizeof(canon)-1] = '\0';
+        safe_str_copy(canon, cand_ba, sizeof(canon)); canon[sizeof(canon)-1] = '\0';
         bits = bits_ba;
-        strncpy(types_canon[0], tb, 31); strncpy(types_canon[1], ta, 31);
+        safe_str_copy(types_canon[0], tb, sizeof(types_canon[0])); safe_str_copy(types_canon[1], ta, sizeof(types_canon[1]));
       }
       record_motif_internal(inst, canon, 2, bits, (const char (*)[32])types_canon);
     }
@@ -3585,14 +3593,13 @@ GSSK_Status GSSK_ProposeArchetype(GSSK_Instance *inst, size_t motif_idx,
   /* Build archetype definition from motif */
   GSSK_ADefn *def = &inst->arch_defns[inst->arch_count];
   memset(def, 0, sizeof(*def));
-  strncpy(def->name, name, sizeof(def->name) - 1);
+  safe_str_copy(def->name, name, sizeof(def->name));
   def->node_count = m->size;
   def->is_structural = false;
 
   for (size_t ni = 0; ni < m->size; ni++) {
     snprintf(def->nodes[ni].id, sizeof(def->nodes[ni].id), "node%zu", ni);
-    strncpy(def->nodes[ni].type_str, m->node_types[ni],
-            sizeof(def->nodes[ni].type_str) - 1);
+    safe_str_copy(def->nodes[ni].type_str, m->node_types[ni], sizeof(def->nodes[ni].type_str));
     def->nodes[ni].value = 0.0;
   }
 
@@ -3602,15 +3609,15 @@ GSSK_Status GSSK_ProposeArchetype(GSSK_Instance *inst, size_t motif_idx,
   size_t ei = 0;
   if (m->size == 2) {
     if (m->edge_bits & 1) {
-      strncpy(def->edges[ei].origin, "node0", 63);
-      strncpy(def->edges[ei].target, "node1", 63);
-      strncpy(def->edges[ei].logic, "linear", 31);
+      safe_str_copy(def->edges[ei].origin, "node0", sizeof(def->edges[ei].origin));
+      safe_str_copy(def->edges[ei].target, "node1", sizeof(def->edges[ei].target));
+      safe_str_copy(def->edges[ei].logic, "linear", sizeof(def->edges[ei].logic));
       def->edges[ei].k = 1.0; ei++;
     }
     if (m->edge_bits & 2) {
-      strncpy(def->edges[ei].origin, "node1", 63);
-      strncpy(def->edges[ei].target, "node0", 63);
-      strncpy(def->edges[ei].logic, "linear", 31);
+      safe_str_copy(def->edges[ei].origin, "node1", sizeof(def->edges[ei].origin));
+      safe_str_copy(def->edges[ei].target, "node0", sizeof(def->edges[ei].target));
+      safe_str_copy(def->edges[ei].logic, "linear", sizeof(def->edges[ei].logic));
       def->edges[ei].k = 1.0; ei++;
     }
   } else {
@@ -3620,15 +3627,15 @@ GSSK_Status GSSK_ProposeArchetype(GSSK_Instance *inst, size_t motif_idx,
       if (!(m->edge_bits & (1u << b))) continue;
       snprintf(def->edges[ei].origin, sizeof(def->edges[ei].origin), "node%d", src3[b]);
       snprintf(def->edges[ei].target, sizeof(def->edges[ei].target), "node%d", tgt3[b]);
-      strncpy(def->edges[ei].logic, "linear", 31);
+      safe_str_copy(def->edges[ei].logic, "linear", sizeof(def->edges[ei].logic));
       def->edges[ei].k = 1.0; ei++;
     }
   }
   def->edge_count = ei;
 
   /* Default ports */
-  strncpy(def->default_in,  def->nodes[0].id, sizeof(def->default_in) - 1);
-  strncpy(def->default_out, def->nodes[m->size-1].id, sizeof(def->default_out) - 1);
+  safe_str_copy(def->default_in, def->nodes[0].id, sizeof(def->default_in));
+  safe_str_copy(def->default_out, def->nodes[m->size-1].id, sizeof(def->default_out));
   inst->arch_count++;
 
   /* Log to mutation log */
@@ -3658,8 +3665,8 @@ static void append_mutation(GSSK_Instance *inst, GSSK_MutationOp op,
   memset(r, 0, sizeof(GSSK_MutationRecord));
   r->t  = inst->current_t;
   r->op = op;
-  if (target_id) { strncpy(r->target_id, target_id, 63); r->target_id[63] = '\0'; }
-  if (payload)   { strncpy(r->payload,   payload,   255); r->payload[255]  = '\0'; }
+  if (target_id) safe_str_copy(r->target_id, target_id, sizeof(r->target_id));
+  if (payload)   safe_str_copy(r->payload,   payload,   sizeof(r->payload));
   if (inst->pending_cause[0])
     snprintf(r->cause, sizeof(r->cause), "%s", inst->pending_cause);
   else
@@ -3759,7 +3766,7 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
   size_t idx = inst->node_count;
   memset(&inst->nodes[idx], 0, sizeof(GSSK_NodeInternal));
   inst->nodes[idx].composite_idx = -1;  /* declared directly, not expanded */
-  strncpy(inst->nodes[idx].id, id->valuestring, 63);
+  safe_str_copy(inst->nodes[idx].id, id->valuestring, sizeof(inst->nodes[idx].id));
   inst->nodes[idx].id[63]        = '\0';
   inst->nodes[idx].type          = parse_node_type(type->valuestring);
   inst->nodes[idx].initial_value = val->valuedouble;
@@ -3780,7 +3787,7 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
       cJSON_IsString(om) ? om->valuestring : NULL);
 
   cJSON *nc_add = cJSON_GetObjectItem(node, "carrier");
-  if (cJSON_IsString(nc_add)) { strncpy(inst->nodes[idx].carrier, nc_add->valuestring, 31); }
+  if (cJSON_IsString(nc_add)) { safe_str_copy(inst->nodes[idx].carrier, nc_add->valuestring, sizeof(inst->nodes[idx].carrier)); }
 
   inst->node_count = new_n;
   cJSON_Delete(node);
@@ -3860,7 +3867,7 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
 
   cJSON *eid = cJSON_GetObjectItem(edge, "id");
   if (cJSON_IsString(eid)) {
-    strncpy(inst->edges[ei].id, eid->valuestring, 63);
+    safe_str_copy(inst->edges[ei].id, eid->valuestring, sizeof(inst->edges[ei].id));
     inst->edges[ei].id[63] = '\0';
   }
 
@@ -3884,7 +3891,7 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
       cJSON_IsString(om) ? om->valuestring : NULL);
 
   cJSON *ec_add = cJSON_GetObjectItem(edge, "carrier");
-  if (cJSON_IsString(ec_add)) { strncpy(inst->edges[ei].carrier, ec_add->valuestring, 31); }
+  if (cJSON_IsString(ec_add)) { safe_str_copy(inst->edges[ei].carrier, ec_add->valuestring, sizeof(inst->edges[ei].carrier)); }
 
   inst->edge_count = new_ec;
   cJSON_Delete(edge);
@@ -4176,7 +4183,7 @@ const GSSK_MutationRecord *GSSK_GetMutationRecord(GSSK_Instance *inst,
 void GSSK_SetMutationCause(GSSK_Instance *inst, const char *cause) {
   if (!inst) return;
   if (cause && cause[0]) {
-    strncpy(inst->pending_cause, cause, 63);
+    safe_str_copy(inst->pending_cause, cause, sizeof(inst->pending_cause));
     inst->pending_cause[63] = '\0';
   } else {
     inst->pending_cause[0] = '\0';
@@ -4295,9 +4302,9 @@ GSSK_Status GSSK_Replay(const char *initial_json,
           cJSON *ca = cJSON_GetObjectItem(m, "cause");
           muts[i].t  = cJSON_IsNumber(t) ? t->valuedouble : 0.0;
           muts[i].op = parse_mutation_op(cJSON_IsString(op) ? op->valuestring : NULL);
-          if (cJSON_IsString(ti)) { strncpy(muts[i].target_id, ti->valuestring, 63); }
-          if (cJSON_IsString(pl)) { strncpy(muts[i].payload,   pl->valuestring, 255); }
-          if (cJSON_IsString(ca)) { strncpy(muts[i].cause,     ca->valuestring, 63); }
+          if (cJSON_IsString(ti)) { safe_str_copy(muts[i].target_id, ti->valuestring, sizeof(muts[i].target_id)); }
+          if (cJSON_IsString(pl)) { safe_str_copy(muts[i].payload, pl->valuestring, sizeof(muts[i].payload)); }
+          if (cJSON_IsString(ca)) { safe_str_copy(muts[i].cause, ca->valuestring, sizeof(muts[i].cause)); }
         }
       }
       cJSON_Delete(arr);
