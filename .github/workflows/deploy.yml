@@ -47,6 +47,13 @@ jobs:
       - name: Run regression tests
         run: make test
 
+      # Unit suites, not CSV regressions. Only the node-type gate is wired in
+      # here: it is the check that stops a mistyped `type` silently becoming a
+      # storage node, so it has to run on every PR rather than only in the
+      # local `make test-linux` chain.
+      - name: Node type validation tests
+        run: make test-node-types
+
   # ────────────────────────────────────────────────────────────
   # Quality gate — all Linux-only checks as serial steps.
   # One checkout, one apt-get, one runner.

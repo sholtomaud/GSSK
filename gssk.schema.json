@@ -126,7 +126,7 @@
 
     "PrimitiveNodeType": {
       "type": "string",
-      "description": "A fundamental (non-composite) node type. storage: dQ/dt computed. source/constant: Q fixed at value. sink: accumulates inflows, not depleted. interaction/gain/loop_limited/exchange/switch: Phase 7 processing nodes, parameterised via the node 'params' block. NOTE: the kernel does not reject unrecognised type strings — parse_node_type() falls back to 'storage'. This enum is therefore advisory for authoring, not a description of what GSSK_Init will refuse.",
+      "description": "A fundamental (non-composite) node type. storage: dQ/dt computed. source/constant: Q fixed at value. sink: accumulates inflows, not depleted. interaction/gain/loop_limited/exchange/switch: Phase 7 processing nodes, parameterised via the node 'params' block. This enum is the complete set of primitives; GSSK_Init rejects any type string that is neither one of these, a built-in composite, nor an archetype the model declares (GSSK_ERR_SCHEMA_VIOLATION). GSSK_AddNode is stricter still: it performs no composite expansion, so it accepts only the primitives listed here.",
       "enum": [
         "storage",
         "source",
@@ -249,7 +249,7 @@
         },
         "type": {
           "type": "string",
-          "description": "Node type. One of: (a) a fundamental type — storage, source, sink, constant, interaction, gain, loop_limited, exchange, switch; (b) a built-in composite — producer (expands to body/gate/heat), consumer (body/heat), misc_box (box), system_frame (structural only, recorded as a single constant node); or (c) the name of any archetype declared in the top-level 'archetypes' block. Because (c) is open-ended this cannot be a closed enum. Unrecognised strings are NOT rejected — the kernel falls back to 'storage'."
+          "description": "Node type. One of: (a) a fundamental type — storage, source, sink, constant, interaction, gain, loop_limited, exchange, switch; (b) a built-in composite — producer (expands to body/gate/heat), consumer (body/heat), misc_box (box), system_frame (structural only, recorded as a single constant node); or (c) the name of any archetype declared in the top-level 'archetypes' block. Because (c) is open-ended this cannot be a closed enum, so validating against this schema cannot catch a mistyped type. GSSK_Init can and does: it parses the 'archetypes' block before the node list, so anything matching none of (a), (b) or (c) is rejected with GSSK_ERR_SCHEMA_VIOLATION naming the node id and the offending string. GSSK_AddNode accepts only (a) — it expands nothing at runtime and rejects composite and archetype names rather than mis-modelling them as single nodes."
         },
         "value": {
           "type": "number",
@@ -344,7 +344,7 @@
     "EdgeLogic": {
       "type": "string",
       "enum": ["constant", "linear", "interaction", "limit", "threshold", "ratio"],
-      "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly. Unlike node types, an unrecognised logic string IS rejected by GSSK_Init.\n\nratio: F = k x Q_origin / max(Q_control, epsilon) — division, requiring params.control_node as the denominator. The denominator is floored so the flow saturates rather than diverging as the control approaches zero; params.threshold sets that floor when above zero, otherwise GSSK_RATIO_EPSILON (1e-9) applies. A model whose control rides the floor is reporting a saturated constant, not a quotient."
+      "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly. An unrecognised logic string is rejected by GSSK_Init, as an unrecognised node type now is.\n\nratio: F = k x Q_origin / max(Q_control, epsilon) — division, requiring params.control_node as the denominator. The denominator is floored so the flow saturates rather than diverging as the control approaches zero; params.threshold sets that floor when above zero, otherwise GSSK_RATIO_EPSILON (1e-9) applies. A model whose control rides the floor is reporting a saturated constant, not a quotient."
     },
 
     "EdgeParams": {

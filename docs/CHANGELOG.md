@@ -6,7 +6,19 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### BREAKING
+
+- **An unrecognised node `type` is now rejected instead of silently becoming a `storage` node.** `parse_node_type` returned `NODE_STORAGE` for any string it did not recognise, so `"storge"`, `"Source"` or `"producer_"` produced a *different model* that ran to completion and reported success. `GSSK_Init` now returns `GSSK_ERR_SCHEMA_VIOLATION` for any type that is neither one of the nine primitives (`storage`, `source`, `sink`, `constant`, `interaction`, `gain`, `loop_limited`, `exchange`, `switch`), a built-in composite (`producer`, `consumer`, `misc_box`, `system_frame`), nor an archetype declared in the model's own `archetypes` block. The message names the node id and the offending string — `Schema Error: Node 'grasss' has unknown type 'storge'.` — so an authoring UI can highlight the element that is wrong.
+
+  `GSSK_AddNode` rejects the same strings, and additionally rejects composite and archetype names: it performs no expansion, so `{"type":"producer"}` added at runtime had been becoming a single storage node rather than the producer subgraph. It now fails with a message saying composites can only be added at `GSSK_Init`. A rejected add is a true no-op — nothing is allocated or grown before the check, so the instance a drag-and-drop editor is mutating is left exactly as it was and remains steppable. Expanding composites at runtime is a separate change and is not attempted here.
+
+  **Migration**: a model relying on the old fallback now fails to load. The fix is to correct the type string; every previously-accepted string that was actually a primitive, a built-in composite, or a declared archetype is unaffected. Nothing in `examples/`, `tests/schema_fixtures/` or the fuzz corpus changed.
+
+  This closes the hazard [ADR 0004](adr/0004-schema-advisory.md) left open, using the fix that ADR named. Schema validation could never have caught it: `Node.type` cannot be a closed enum, because archetype names are user-defined, so a validator cannot tell a typo from a legitimate archetype reference. The parser can — it reads the `archetypes` block before the node list — which is why the check belongs there and why the schema can stay advisory.
+
 ### Fixed
+
+- **`GSSK_AddNode` read freed memory when reporting a duplicate id.** The error message formatted `id->valuestring` after `cJSON_Delete` had already released the tree that owned it. Found while adding the type check next to it; the message is now formatted before the delete.
 
 - **GCC 11 can build the kernel again.** `append_mutation` used `strncpy` followed by an explicit terminator, a pattern GCC's `-Wstringop-truncation` rejects under `-Werror` even though it is correct. Every `strncpy` in `src/gssk.c` (107 sites) is now `safe_str_copy`, which always NUL-terminates and derives its bound from `sizeof(dst)` so the bound cannot drift from the field width. This removes the limitation recorded against 4.1.0.
 

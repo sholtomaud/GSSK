@@ -327,9 +327,22 @@ void GSSK_SetEdgeK(GSSK_Instance *inst, size_t index, double k);
  *
  * Automatically calls GSSK_ReclassifyNetwork().
  *
+ * Only the nine primitive types are accepted: storage, source, sink, constant,
+ * interaction, gain, loop_limited, exchange, switch. This path does not expand
+ * composites, so a composite or archetype name — including a built-in such as
+ * "producer" — is rejected with GSSK_ERR_SCHEMA_VIOLATION rather than being
+ * mis-modelled as a single node; add such a structure at GSSK_Init time. Any
+ * other string is likewise an error, not a fallback to "storage".
+ *
+ * A rejected call is a no-op: the type is checked before anything is allocated
+ * or grown, so node_count, state[] and the edge arrays are unchanged and the
+ * instance remains steppable. Read GSSK_GetErrorDescription() for a message
+ * naming the node id and the offending string.
+ *
  * @param json_node_fragment  JSON object conforming to the Node schema, e.g.:
  *   {"id":"car","type":"storage","value":0.0}
- * @return GSSK_Status  GSSK_SUCCESS or error.
+ * @return GSSK_Status  GSSK_SUCCESS, or GSSK_ERR_SCHEMA_VIOLATION for a
+ *   duplicate id, a missing field, or a type that is not a primitive.
  */
 GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment);
 

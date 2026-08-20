@@ -285,6 +285,23 @@ static void append_mutation(GSSK_Instance *inst, GSSK_MutationOp op,
 static void scan_motifs_internal(GSSK_Instance *inst);                    /* Phase 9 */
 static void safe_str_copy(char *dst, const char *src, size_t cap);        /* bounded, always NUL-terminates */
 
+/* The nine ESL primitives, and the only strings parse_node_type can actually
+ * decode.  parse_node_type returns NODE_STORAGE for anything else, which is a
+ * usable default only once the string is known to be a primitive — so every
+ * caller that takes a type from a model must gate on this first.  A composite
+ * or archetype name is NOT a primitive; it is resolved by find_archetype. */
+static bool is_primitive_node_type(const char *s) {
+  if (!s) return false;
+  return strcmp(s, "storage")      == 0 || strcmp(s, "source")   == 0 ||
+         strcmp(s, "sink")         == 0 || strcmp(s, "constant") == 0 ||
+         strcmp(s, "interaction")  == 0 || strcmp(s, "gain")     == 0 ||
+         strcmp(s, "loop_limited") == 0 || strcmp(s, "exchange") == 0 ||
+         strcmp(s, "switch")       == 0;
+}
+
+/* Decodes a primitive type string.  The NODE_STORAGE tail is a decode default,
+ * not a fallback for unknown input: callers validate with
+ * is_primitive_node_type (or find_archetype) before getting here. */
 static GSSK_NodeType parse_node_type(const char *s) {
   if (strcmp(s, "source")       == 0) return NODE_SOURCE;
   if (strcmp(s, "sink")         == 0) return NODE_SINK;
@@ -2600,8 +2617,12 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
   for (int i = 0; i < n_json_nodes; i++) {
     cJSON *nn = cJSON_GetArrayItem(nodes_arr, i);
     cJSON *tn = cJSON_GetObjectItem(nn, "type");
-    const char *ts = cJSON_IsString(tn) ? tn->valuestring : "storage";
-    GSSK_ADefn *def = find_archetype(inst, ts);
+    /* A missing or non-string type is rejected by the main loop below; here it
+     * only has to be sized, and one slot is the safe assumption.  Do not
+     * substitute "storage" — that was the sizing half of the fallback the
+     * parser no longer performs, and it read as if the type were accepted. */
+    const char *ts = cJSON_IsString(tn) ? tn->valuestring : NULL;
+    GSSK_ADefn *def = ts ? find_archetype(inst, ts) : NULL;
     if (def && !def->is_structural) {
       total_nodes       += def->node_count;
       total_extra_edges += def->edge_count;
@@ -2656,6 +2677,19 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     cJSON *nparams = cJSON_GetObjectItem(node, "params");
 
     GSSK_ADefn *def = find_archetype(inst, type->valuestring);
+
+    /* Archetypes are parsed before this loop, so find_archetype is complete by
+     * now and "neither a primitive nor a known archetype" is decidable here —
+     * the one place in the system where it is.  A typo used to become a
+     * storage node and run to completion, reporting success for a model the
+     * author never wrote (ADR 0004). */
+    if (!def && !is_primitive_node_type(type->valuestring)) {
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "Schema Error: Node '%s' has unknown type '%s'.",
+               id->valuestring, type->valuestring);
+      status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+    }
+
     if (def && !def->is_structural) {
       /* ---- Composite node expansion ---- */
       if (inst->composite_count >= GSSK_MAX_COMPOSITES) {
@@ -3703,9 +3737,34 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
   }
 
   if (find_node_idx(inst, id->valuestring) != -1) {
-    cJSON_Delete(node);
+    /* Format before the delete: id->valuestring is owned by `node`. */
     snprintf(inst->error_msg, sizeof(inst->error_msg),
              "GSSK_AddNode: duplicate id '%s'", id->valuestring);
+    cJSON_Delete(node);
+    return GSSK_ERR_SCHEMA_VIOLATION;
+  }
+
+  /* Type check, before anything is allocated or grown, so a rejected add is a
+   * true no-op — a drag-and-drop editor calls this on every element change and
+   * must be able to reject one without corrupting the model.
+   *
+   * This path expands nothing: unlike GSSK_Init it has no composite or
+   * archetype dispatch, so a composite name here would have become a single
+   * storage node rather than its subgraph.  Say so instead of mis-modelling. */
+  if (find_archetype(inst, type->valuestring)) {
+    snprintf(inst->error_msg, sizeof(inst->error_msg),
+             "GSSK_AddNode: node '%s' has composite type '%s'; composites and "
+             "archetypes cannot be added at runtime, only at GSSK_Init. Add "
+             "the primitive members individually.",
+             id->valuestring, type->valuestring);
+    cJSON_Delete(node);
+    return GSSK_ERR_SCHEMA_VIOLATION;
+  }
+  if (!is_primitive_node_type(type->valuestring)) {
+    snprintf(inst->error_msg, sizeof(inst->error_msg),
+             "GSSK_AddNode: node '%s' has unknown type '%s'.",
+             id->valuestring, type->valuestring);
+    cJSON_Delete(node);
     return GSSK_ERR_SCHEMA_VIOLATION;
   }
 
