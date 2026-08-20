@@ -24,7 +24,10 @@
     },
     "config":   { "$ref": "#/$defs/Config" },
     "snapshot": { "$ref": "#/$defs/Snapshot" },
-    "mutation_log": { "$ref": "#/$defs/MutationLog" },
+    "mutation_log": {
+      "$ref": "#/$defs/MutationLog",
+      "description": "Archival copy of a mutation history, as produced by GSSK_ExportMutationLog. GSSK_Init does NOT read it here — the kernel restores a log only from snapshot.mutation_log, and gssk replay takes one as a separate file. Allowed at the root so an exported log can be stored alongside the model it belongs to."
+    },
     "carriers": { "$ref": "#/$defs/Carriers" }
   },
 
@@ -398,6 +401,30 @@
           "type": "number",
           "default": 1e-6,
           "description": "Maximum relative error between IDC and RK4 before dual-solver confidence degrades to DEGRADED and k-adjustments are frozen. Only used in auto mode."
+        },
+        "rel_tol": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1e-6,
+          "description": "DOPRI5 relative error tolerance. Only used by GSSK_StepAdaptive; ignored by the fixed-step solvers. Emitted by the serializer when it differs from the default."
+        },
+        "abs_tol": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1e-9,
+          "description": "DOPRI5 absolute error tolerance. Only used by GSSK_StepAdaptive; ignored by the fixed-step solvers. Emitted by the serializer when it differs from the default."
+        },
+        "h_min": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Smallest adaptive step size accepted before a step is taken anyway with GSSK_WARN_SOLVER_DIVERGENCE. 0 means dt * 1e-6."
+        },
+        "h_max": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Largest adaptive step size. 0 means dt, further capped by the spectral-radius heuristic h_max <= 3.5 / lambda_bound."
         }
       }
     }

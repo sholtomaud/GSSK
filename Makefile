@@ -65,7 +65,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -95,7 +95,7 @@ $(TARGET_COMPARE): $(TEST_DIR)/csv_compare.c
 MODELS = $(wildcard examples/*.json)
 RESULTS = $(patsubst examples/%.json,tests/results/%.csv,$(MODELS))
 
-test: all
+test: all test-schema
 	@echo "Running Regression Tests..."
 	@mkdir -p tests/results
 	@for model in $(MODELS); do \
@@ -188,6 +188,26 @@ $(TARGET_TEST_DW): $(TEST_DIR)/test_delivered_work.c $(TARGET_LIB)
 test-delivered-work: all $(TARGET_TEST_DW)
 	@echo "Running delivered-work tests..."
 	@./$(TARGET_TEST_DW)
+
+# Schema conformance — examples/ must match gssk.schema.json.
+#
+# The kernel does not validate against the schema at load time (ADR 0004), so
+# this is what stops the schema and the parser drifting apart. It skips when
+# jsonschema is absent rather than failing, so a bare checkout still builds;
+# CI installs the dependency so the gate is real there.
+# Serialised output is checked too: the schema also has to describe what
+# GSSK_SerializeModel/Snapshot emit, which is the format the archival story
+# in Phase G rests on. dump_serialized writes those into tests/results.
+SER_DIR = tests/results/serialized
+TARGET_DUMP_SER = $(BIN_DIR)/dump_serialized
+
+$(TARGET_DUMP_SER): $(TEST_DIR)/dump_serialized.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-schema: directories $(TARGET_DUMP_SER)
+	@rm -rf $(SER_DIR) && mkdir -p $(SER_DIR)
+	@./$(TARGET_DUMP_SER) $(SER_DIR) $(MODELS) $(wildcard tests/schema_fixtures/*.json)
+	@python3 scripts/validate_models.py
 
 clean: swift-clean
 	rm -rf $(BIN_DIR) $(LIB_DIR) $(DIST_DIR) tests/results coverage/

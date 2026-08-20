@@ -28,3 +28,20 @@ A dedicated `tests/benchmark.c` will measure:
 - Mean time per step.
 - Startup latency.
 - Memory footprint per 1,000 nodes.
+
+## 5. Schema Conformance
+`make test-schema` (also run by `make test`) checks `gssk.schema.json` against
+what the kernel really does, in both directions:
+
+- `examples/` and `tests/schema_fixtures/` — models a consumer writes must
+  validate. Fixtures exist for corners no example reaches, such as the
+  adaptive-solver config fields.
+- `tests/results/serialized/` — `bin/dump_serialized` (`tests/dump_serialized.c`)
+  loads every example and fixture, steps it, and writes the output of
+  `GSSK_SerializeModel` and `GSSK_SerializeSnapshot`. The schema must accept
+  the kernel's own output, which is what `dist/` consumers receive.
+
+`tests/fuzz_corpus/` is exempt by design and reported for information only —
+see [ADR 0004](../docs/adr/0004-schema-advisory.md). The validator needs
+`jsonschema`; without it the target skips with a message rather than failing,
+so a bare checkout still builds. CI installs it, so the gate is real there.
