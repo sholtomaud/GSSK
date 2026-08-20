@@ -34,7 +34,7 @@ Odum identifies seven fundamental symbol types. All are implemented, along with 
 
 The five processing types (`interaction`, `gain`, `loop_limited`, `exchange`, `switch`) are configured through the node's `params` block — `k`, `C`, `threshold`, `price` — rather than through edge parameters. An edge touching a processing node may therefore omit `logic` and `params.k`, which default to `"linear"` and `1.0`; every other edge must supply both.
 
-Note that an unrecognised `type` string is **not** rejected. The kernel falls back to `"storage"`, so a typo produces a silently wrong model rather than an error.
+An unrecognised `type` string is **rejected**. `GSSK_Init` returns `GSSK_ERR_SCHEMA_VIOLATION` naming the node and the offending string — `Schema Error: Node 'grasss' has unknown type 'storge'.` — so a typo fails at load rather than becoming a silent `storage` node. Valid strings are the nine primitives above, a built-in composite, or an archetype the model declares itself.
 
 ### Implemented node types
 
@@ -145,7 +145,7 @@ A top-level `"archetypes"` block registers your own templates; the key becomes a
 }
 ```
 
-Limits: 32 archetypes (4 built-ins included), 16 nodes and 32 edges per archetype, 128 composite instances per model. Built-ins are matched first, so a user archetype cannot shadow one. An unrecognised `type` is **not** an error — the kernel falls back to `storage`.
+Limits: 32 archetypes (4 built-ins included), 16 nodes and 32 edges per archetype, 128 composite instances per model. Built-ins are matched first, so a user archetype cannot shadow one. A `type` naming neither a primitive nor a declared archetype is **an error** — archetypes are parsed before nodes, so by the time the node loop runs the parser knows every name that was declared and can tell a typo from a legitimate reference.
 
 ### Querying the expansion
 

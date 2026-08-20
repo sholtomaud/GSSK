@@ -65,7 +65,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-node-types test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -188,6 +188,18 @@ $(TARGET_TEST_DW): $(TEST_DIR)/test_delivered_work.c $(TARGET_LIB)
 test-delivered-work: all $(TARGET_TEST_DW)
 	@echo "Running delivered-work tests..."
 	@./$(TARGET_TEST_DW)
+
+# Node type validation — an unrecognised node `type` must be an error, not a
+# silent fallback to `storage` (ADR 0004). Covers both call sites: GSSK_Init,
+# which has full archetype dispatch, and GSSK_AddNode, which has none.
+TARGET_TEST_NODETYPE = $(BIN_DIR)/test_node_type_validation
+
+$(TARGET_TEST_NODETYPE): $(TEST_DIR)/test_node_type_validation.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-node-types: all $(TARGET_TEST_NODETYPE)
+	@echo "Running node type validation tests..."
+	@./$(TARGET_TEST_NODETYPE)
 
 # Schema conformance — examples/ must match gssk.schema.json.
 #
@@ -434,7 +446,7 @@ wasm-container: container-image-wasm
 
 # Full native build + both test suites under real GCC with -Werror.
 test-linux: container-image-linux
-	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced'
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types'
 
 # Same under Linux clang, the other half of CI's build-native matrix.
 test-linux-clang: container-image-linux

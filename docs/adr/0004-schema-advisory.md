@@ -4,6 +4,7 @@
 - **Date**: 2026-08-19
 - **Task**: `schema-v4-audit`
 - **Supersedes**: nothing
+- **Amended**: 2026-08-21 by `reject-unknown-node-types` — the open hazard in Consequences is closed; the decision itself stands unchanged.
 
 ## Context
 
@@ -39,6 +40,10 @@ The third is the one that mattered. `examples/` alone only tests the schema agai
 
 **The fuzz corpus is deliberately exempt.** The task's acceptance criteria asked that `tests/fuzz_corpus/` validate too. That is the wrong requirement and it is not implemented. A fuzz corpus exists to carry malformed and degenerate input — one seed is not JSON at all, and `seed_empty.json` legitimately has no `nodes`. Requiring every seed to validate would either defeat the corpus's purpose or pressure someone into "fixing" seeds by making them well-formed, destroying the very cases fuzzing needs. Seed conformance is reported for visibility and gates nothing.
 
-**The known hazard remains, and is now the consumer's to manage.** An unrecognised node `type` is not rejected by the parser — it falls back to `storage`, so a typo silently produces a different model rather than an error. Advisory validation does not change that; it makes checking possible, not automatic. This is documented in the schema, in `docs/concepts.md`, and in the 4.1.0 release notes, and it is the strongest argument for a consumer validating before calling `GSSK_Init`. If that hazard ever needs closing, the right fix is for the parser to reject unknown types, not for the kernel to acquire a schema validator.
+**The known hazard is now closed — by the parser, as this ADR anticipated.** When this decision was recorded, an unrecognised node `type` was not rejected: it fell back to `storage`, so a typo silently produced a different model rather than an error. This ADR named the right fix and declined to reach for the wrong one — *the parser should reject unknown types, not the kernel acquire a schema validator*. Task `reject-unknown-node-types` implements exactly that.
+
+`GSSK_Init` now returns `GSSK_ERR_SCHEMA_VIOLATION` for any type that is neither one of the nine primitives, a built-in composite, nor an archetype declared in the model's own `archetypes` block, with a message naming the node id and the offending string. `GSSK_AddNode` rejects the same strings at runtime, and additionally refuses composite and archetype names, because it performs no expansion — a `producer` added at runtime would have become one storage node rather than its subgraph.
+
+**This strengthens the decision rather than reversing it.** The reason a schema validator was the wrong instrument is exactly the reason the parser was the right one: `Node.type` cannot be a closed enum, because archetype names are user-defined and open-ended. A validator therefore cannot distinguish a typo from a legitimate archetype reference — but the parser can, because archetypes are parsed before nodes and it alone knows which names the model actually declared. Advisory validation stays advisory; the class of error it could never have caught is now caught where the information exists.
 
 **Enforcement could still be added later without reversing this.** A `--validate` flag on the CLI, or an opt-in `GSSK_ValidateModel` in a separate translation unit that consumers link only if they want it, would both preserve the dependency-free core. Neither is needed now.
