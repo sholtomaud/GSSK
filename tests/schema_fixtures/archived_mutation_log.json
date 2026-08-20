@@ -1,0 +1,49 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "archived-mutation-log-fixture",
+    "description": "Schema fixture: a mutation log stored at the root, as GSSK_ExportMutationLog writes it, alongside carriers and a snapshot block. GSSK_Init reads a log only from snapshot.mutation_log — a root-level log is archival, and the schema says so rather than pretending it is restored."
+  },
+
+  "_covers": "root mutation_log, carriers[], snapshot.state/edge_k/solver/rng_state/mutation_log.",
+
+  "carriers": [
+    { "id": "energy", "unit": "J",   "conserved": true },
+    { "id": "signal", "unit": "J/t", "conserved": false }
+  ],
+
+  "nodes": [
+    { "id": "sun",   "type": "source",  "value": 100.0, "carrier": "energy" },
+    { "id": "grass", "type": "storage", "value": 10.0,  "carrier": "energy" }
+  ],
+
+  "edges": [
+    { "id": "photosynthesis", "origin": "sun", "target": "grass",
+      "logic": "linear", "carrier": "energy", "params": { "k": 0.1 } }
+  ],
+
+  "config": { "t_start": 0.0, "t_end": 2.0, "dt": 0.1, "method": "auto" },
+
+  "snapshot": {
+    "t": 1.0,
+    "step": 10,
+    "state": [
+      { "id": "sun",   "Q": 100.0, "Tr": 1.0 },
+      { "id": "grass", "Q": 19.5,  "Tr": 1.0 }
+    ],
+    "edge_k": [
+      { "id": "photosynthesis", "k": 0.1 }
+    ],
+    "solver": { "confidence": "high", "incipient_eligible": true },
+    "rng_state": { "seed": "0x0000000000007a69", "state": "0x9e3779b97f4a7c15" },
+    "mutation_log": [
+      { "t": 0.5, "op": "set_edge_k", "target_id": "photosynthesis",
+        "payload": "0.1", "cause": "restored with the snapshot" }
+    ]
+  },
+
+  "mutation_log": [
+    { "t": 0.5, "op": "set_edge_k", "target_id": "photosynthesis",
+      "payload": "0.1", "cause": "archival copy — not read back by GSSK_Init" }
+  ]
+}

@@ -1,8 +1,20 @@
 #!/usr/bin/env python3
 """Validate the bundled models against gssk.schema.json.
 
-examples/ is the normative corpus: every model there is meant to be valid and
-a failure is a real defect — either the model or the schema is wrong.
+Three normative corpora, each of which must validate:
+
+  examples/                — the models a human writes. A failure here means
+                             the schema rejects hand-authored input.
+  tests/schema_fixtures/   — models that exist only to exercise corners the
+                             examples do not reach (adaptive-solver config,
+                             archived mutation logs).
+  tests/results/serialized/ — what GSSK_SerializeModel and
+                             GSSK_SerializeSnapshot actually emit, written by
+                             bin/dump_serialized. This is the half the schema
+                             kept drifting from: it is the format the archival
+                             story rests on, and nothing regenerates it by
+                             hand. Absent when the validator is run without
+                             building first, in which case it is skipped.
 
 tests/fuzz_corpus/ is deliberately NOT held to that standard. A fuzz corpus
 exists to carry malformed and degenerate input; requiring every seed to
@@ -13,7 +25,7 @@ The kernel does not validate against this schema at load time (see
 docs/adr/0004-schema-advisory.md), so this check is how the schema and the
 parser are kept from drifting apart.
 
-Exit codes: 0 pass or skipped, 1 an examples/ model failed validation.
+Exit codes: 0 pass or skipped, 1 a normative model failed validation.
 """
 import glob
 import json
@@ -26,6 +38,8 @@ except ImportError:
     sys.exit(0)
 
 SCHEMA = "gssk.schema.json"
+SERIALIZED = "tests/results/serialized/"
+NORMATIVE = ("examples/", "tests/schema_fixtures/", SERIALIZED)
 
 
 def load(path):
@@ -41,17 +55,25 @@ def main():
 
     failures = 0
 
-    normative = sorted(glob.glob("examples/*.json"))
-    for path in normative:
-        errors = sorted(validator.iter_errors(load(path)),
-                        key=lambda e: list(e.absolute_path))
-        if errors:
-            failures += 1
-            print(f"FAIL  {path}")
-            for err in errors[:5]:
-                loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
-                print(f"        {loc}: {err.message[:150]}")
-    print(f"examples/: {len(normative) - failures}/{len(normative)} valid")
+    for corpus in NORMATIVE:
+        paths = sorted(glob.glob(f"{corpus}*.json"))
+        if not paths:
+            why = ("not generated — run 'make test-schema'"
+                   if corpus == SERIALIZED else "empty")
+            print(f"{corpus}: skipped ({why})")
+            continue
+        bad = 0
+        for path in paths:
+            errors = sorted(validator.iter_errors(load(path)),
+                            key=lambda e: list(e.absolute_path))
+            if errors:
+                bad += 1
+                print(f"FAIL  {path}")
+                for err in errors[:5]:
+                    loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
+                    print(f"        {loc}: {err.message[:150]}")
+        failures += bad
+        print(f"{corpus}: {len(paths) - bad}/{len(paths)} valid")
 
     seeds = sorted(glob.glob("tests/fuzz_corpus/*"))
     ok = invalid = unparseable = 0
@@ -70,7 +92,7 @@ def main():
               f"{unparseable} unparseable (informational — not a gate)")
 
     if failures:
-        print(f"\nFAILED: {failures} model(s) in examples/ do not match {SCHEMA}")
+        print(f"\nFAILED: {failures} model(s) do not match {SCHEMA}")
         return 1
     print("OK")
     return 0

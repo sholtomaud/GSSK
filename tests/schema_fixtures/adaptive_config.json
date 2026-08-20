@@ -1,0 +1,32 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "adaptive-config-fixture",
+    "description": "Schema fixture: every config field the parser reads. rel_tol, abs_tol, h_min and h_max are consumed by GSSK_StepAdaptive and emitted by GSSK_SerializeModel, but no example sets them, so nothing noticed when the schema stopped describing them."
+  },
+
+  "_covers": "config.rel_tol, config.abs_tol, config.h_min, config.h_max — parsed at src/gssk.c GSSK_Init, serialised at build_model_json.",
+
+  "nodes": [
+    { "id": "supply", "type": "source",  "value": 50.0 },
+    { "id": "tank",   "type": "storage", "value": 5.0 },
+    { "id": "drain",  "type": "sink",    "value": 0.0 }
+  ],
+
+  "edges": [
+    { "id": "fill",  "origin": "supply", "target": "tank",  "logic": "linear", "params": { "k": 0.2 } },
+    { "id": "leak",  "origin": "tank",   "target": "drain", "logic": "linear", "params": { "k": 0.05 } }
+  ],
+
+  "config": {
+    "t_start": 0.0,
+    "t_end": 5.0,
+    "dt": 0.1,
+    "method": "rk4",
+    "solver_tolerance": 1e-6,
+    "rel_tol": 1e-8,
+    "abs_tol": 1e-11,
+    "h_min": 1e-5,
+    "h_max": 0.05
+  }
+}

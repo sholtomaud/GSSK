@@ -195,7 +195,18 @@ test-delivered-work: all $(TARGET_TEST_DW)
 # this is what stops the schema and the parser drifting apart. It skips when
 # jsonschema is absent rather than failing, so a bare checkout still builds;
 # CI installs the dependency so the gate is real there.
-test-schema:
+# Serialised output is checked too: the schema also has to describe what
+# GSSK_SerializeModel/Snapshot emit, which is the format the archival story
+# in Phase G rests on. dump_serialized writes those into tests/results.
+SER_DIR = tests/results/serialized
+TARGET_DUMP_SER = $(BIN_DIR)/dump_serialized
+
+$(TARGET_DUMP_SER): $(TEST_DIR)/dump_serialized.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-schema: directories $(TARGET_DUMP_SER)
+	@rm -rf $(SER_DIR) && mkdir -p $(SER_DIR)
+	@./$(TARGET_DUMP_SER) $(SER_DIR) $(MODELS) $(wildcard tests/schema_fixtures/*.json)
 	@python3 scripts/validate_models.py
 
 clean: swift-clean
