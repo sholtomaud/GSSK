@@ -177,6 +177,27 @@ While GSSK's node type taxonomy is being corrected in Phase 7, the current `logi
 | `"interaction"` | `type: "interaction"` node | Interaction / Work Gate |
 | `"limit"` | `type: "loop_limited"` node | Loop-Limited Converter |
 | `"threshold"` | `type: "switch"` node | Switch / Digital Box |
+| `"ratio"` | — (no Odum symbol; see below) | division |
+
+### `ratio` — division (Phase C.1, extended in C.3)
+
+`F = k × Q_numerator / max(Q_control, ε)`
+
+Division has no Odum symbol of its own, and it exists here because Odum's claim that price is circulating money over real work delivered — `P = M/W` — cannot otherwise be written down. See [ADR 0002](adr/0002-ratio-primitive.md) for why it is an edge logic rather than an extension of the `gain` node.
+
+Both operands are **named parameters**, not positions, and neither is consumed:
+
+| param | role | default |
+|---|---|---|
+| `control_node` | denominator | required |
+| `numerator_node` | numerator | `origin` |
+| `threshold` | denominator floor | `GSSK_RATIO_EPSILON` (1e-9) |
+
+The denominator is floored so the flow saturates rather than diverging as the control approaches zero. A model whose control rides the floor is reporting a bounded constant, not a quotient.
+
+`numerator_node` matters because an edge is a flow and therefore **debits its origin**. Without it, the only way to put a stock in a numerator is to drain it — a price mechanism reading the money supply would eat the money supply. Naming the numerator separates *what the flow is computed from* (read, never consumed) from *where the flow goes* (origin → target, still a real flow). Pin the origin with a `source` or `constant` node when that flow must cost nothing; `compute_derivatives` holds those types at `dQ/dt = 0`, so the debit is discarded. See [ADR 0005](adr/0005-price-relaxation-and-named-numerator.md).
+
+This does not weaken the topology rule above — edges are still flows only. State continues to be *read* through named params, never through an edge.
 
 ---
 

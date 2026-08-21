@@ -1,0 +1,71 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "price-dynamics-tier2",
+    "description": "Phase C.3 — price as a state relaxing toward Odum's ratio: dP/dt = alpha x (M/W - P). M is circulating money, W is delivered work (the C.2 low-pass tap), and the quotient is the C.1 ratio primitive with both operands named. Companion to emergent_price_model.json, which reaches a quantity PROPORTIONAL to M/W as the fixed point of two hand-tuned coefficients; this model computes the ratio itself. Both are kept so the difference stays visible in the suite."
+  },
+
+  "_mechanism": "Relaxation, not an algebraic reset (ADR 0005). P is a storage with two signal pathways, which is what a first-order lag looks like in ESL: a tank with an inflow and a drain. Inflow `p_target` is a ratio edge carrying alpha x M / W; outflow `p_relax` is a linear edge carrying alpha x P. Their difference is dP/dt = alpha x (M/W - P), whose fixed point is exactly M/W and whose approach time constant is 1/alpha. BOTH k values are alpha: if they differ the equilibrium becomes (k_in/k_out) x M/W, which is the proportional-only behaviour of the Tier 1 anchor reintroduced by accident. tests/test_price_dynamics.c asserts the fixed point equals M/W, which is the check that catches a mismatch.",
+
+  "_which_odum_notation_this_is": "The IMPOSED one. Odum draws two price symbols (Systems Ecology, ch. 23, 'Notation for Prices'): 23-3c where the transaction GENERATES price, and 23-3d where price is determined outside and imposed on the pathway, drawn as a barb showing direction of control. GSSK's exchange node computes F_money = price x F_goods, so price is a control on the pathway — 23-3d. What C.3 adds is that the imposed number is now computed from the system's own state instead of being dialled in. Odum's generated price is p1 = J1/J4, a ratio of two INDEPENDENTLY DRIVEN flows (Fig 23-2c; money by spending-proportional-to-storage J1 = k1*M1, goods by the energy source). That cannot be reached by measuring this diamond's flows, because F_money is defined AS price x F_goods, so the quotient is an identity. M/W is dimensionally a price and proportional to J1/J4 with the constant set by beta. See ADR 0005.",
+
+  "_reading_M_and_W_without_consuming_them": "An edge is a flow, so it debits its origin. `p_target` therefore originates at `unity`, a source: compute_derivatives pins sources to dQ/dt = 0, so the debit is discarded (ADR 0003). M and W reach the quotient as NAMED params instead — numerator_node and control_node — neither of which is consumed. That is what ADR 0002 meant by a ratio whose numerator and denominator are 'both named and distinguishable'.",
+
+  "carriers": [
+    { "id": "money",  "unit": "AUD", "conserved": true },
+    { "id": "goods",  "unit": "kg",  "conserved": true },
+    { "id": "signal", "unit": "AUD/kg", "conserved": false,
+      "_note": "Price and delivered work are signals, not stocks of a substance. Their pathways must stay out of the money and goods conservation checks." }
+  ],
+
+  "nodes": [
+    { "id": "seller",    "type": "source",   "value": 1.0,    "carrier": "goods",
+      "_note": "Unlimited supply at the boundary; a source is not depleted." },
+    { "id": "buyer",     "type": "storage",  "value": 1000.0, "carrier": "money",
+      "_note": "Circulating money M. This is the numerator of the price ratio." },
+
+    { "id": "ex",        "type": "exchange", "value": 0.0,    "carrier": "goods",
+      "params": { "k": 0.01, "price": 999.0, "price_node": "price" },
+      "_note": "The scalar price is a poison value: if price_node resolution regresses the trajectory diverges obviously rather than subtly." },
+
+    { "id": "inventory", "type": "storage",  "value": 0.0,    "carrier": "goods" },
+    { "id": "spent",     "type": "sink",     "value": 0.0,    "carrier": "money" },
+
+    { "id": "W",         "type": "storage",  "value": 10.0,   "carrier": "signal",
+      "_note": "Delivered work (C.2): a low-pass storage fed by a tap that mirrors the trade flow and drained at beta. Starts at 10.0 rather than 0.0 so the very first step divides by a real W instead of riding the epsilon floor." },
+    { "id": "W_leak",    "type": "sink",     "value": 0.0,    "carrier": "signal" },
+
+    { "id": "price",     "type": "storage",  "value": 5.0,    "carrier": "signal",
+      "_note": "The emergent price P. Read by `ex` at every RK4 stage through price_node." },
+    { "id": "unity",     "type": "source",   "value": 1.0,    "carrier": "signal",
+      "_note": "Pinned origin for the price inflow. Supplies topology, not magnitude: the flow is alpha x M / W and does not read this node's value at all." },
+    { "id": "clearing",  "type": "sink",     "value": 0.0,    "carrier": "signal" }
+  ],
+
+  "edges": [
+    { "id": "e1", "origin": "seller", "target": "ex",        "carrier": "goods" },
+    { "id": "e2", "origin": "buyer",  "target": "ex",        "carrier": "money" },
+    { "id": "e3", "origin": "ex",     "target": "inventory", "carrier": "goods" },
+    { "id": "e4", "origin": "ex",     "target": "spent",     "carrier": "money" },
+
+    { "id": "w_tap", "origin": "seller", "target": "W", "carrier": "signal",
+      "logic": "interaction",
+      "params": { "k": 0.01, "control_node": "buyer" },
+      "_note": "C.2 tap: reproduces the exchange flow F = k x Q_seller x Q_buyer off a pinned origin, so measuring the trade costs the trade nothing. The duplication of k and the control is the known cost of the tap (ADR 0003); b2-coupled-edge-live would remove it." },
+    { "id": "w_leak", "origin": "W", "target": "W_leak", "carrier": "signal",
+      "logic": "linear",
+      "params": { "k": 0.5 },
+      "_note": "beta. W settles near F_in/beta, so beta sets both the smoothing window and the SCALE of W — and therefore the level of P. beta and alpha are not independent knobs (ADR 0003)." },
+
+    { "id": "p_target", "origin": "unity", "target": "price", "carrier": "signal",
+      "logic": "ratio",
+      "params": { "k": 0.8, "numerator_node": "buyer", "control_node": "W", "threshold": 0.01 },
+      "_note": "alpha x M / W. threshold floors the denominator at 0.01 rather than at GSSK_RATIO_EPSILON (1e-9), so an emptied W bounds the price instead of sending it to 1e11." },
+    { "id": "p_relax", "origin": "price", "target": "clearing", "carrier": "signal",
+      "logic": "linear",
+      "params": { "k": 0.8 },
+      "_note": "alpha x P. Same alpha as p_target — see _mechanism." }
+  ],
+
+  "config": { "t_start": 0, "t_end": 20, "dt": 0.1, "method": "rk4" }
+}

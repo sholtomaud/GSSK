@@ -358,7 +358,11 @@ general-purpose ODE library. The wedge is:
       kept as v3 alias; v4 models use `type:` node fields; kernel accepts both.
       v3 edge loop skips processing-node edges; per-type helpers compute flow.
 - [x] **Exchange node price state:** chose **(A) fixed parameter** — `price` is a
-      static node param. Stateful market price deferred to a future phase.
+      static node param. Stateful market price was deferred here and has since
+      landed in Phase C: `params.price_node` (C.0) points the diamond at a state
+      node, and C.3 makes that node relax toward `M/W` (ADR 0005). The static
+      `price` param remains the fallback when no `price_node` is given.
+      Phase C is tracked in `crux`, not in this file.
 - [x] **Composite macro-expansion timing:** chose **(A) parse-time expansion** —
       composites expand in `GSSK_Init`; mutation log references primitives.
 
