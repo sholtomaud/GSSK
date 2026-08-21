@@ -9,7 +9,7 @@
 
 ## Context
 
-Odum's claim is `P = M/W`. ADR 0002 supplied the division, ADR 0003 supplied `W`, and `c0-price-constant-or-node-ref` supplied the hook that lets an exchange read price from a state node. What remained was the dynamics: how `P` gets to `M/W`.
+The working form carried through Phase C is `P = M/W` — the phrase ADR 0002 and ADR 0003 both use. It is not Odum's expression; see *Fidelity to Odum* below, which qualifies it. ADR 0002 supplied the division, ADR 0003 supplied `W`, and `c0-price-constant-or-node-ref` supplied the hook that lets an exchange read price from a state node. What remained was the dynamics: how `P` gets to `M/W`.
 
 The task left one decision open — **relaxation** `dP/dt = α(M/W − P)` versus **algebraic** `P = M/W` recomputed each step — and the phase document recommended relaxation. Implementing it surfaced a second decision that was not anticipated, and it has to be recorded because ADR 0002 asserted the opposite.
 
@@ -74,3 +74,27 @@ This is not a new mechanism so much as the completion of the one ADR 0002 chose.
 **Tier 1 remains the anchor.** `examples/emergent_price_model.json` is unchanged and still in the regression suite. `examples/price_dynamics_model.json` sits beside it, so the difference between a price *proportional to* `M/W` and a price *converging to* `M/W` stays visible in the suite rather than being replaced by it.
 
 **`α` and `β` are still not independent.** ADR 0003 noted that `β` sets the scale of `W` and therefore the level of `P`. That is unchanged: `α` sets how fast price adjusts, `β` sets what `W` means. The example says so at the edge that carries `β`.
+
+## Fidelity to Odum, and what this is not
+
+Recorded because ADR 0002 and ADR 0003 both introduce `P = M/W` as "Odum's claim", and it is not his expression. Checked against *Systems Ecology* Ch. 1 (Fig. 1-4), Ch. 7 (Fig. 7-3f) and Ch. 23 (Figs. 23-2, 23-3).
+
+**Odum's endogenous price is a ratio of two flows.** Fig. 23-2c gives `p₁ = J₁/J₄`, `p₂ = J₂/J₃` — money per unit time over goods per unit time. Crucially both flows are driven *independently*: money by spending proportional to storage (`J₁ = k₁M₁`, Fig. 23-2a), goods by the energy source. Neither leg consults price; the quotient falls out. That independence is what makes it a determination rather than a definition, and it is why Odum can call the model self-regulating.
+
+**Odum draws two distinct symbols, and GSSK implements the other one.** From "Notation for Prices" (Ch. 23): where the transaction *generates* price it is drawn with the transaction price symbol (Fig. 23-3c); where price "is determined from outside the transaction and imposed on it" it is drawn as *a barb on the pathway showing direction of control* (Fig. 23-3d). Fig. 1-4 says the same thing plainly — "Price is shown as an external source" — and Ch. 7 lists price among the *forcing functions*.
+
+`apply_transaction_coupling` computes `F_money = P × F_goods`. Price is a control on the pathway. **GSSK's exchange node is Fig. 23-3d.**
+
+**Fig. 23-2c therefore cannot be reached by measuring the diamond's own flows.** If `J_money := P·J_goods`, then `P = J_money/J_goods` is an identity — price computed from price. Reaching the generating transactor requires the money leg to carry its own driving logic (`J₁ = k₁M₁`) so that the two flows are genuinely independent. That is a change to the diamond's physics, not a wiring exercise, and no task currently queued introduces it: `d1-money-conserved-gnp-loop` closes the money loop but is an authoring task (`examples/`, `tests/`), and `c4-net-energy-feedback-loop` is Fig. 23-2b, which works on the imposed path.
+
+**So what C.3 builds is the imposed transactor with a dynamically computed price.** Endogenous in where the number comes from; exogenous in how it acts on the trade. That is a legitimate and common configuration — a firm setting its price from its own money-and-throughput state and then charging it — and it is what the task specified, which describes `M` as "circulating money / GNP proxy **storage**". It is not the price-generating transactor of Fig. 23-2c, and should not be described as though it were.
+
+**The `M/W` form is dimensionally sound but proportional, not equal, to Odum's ratio.** ADR 0003's low-pass settles at `W ≈ F_in/β`, which carries the units of a goods stock, so `M/W` is AUD/kg — correct for a price. Relating it to `J₁/J₄` leaves a constant set by `β` (and by the exchange's own `k`). So C.3 removes one layer of proportionality — Tier 1's two hand-tuned coefficients — but not the constant that relates a stock ratio to a flow ratio. The claim "the fixed point is `M/W` itself, not merely proportional to it" is true as stated and should not be read as "the fixed point is Odum's price".
+
+### Consequence for the generating transactor, when it is built
+
+It should be **a separate node type, not a mode flag on `exchange`**. Odum gives it a different symbol, and ADR 0002 already rejected disambiguating a node's legs by parameter on the grounds that the same topology meaning different things depending on a flag "is precisely the ambiguity the ESL topology rule exists to prevent". With a separate type, which physics applies is readable from the topology: the generating type's money leg carries a spending rate, the imposed type carries a `price`/`price_node`. Declaring both on one node is a contradiction and should be rejected outright rather than resolved by precedence, per ADR 0004.
+
+The relaxation machinery here transfers unchanged: the generating transactor can relax its price node toward `J_money/J_goods` instead of toward `M/W`, keeping price an integrated state rather than a per-step assignment — which is the objection that decided Decision 1 above.
+
+A third case sits between the two and neither symbol covers it. Odum writes that "price **regulation** may be external" — regulation, not determination: a ceiling or floor on an otherwise emergent price. Rent control, tariffs, subsidised energy. Worth designing for rather than discovering later.
