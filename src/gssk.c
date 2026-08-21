@@ -3963,6 +3963,26 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
     return GSSK_ERR_SCHEMA_VIOLATION;
   }
 
+  /* Resolved here, with the other checks, so a rejected add stays a true
+   * no-op: nothing below this point may fail on model content. */
+  int numer_idx = -1;
+  cJSON *numer = cJSON_GetObjectItem(params, "numerator_node");
+  if (cJSON_IsString(numer)) {
+    if (lt != GSSK_LOGIC_RATIO) {
+      cJSON_Delete(edge);
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "GSSK_AddEdge: numerator_node is only valid on ratio logic");
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+    numer_idx = find_node_idx(inst, numer->valuestring);
+    if (numer_idx == -1) {
+      cJSON_Delete(edge);
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "GSSK_AddEdge: unknown numerator_node '%s'", numer->valuestring);
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+  }
+
   /* Grow edge arrays */
   size_t new_ec = inst->edge_count + 1;
   GSSK_EdgeInternal *new_edges = realloc(inst->edges,
@@ -3999,28 +4019,11 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
   inst->edges[ei].active      = true;
   inst->edges[ei].coupled_idx = -1;
   inst->edges[ei].control_idx = -1;
-  inst->edges[ei].numerator_idx = -1;
+  inst->edges[ei].numerator_idx = numer_idx;
 
   cJSON *ctrl = cJSON_GetObjectItem(params, "control_node");
   if (cJSON_IsString(ctrl))
     inst->edges[ei].control_idx = find_node_idx(inst, ctrl->valuestring);
-
-  cJSON *numer = cJSON_GetObjectItem(params, "numerator_node");
-  if (cJSON_IsString(numer)) {
-    if (lt != GSSK_LOGIC_RATIO) {
-      snprintf(inst->error_msg, sizeof(inst->error_msg),
-               "Logic Error: numerator_node is only valid on ratio logic.");
-      cJSON_Delete(edge);
-      return GSSK_ERR_SCHEMA_VIOLATION;
-    }
-    inst->edges[ei].numerator_idx = find_node_idx(inst, numer->valuestring);
-    if (inst->edges[ei].numerator_idx == -1) {
-      snprintf(inst->error_msg, sizeof(inst->error_msg),
-               "Linkage Error: unknown numerator_node '%s'.", numer->valuestring);
-      cJSON_Delete(edge);
-      return GSSK_ERR_SCHEMA_VIOLATION;
-    }
-  }
 
   cJSON *thr = cJSON_GetObjectItem(params, "threshold");
   inst->edges[ei].threshold = cJSON_IsNumber(thr) ? thr->valuedouble : 0.0;

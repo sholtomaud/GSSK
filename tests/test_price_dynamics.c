@@ -382,6 +382,61 @@ static void test_omitted_numerator_is_origin(void) {
   GSSK_Free(a); GSSK_Free(b);
 }
 
+/* GSSK_AddEdge has its own parser with no archetype dispatch, so it is a
+ * separate code path from GSSK_Init and has to be checked separately — the
+ * same reason test_node_type_validation.c covers both. A rejected add must
+ * also be a true no-op: the instance a drag-and-drop editor is mutating has to
+ * be left exactly as it was, and still steppable. */
+static const char *ADD_EDGE_BASE =
+  "{\"metadata\":{\"schema_version\":4},"
+  "\"nodes\":[{\"id\":\"M\",\"type\":\"constant\",\"value\":100.0},"
+  "          {\"id\":\"W\",\"type\":\"constant\",\"value\":4.0},"
+  "          {\"id\":\"unity\",\"type\":\"source\",\"value\":1.0},"
+  "          {\"id\":\"P\",\"type\":\"storage\",\"value\":0.0},"
+  "          {\"id\":\"clearing\",\"type\":\"sink\",\"value\":0.0}],"
+  "\"edges\":[{\"id\":\"p_relax\",\"origin\":\"P\",\"target\":\"clearing\","
+  "  \"logic\":\"linear\",\"params\":{\"k\":0.8}}],"
+  "\"config\":{\"t_start\":0,\"t_end\":50,\"dt\":0.01,\"method\":\"rk4\"}}";
+
+static void test_add_edge_at_runtime(void) {
+  printf("GSSK_AddEdge honours and validates numerator_node...\n");
+  GSSK_Instance *inst = NULL;
+  if (GSSK_Init(ADD_EDGE_BASE, &inst) != GSSK_SUCCESS) {
+    printf("    init failed: %s\n", GSSK_GetErrorDescription(inst));
+    GSSK_Free(inst); failures++; return;
+  }
+  size_t ec0 = GSSK_GetEdgeCount(inst);
+
+  ok("numerator_node on non-ratio logic is rejected",
+     GSSK_AddEdge(inst,
+       "{\"id\":\"bad1\",\"origin\":\"unity\",\"target\":\"P\","
+       " \"logic\":\"linear\",\"params\":{\"k\":1.0,\"numerator_node\":\"M\"}}")
+     != GSSK_SUCCESS);
+  ok("unknown numerator_node is rejected",
+     GSSK_AddEdge(inst,
+       "{\"id\":\"bad2\",\"origin\":\"unity\",\"target\":\"P\","
+       " \"logic\":\"ratio\",\"params\":{\"k\":1.0,\"numerator_node\":\"nope\","
+       " \"control_node\":\"W\"}}")
+     != GSSK_SUCCESS);
+  ok("a rejected add leaves the edge count unchanged",
+     GSSK_GetEdgeCount(inst) == ec0);
+
+  /* Completing the relaxation at runtime must give the same fixed point the
+   * authored model reaches. */
+  ok("a valid ratio edge with numerator_node is accepted",
+     GSSK_AddEdge(inst,
+       "{\"id\":\"p_target\",\"origin\":\"unity\",\"target\":\"P\","
+       " \"logic\":\"ratio\",\"params\":{\"k\":0.8,\"numerator_node\":\"M\","
+       " \"control_node\":\"W\"}}")
+     == GSSK_SUCCESS);
+
+  int pi = GSSK_FindNodeIdx(inst, "P");
+  for (int i = 0; i < 5000; i++) GSSK_Step(inst, GSSK_GetDt(inst));
+  close_to("the runtime-added relaxation settles at M/W",
+           GSSK_GetState(inst)[pi], 25.0, 1e-9);
+  GSSK_Free(inst);
+}
+
 int main(void) {
   printf("Phase C.3 — price dynamics: dP/dt = alpha (M/W - P)\n\n");
   test_fixed_point_is_the_ratio();       printf("\n");
@@ -391,6 +446,7 @@ int main(void) {
   test_numerator_is_not_consumed();      printf("\n");
   test_omitted_numerator_is_origin();    printf("\n");
   test_authoring_errors();               printf("\n");
+  test_add_edge_at_runtime();            printf("\n");
   test_round_trip();
   printf("\n%s (%d failure%s)\n", failures ? "FAILED" : "OK",
          failures, failures == 1 ? "" : "s");
