@@ -6,6 +6,22 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### Added
+
+- **Phase C.3 — price is now a state variable that relaxes toward Odum's ratio.** `dP/dt = α(M/W − P)`, with `α` a settable per-model adjustment rate rather than a hard-coded one. `examples/price_dynamics_model.json` wires circulating money `M` and the C.2 delivered-work signal `W` into the C.1 `ratio` primitive and feeds the result back into the transaction diamond through the C.0 `price_node` hook. The fixed point is `M/W` itself, not something proportional to it: `make test-price-dynamics` asserts convergence to `M/W` to 1e-9 and the approach to `(M/W)(1 − e^{−αt})`, so both the level and the time constant are hand-checked rather than golden. `examples/emergent_price_model.json` is unchanged and stays in the suite, so the difference between the Tier 1 proportional anchor and the Tier 2 true ratio remains visible. [ADR 0005](adr/0005-price-relaxation-and-named-numerator.md) records why relaxation was chosen over recomputing `P = M/W` algebraically each step.
+
+- **`ratio` edges accept `params.numerator_node`.** The numerator is now an optional *named* operand, read by id and not consumed — the same contract `control_node` has had as the denominator. Omitted, the numerator is `Q_origin` and behaviour is bit-for-bit unchanged.
+
+  This exists because an edge debits its origin, so before it the only way to put a stock in the numerator was to drain it: a price mechanism reading `M` would have eaten the money supply it was observing. ADR 0002 called for a ratio whose numerator and denominator are "both named and distinguishable" and then named only the denominator; this supplies the other name. The edge remains a flow from origin to target — pin that origin with a `source` or `constant` node when the flow must cost nothing, as [ADR 0003](adr/0003-delivered-work-signal.md) established for the `W` tap.
+
+  An unknown `numerator_node` id is a linkage error, and `numerator_node` on any logic other than `ratio` is a logic error rather than a silently ignored key.
+
+### Fixed
+
+- **A `ratio` edge serialised as a `linear` edge.** `logic_type_str` was never given a `ratio` case and fell through to its `"linear"` default, so every round-trip through `GSSK_SerializeModel` or `GSSK_SerializeSnapshot` silently replaced the division with a proportional flow — permanently, and with no error. This reached snapshots and the Phase G archival dumps, where the serialised form *is* the artefact. ADR 0002 tabulated the eight sites a new logic type must be added to; the serialiser was not among them, which is how it was missed.
+
+- **A `ratio` edge's denominator floor did not survive serialisation.** `params.threshold` is the floor override for `ratio` logic, but it was emitted only for `threshold` logic. A deliberate floor of `0.01` round-tripped back to `GSSK_RATIO_EPSILON` (1e-9) — a 1e7× change in the price a model reports once `W` empties.
+
 ### BREAKING
 
 - **An unrecognised node `type` is now rejected instead of silently becoming a `storage` node.** `parse_node_type` returned `NODE_STORAGE` for any string it did not recognise, so `"storge"`, `"Source"` or `"producer_"` produced a *different model* that ran to completion and reported success. `GSSK_Init` now returns `GSSK_ERR_SCHEMA_VIOLATION` for any type that is neither one of the nine primitives (`storage`, `source`, `sink`, `constant`, `interaction`, `gain`, `loop_limited`, `exchange`, `switch`), a built-in composite (`producer`, `consumer`, `misc_box`, `system_frame`), nor an archetype declared in the model's own `archetypes` block. The message names the node id and the offending string — `Schema Error: Node 'grasss' has unknown type 'storge'.` — so an authoring UI can highlight the element that is wrong.

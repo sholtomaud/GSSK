@@ -37,7 +37,9 @@ typedef enum {
   GSSK_LOGIC_INTERACTION, /**< Work gate / Riccati: F = k × Q_origin × Q_control */
   GSSK_LOGIC_LIMIT,       /**< Saturation (Michaelis-Menten): F = kQ/(1+Q/C) */
   GSSK_LOGIC_THRESHOLD,   /**< Boolean switch: F = k if Q > threshold, else 0 */
-  GSSK_LOGIC_RATIO        /**< Division: F = k × Q_origin / max(Q_control, ε) */
+  GSSK_LOGIC_RATIO        /**< Division: F = k × Q_num / max(Q_control, ε).
+                               Q_num is params.numerator_node when given (read,
+                               not consumed — ADR 0005), else Q_origin. */
 } GSSK_LogicType;
 
 /**

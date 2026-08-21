@@ -79,6 +79,7 @@ typedef struct {
   int             origin_idx;
   int             target_idx;
   int             control_idx;    /* -1 if unused */
+  int             numerator_idx;  /* ratio: named numerator; -1 = use origin */
   int             coupled_idx;    /* -1 if unused; index into edges[] */
   GSSK_LogicType  logic;
   double          k;
@@ -280,6 +281,7 @@ struct GSSK_Instance {
 
 static GSSK_MutationOp parse_mutation_op(const char *s);  /* forward decl (Phase 4) */
 static const char *node_type_str(GSSK_NodeType t);          /* forward decl (Phase 7) */
+static const char *logic_type_str(GSSK_LogicType lt);        /* forward decl (Phase 7) */
 static void append_mutation(GSSK_Instance *inst, GSSK_MutationOp op,
                              const char *target_id, const char *payload); /* Phase 4, used in Phase 9 */
 static void scan_motifs_internal(GSSK_Instance *inst);                    /* Phase 9 */
@@ -330,6 +332,28 @@ static GSSK_OutputMode parse_output_mode(const char *s) {
 static double ratio_denom(double q_control, double threshold) {
   double eps = (threshold > 0.0) ? threshold : GSSK_RATIO_EPSILON;
   return (q_control > eps) ? q_control : eps;
+}
+
+/* Which node supplies the numerator of a `ratio` edge (ADR 0005).
+ *
+ * ADR 0002 required a ratio whose numerator and denominator are "both named
+ * and distinguishable", but only the denominator got a name (`control_node`);
+ * the numerator was Q_origin, which an edge must debit.  `numerator_node`
+ * completes that: when set, the quotient is formed from a node read by id and
+ * NOT consumed — the same contract `control_node` already has — while the edge
+ * remains a flow from origin to target, exactly as `constant` logic is already
+ * a flow whose rate does not depend on Q_origin.  Unset, the numerator is
+ * Q_origin and every pre-existing ratio model is bit-for-bit unchanged.
+ *
+ * Every site that differentiates a ratio flow must differentiate with respect
+ * to THIS index, not origin_idx; they diverge exactly when numerator_node is
+ * given. */
+static int ratio_numer_idx(const GSSK_EdgeInternal *e) {
+  return (e->numerator_idx >= 0) ? e->numerator_idx : e->origin_idx;
+}
+
+static double ratio_numer(const GSSK_EdgeInternal *e, const double *state) {
+  return state[ratio_numer_idx(e)];
 }
 
 static int parse_logic_type(const char *s) {
@@ -652,7 +676,7 @@ static void compute_derivatives(GSSK_Instance *inst, const double *state,
       break;
     case GSSK_LOGIC_RATIO:
       if (e->control_idx != -1)
-        flow = e->k * Q_orig /
+        flow = e->k * ratio_numer(e, state) /
                ratio_denom(state[e->control_idx], e->threshold);
       break;
     }
@@ -748,11 +772,14 @@ static void build_flow_matrix(GSSK_Instance *inst, const double *state,
       break;
     }
     case GSSK_LOGIC_RATIO:
-      /* Exact in Q_origin for a frozen denominator: F = (k/D)·Q_origin. */
+      /* Exact in the numerator for a frozen denominator: F = (k/D)·Q_num.
+       * The conductance column is the numerator node, which is the origin
+       * unless numerator_node names another. */
       if (e->control_idx != -1) {
+        int num = ratio_numer_idx(e);
         conductance = e->k / ratio_denom(state[e->control_idx], e->threshold);
-        A[e->target_idx * (int)n + e->origin_idx] += conductance;
-        A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
+        A[e->target_idx * (int)n + num] += conductance;
+        A[e->origin_idx * (int)n + num] -= conductance;
       }
       break;
     default:
@@ -1101,7 +1128,8 @@ static double compute_edge_flow(const GSSK_EdgeInternal *e,
     return (Q > e->threshold) ? e->k : 0.0;
   case GSSK_LOGIC_RATIO:
     if (e->control_idx != -1)
-      return e->k * Q / ratio_denom(state[e->control_idx], e->threshold);
+      return e->k * ratio_numer(e, state) /
+             ratio_denom(state[e->control_idx], e->threshold);
     return 0.0;
   }
   return 0.0;
@@ -1691,7 +1719,8 @@ static void compute_quality_pass(GSSK_Instance *inst, const double *state) {
       break;
     case GSSK_LOGIC_RATIO:
       if (e->control_idx != -1)
-        f = e->k * Q / ratio_denom(state[e->control_idx], e->threshold);
+        f = e->k * ratio_numer(e, state) /
+            ratio_denom(state[e->control_idx], e->threshold);
       break;
     }
     flow[i] = (f > 0.0) ? f : 0.0;
@@ -1811,6 +1840,13 @@ static void build_jacobian(GSSK_Instance *inst, const double *state, double *J) 
     double Q = state[orig];
     double dF_dQ_orig = 0.0, dF_dQ_ctrl = 0.0;
 
+    /* State variable the flow is proportional to.  This is the origin for
+     * every logic except a `ratio` carrying an explicit numerator_node, where
+     * the flow depends on that node instead (ADR 0005).  Getting this wrong
+     * puts the sensitivity into the wrong column and only shows up in the
+     * implicit/stiff and forward-sensitivity paths, never in plain RK4. */
+    int dvar = orig;
+
     switch (e->logic) {
     case GSSK_LOGIC_CONSTANT:
       break;
@@ -1838,19 +1874,20 @@ static void build_jacobian(GSSK_Instance *inst, const double *state, double *J) 
     case GSSK_LOGIC_RATIO:
       if (ctrl >= 0) {
         double D = ratio_denom(state[ctrl], e->threshold);
+        dvar = ratio_numer_idx(e);
         dF_dQ_orig = e->k / D;
         /* Zero once the denominator is on the floor: the flow no longer
          * responds to the control there. */
         if (state[ctrl] > D - 1e-300 && state[ctrl] > 0.0)
-          dF_dQ_ctrl = -e->k * Q / (D * D);
+          dF_dQ_ctrl = -e->k * state[dvar] / (D * D);
       }
       break;
     case GSSK_LOGIC_THRESHOLD:
       break; /* step function → 0 derivative almost everywhere */
     }
 
-    J[(size_t)orig * n + (size_t)orig] -= dF_dQ_orig;
-    J[(size_t)tgt  * n + (size_t)orig] += dF_dQ_orig;
+    J[(size_t)orig * n + (size_t)dvar] -= dF_dQ_orig;
+    J[(size_t)tgt  * n + (size_t)dvar] += dF_dQ_orig;
     if (ctrl >= 0 && (dF_dQ_ctrl != 0.0)) {
       J[(size_t)orig * n + (size_t)ctrl] -= dF_dQ_ctrl;
       J[(size_t)tgt  * n + (size_t)ctrl] += dF_dQ_ctrl;
@@ -2042,7 +2079,8 @@ static void compute_param_deriv(GSSK_Instance *inst, const double *state,
     dF_dk = (Q > e->threshold) ? 1.0 : 0.0;
     break;
   case GSSK_LOGIC_RATIO:
-    if (ctrl >= 0) dF_dk = Q / ratio_denom(state[ctrl], e->threshold);
+    if (ctrl >= 0)
+      dF_dk = ratio_numer(e, state) / ratio_denom(state[ctrl], e->threshold);
     break;
   }
 
@@ -2132,7 +2170,8 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, size_t edge_idx,
       break;
     case GSSK_LOGIC_RATIO:
       if (e->control_idx != -1)
-        f = e->k * Q / ratio_denom(inst->state[e->control_idx], e->threshold);
+        f = e->k * ratio_numer(e, inst->state) /
+            ratio_denom(inst->state[e->control_idx], e->threshold);
       break;
     }
     flow[ei] = f > 0.0 ? f : 0.0;
@@ -2187,7 +2226,8 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, size_t edge_idx,
     break;
   case GSSK_LOGIC_RATIO:
     if (ej->control_idx >= 0)
-      dflow_dk = Q / ratio_denom(inst->state[ej->control_idx], ej->threshold);
+      dflow_dk = ratio_numer(ej, inst->state) /
+                 ratio_denom(inst->state[ej->control_idx], ej->threshold);
     break;
   }
 
@@ -2873,6 +2913,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       }
       inst->edges[i].active     = true;
       inst->edges[i].coupled_idx = -1;
+      inst->edges[i].numerator_idx = -1;
 
       if (inst->edges[i].origin_idx == -1) {
         snprintf(inst->error_msg, sizeof(inst->error_msg),
@@ -2932,6 +2973,26 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
                  "Linkage Error: Edge %d unknown control_node '%s'.",
                  i, ctrl->valuestring);
         status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+      }
+
+      cJSON *numer = cJSON_IsObject(params)
+                      ? cJSON_GetObjectItem(params, "numerator_node") : NULL;
+      if (cJSON_IsString(numer)) {
+        inst->edges[i].numerator_idx = find_node_idx(inst, numer->valuestring);
+        if (inst->edges[i].numerator_idx == -1) {
+          snprintf(inst->error_msg, sizeof(inst->error_msg),
+                   "Linkage Error: Edge %d unknown numerator_node '%s'.",
+                   i, numer->valuestring);
+          status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+        }
+        if (inst->edges[i].logic != GSSK_LOGIC_RATIO) {
+          /* Silently ignoring it would leave the model reading as though the
+           * quotient were wired up while the kernel used Q_origin. */
+          snprintf(inst->error_msg, sizeof(inst->error_msg),
+                   "Logic Error: Edge %d has numerator_node but logic is '%s', "
+                   "not 'ratio'.", i, logic_type_str(inst->edges[i].logic));
+          status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+        }
       }
 
       cJSON *thr = cJSON_IsObject(params)
@@ -3026,6 +3087,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       E->origin_idx  = o;
       E->target_idx  = t;
       E->control_idx = -1;
+      E->numerator_idx = -1;
       E->coupled_idx = -1;
       E->active      = true;
       int lt = parse_logic_type(te->logic[0] ? te->logic : "linear");
@@ -3937,10 +3999,28 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
   inst->edges[ei].active      = true;
   inst->edges[ei].coupled_idx = -1;
   inst->edges[ei].control_idx = -1;
+  inst->edges[ei].numerator_idx = -1;
 
   cJSON *ctrl = cJSON_GetObjectItem(params, "control_node");
   if (cJSON_IsString(ctrl))
     inst->edges[ei].control_idx = find_node_idx(inst, ctrl->valuestring);
+
+  cJSON *numer = cJSON_GetObjectItem(params, "numerator_node");
+  if (cJSON_IsString(numer)) {
+    if (lt != GSSK_LOGIC_RATIO) {
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "Logic Error: numerator_node is only valid on ratio logic.");
+      cJSON_Delete(edge);
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+    inst->edges[ei].numerator_idx = find_node_idx(inst, numer->valuestring);
+    if (inst->edges[ei].numerator_idx == -1) {
+      snprintf(inst->error_msg, sizeof(inst->error_msg),
+               "Linkage Error: unknown numerator_node '%s'.", numer->valuestring);
+      cJSON_Delete(edge);
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+  }
 
   cJSON *thr = cJSON_GetObjectItem(params, "threshold");
   inst->edges[ei].threshold = cJSON_IsNumber(thr) ? thr->valuedouble : 0.0;
@@ -4532,6 +4612,11 @@ static const char *logic_type_str(GSSK_LogicType lt) {
     case GSSK_LOGIC_INTERACTION: return "interaction";
     case GSSK_LOGIC_LIMIT:       return "limit";
     case GSSK_LOGIC_THRESHOLD:   return "threshold";
+    /* Added with C.1 in every flow path but not here, so a `ratio` edge
+     * serialized as "linear" and a round-trip silently turned the division
+     * into a proportional flow.  Snapshots and the Phase G archival dumps go
+     * through this function, so the loss was permanent, not cosmetic. */
+    case GSSK_LOGIC_RATIO:       return "ratio";
     default:                     return "linear";
   }
 }
@@ -4632,7 +4717,14 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
     if (ed->control_idx >= 0)
       cJSON_AddStringToObject(params, "control_node",
                               inst->nodes[ed->control_idx].id);
-    if (ed->logic == GSSK_LOGIC_THRESHOLD)
+    if (ed->numerator_idx >= 0)
+      cJSON_AddStringToObject(params, "numerator_node",
+                              inst->nodes[ed->numerator_idx].id);
+    /* `ratio` also reads threshold — as the denominator floor override — so
+     * emitting it only for THRESHOLD logic silently dropped it on round-trip,
+     * turning a bounded quotient back into one floored at GSSK_RATIO_EPSILON. */
+    if (ed->logic == GSSK_LOGIC_THRESHOLD ||
+        (ed->logic == GSSK_LOGIC_RATIO && ed->threshold > 0.0))
       cJSON_AddNumberToObject(params, "threshold", ed->threshold);
     cJSON_AddItemToObject(e, "params", params);
 

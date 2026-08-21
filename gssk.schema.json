@@ -344,7 +344,7 @@
     "EdgeLogic": {
       "type": "string",
       "enum": ["constant", "linear", "interaction", "limit", "threshold", "ratio"],
-      "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly. An unrecognised logic string is rejected by GSSK_Init, as an unrecognised node type now is.\n\nratio: F = k x Q_origin / max(Q_control, epsilon) — division, requiring params.control_node as the denominator. The denominator is floored so the flow saturates rather than diverging as the control approaches zero; params.threshold sets that floor when above zero, otherwise GSSK_RATIO_EPSILON (1e-9) applies. A model whose control rides the floor is reporting a saturated constant, not a quotient."
+      "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly. An unrecognised logic string is rejected by GSSK_Init, as an unrecognised node type now is.\n\nratio: F = k x Q_numerator / max(Q_control, epsilon) — division, requiring params.control_node as the denominator. The numerator is Q_origin unless params.numerator_node names another node. The denominator is floored so the flow saturates rather than diverging as the control approaches zero; params.threshold sets that floor when above zero, otherwise GSSK_RATIO_EPSILON (1e-9) applies. A model whose control rides the floor is reporting a saturated constant, not a quotient."
     },
 
     "EdgeParams": {
@@ -359,12 +359,16 @@
         },
         "control_node": {
           "type": "string",
-          "description": "Required for interaction and limit logic. ID of the node whose Q value modulates the flow."
+          "description": "Required for interaction and limit logic; the denominator for ratio logic. ID of the node whose Q value modulates the flow. The control node is read, never consumed."
+        },
+        "numerator_node": {
+          "type": "string",
+          "description": "ratio logic only \u2014 rejected by GSSK_Init on any other logic, since silently ignoring it would leave a model that reads as though the quotient were wired up while the kernel used Q_origin. ID of the node supplying the numerator, read by id and NOT consumed, exactly as control_node is. Omitted, the numerator is Q_origin and behaviour is unchanged. This is what lets a stock enter a quotient without being drained by the edge that reads it: the edge stays a flow from origin to target (pin that origin with a source or constant node when the flow must cost nothing), while both operands of the division are named. See ADR 0005."
         },
         "threshold": {
           "type": "number",
           "default": 0.0,
-          "description": "Required for threshold logic. Flow = k if Q_origin > threshold, else 0."
+          "description": "Required for threshold logic: flow = k if Q_origin > threshold, else 0. For ratio logic it is the denominator floor, overriding GSSK_RATIO_EPSILON when above zero."
         }
       }
     },
