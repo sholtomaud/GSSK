@@ -4487,6 +4487,33 @@ const GSSK_Carrier *GSSK_GetCarrier(GSSK_Instance *inst, size_t idx) {
   return &inst->carriers[idx];
 }
 
+/* Flat carrier getters. These exist so a consumer never has to decode the
+ * GSSK_Carrier struct — across the WASM boundary GSSK_GetCarrier is just a heap
+ * pointer, and hand-decoding it bakes field offsets, bool width and padding
+ * into the caller. Note the out-of-range convention differs from
+ * GSSK_GetCarrier (NULL): these follow GSSK_GetNodeCarrier and return "". */
+const char *GSSK_GetCarrierID(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->carrier_count) return "";
+  return inst->carriers[idx].id;
+}
+
+const char *GSSK_GetCarrierUnit(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->carrier_count) return "";
+  return inst->carriers[idx].unit;
+}
+
+int GSSK_GetCarrierConserved(GSSK_Instance *inst, size_t idx) {
+  if (!inst || idx >= inst->carrier_count) return 0;
+  return inst->carriers[idx].conserved ? 1 : 0;
+}
+
+int GSSK_FindCarrierIdx(GSSK_Instance *inst, const char *id) {
+  if (!inst || !id) return -1;
+  for (size_t i = 0; i < inst->carrier_count; i++)
+    if (strcmp(inst->carriers[i].id, id) == 0) return (int)i;
+  return -1;
+}
+
 const char *GSSK_GetNodeCarrier(GSSK_Instance *inst, size_t node_idx) {
   if (!inst || node_idx >= inst->node_count) return "";
   return inst->nodes[node_idx].carrier;

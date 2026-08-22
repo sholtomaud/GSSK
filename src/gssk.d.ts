@@ -110,8 +110,31 @@ export interface GSSKModule {
   /**
    * Pointer to a GSSK_Carrier struct {id[32], unit[32], conserved: bool}.
    * Returns 0 if idx >= carrierCount.
+   *
+   * PREFER the flat getters below. Decoding this struct from JS bakes field
+   * offsets, `bool` width and trailing padding into your code — none of which
+   * is an ABI contract, and all of which breaks by returning plausible garbage
+   * rather than by failing.
    */
   _GSSK_GetCarrier(kernelPtr: number, idx: number): number;
+  /**
+   * Pointer to the carrier id string at idx. Never null; empty string if
+   * idx >= carrierCount (unlike _GSSK_GetCarrier, which returns 0).
+   */
+  _GSSK_GetCarrierID(kernelPtr: number, idx: number): number;
+  /**
+   * Pointer to the carrier unit string at idx, e.g. "AUD", "kWh". This is the
+   * y-axis label; carriers with different units may not share an axis.
+   * Never null; empty string if idx >= carrierCount.
+   */
+  _GSSK_GetCarrierUnit(kernelPtr: number, idx: number): number;
+  /**
+   * 1 if the carrier at idx was declared conserved, else 0. Out of range also
+   * returns 0 — bound-check against _GSSK_GetCarrierCount if that matters.
+   */
+  _GSSK_GetCarrierConserved(kernelPtr: number, idx: number): number;
+  /** Index of the carrier with this id, or -1 if not found. */
+  _GSSK_FindCarrierIdx(kernelPtr: number, idPtr: number): number;
   /** Pointer to carrier string on node at nodeIdx. Never null; may be empty. */
   _GSSK_GetNodeCarrier(kernelPtr: number, nodeIdx: number): number;
   /** Pointer to carrier string on edge at edgeIdx (Odum Position 1). Never null; may be empty. */

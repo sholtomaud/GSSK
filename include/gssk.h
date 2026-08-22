@@ -760,9 +760,55 @@ size_t GSSK_GetCarrierCount(GSSK_Instance *inst);
 
 /**
  * @brief Pointer to carrier definition at index.
- * @return NULL if idx >= GSSK_GetCarrierCount().
+ *
+ * For C consumers.  Across the WASM boundary this returns a raw heap pointer
+ * that JS would have to decode by assuming field offsets, `bool` width and
+ * trailing padding — none of which is an ABI contract.  JS should use the flat
+ * getters below instead.
+ *
+ * @return NULL if idx >= GSSK_GetCarrierCount().  Note this differs from the
+ *         flat string getters, which return "" for an out-of-range index.
  */
 const GSSK_Carrier *GSSK_GetCarrier(GSSK_Instance *inst, size_t idx);
+
+/**
+ * @brief Carrier id at index, without crossing a struct layout.
+ *
+ * Flat accessor for consumers that cannot safely decode GSSK_Carrier — chiefly
+ * JS across the WASM boundary.
+ *
+ * @return Empty string if idx >= GSSK_GetCarrierCount().  Never NULL.  This is
+ *         the GSSK_GetNodeCarrier convention, not the GSSK_GetCarrier one:
+ *         GSSK_GetCarrier returns NULL for a bad index, this returns "".
+ */
+const char *GSSK_GetCarrierID(GSSK_Instance *inst, size_t idx);
+
+/**
+ * @brief Carrier unit string at index, e.g. "AUD", "kWh", "kg".
+ *
+ * This is the axis label a plotting consumer would otherwise hardcode.  Two
+ * carriers with different units may not share a y-axis (ADR-6, ADR-8).
+ *
+ * @return Empty string if idx >= GSSK_GetCarrierCount().  Never NULL.  Same
+ *         convention as GSSK_GetCarrierID, i.e. "" and not NULL.
+ */
+const char *GSSK_GetCarrierUnit(GSSK_Instance *inst, size_t idx);
+
+/**
+ * @brief Conservation flag for the carrier at index.
+ *
+ * @return 1 if the carrier was declared `conserved`, otherwise 0.  Out of range
+ *         also returns 0, which is INDISTINGUISHABLE from a declared
+ *         non-conserved carrier — bound-check against GSSK_GetCarrierCount()
+ *         first if the difference matters.
+ */
+int GSSK_GetCarrierConserved(GSSK_Instance *inst, size_t idx);
+
+/**
+ * @brief Index of the carrier with this id.
+ * @return -1 if not found, matching GSSK_FindNodeIdx / GSSK_FindEdgeIdx.
+ */
+int GSSK_FindCarrierIdx(GSSK_Instance *inst, const char *id);
 
 /**
  * @brief Carrier string declared on node at node_idx.
