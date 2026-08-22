@@ -4,8 +4,30 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
+  # `branches` here filters on the PR's BASE, not its head. It listed only
+  # `main`, so a PR stacked on another feature branch ran none of the jobs
+  # below — no build matrix, no WASM, no quality gate. GitHub still showed the
+  # PR as checked, because third-party checks (Socket Security) run regardless,
+  # so it reported two green checks and looked tested. That is worse than
+  # failing: it is the "tested by nothing" state a bare push produces, wearing
+  # a passing badge. It let a broken `make test-forcing-wasm` reach main
+  # (PR #42, fixed in #43) — through exactly the gap the WASM-on-PR job was
+  # added to close.
+  #
+  # The three prefixes below are the ones AGENTS.md defines for branches.
+  # Listing all three rather than just `feat/**` is deliberate: the gap is in
+  # the trigger, not in any one prefix, and closing a third of it would leave
+  # the next stacked `fix/` or `docs/` PR silently unverified in the same way.
+  #
+  # This cannot cause a deploy or a release: both are additionally gated on
+  # `github.event_name == 'push'` and a main/tag ref, so a pull_request event
+  # can never satisfy them however it is targeted.
   pull_request:
-    branches: [ main ]
+    branches:
+      - main
+      - 'feat/**'
+      - 'fix/**'
+      - 'docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
