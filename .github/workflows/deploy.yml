@@ -52,6 +52,12 @@ jobs:
       - name: Node type validation tests
         run: make test-node-types
 
+      # Forcing functions. The convergence check inside is the one that
+      # catches a waveform sampled once per STEP instead of once per STAGE —
+      # every other assertion in that suite passes either way.
+      - name: Forcing function tests
+        run: make test-forcing
+
       # The Butcher c-nodes were written down in the DOPRI5 stage comments and
       # thrown away for years because there was no `t` for them to offset.
       # A forcing function sampled once per STEP instead of once per STAGE is
@@ -196,6 +202,19 @@ jobs:
           done
           if [ "$missing" -ne 0 ]; then exit 1; fi
           echo "All declared exports present in dist/gssk.js."
+
+      # Requirement 3 of the forcing proposal: sin/exp must stay in the ONE
+      # pinned artifact and must not silently differ from native. The native
+      # binary writes its evaluator's answers; the JS side reads them back
+      # and compares through the built dist/gssk.js. An exported symbol that
+      # is present but wrong would pass the check above and fail this one.
+      #
+      # Compared to 4 ULP, not bit-for-bit. Measured three ways: WASM agrees
+      # with Linux GCC exactly, and macOS libm's sin() is the outlier by 1 ULP
+      # at 2 of 8 sample points. sin/exp are not required by IEEE-754 to be
+      # correctly rounded. Tracked as deterministic-transcendentals-cross-platform.
+      - name: Forcing evaluator parity (WASM vs native)
+        run: make test-forcing-wasm
 
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v4

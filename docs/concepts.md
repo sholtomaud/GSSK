@@ -201,6 +201,121 @@ This does not weaken the topology rule above — edges are still flows only. Sta
 
 ---
 
+## Forcing Functions
+
+Odum draws eleven forcing functions in *Systems Ecology* Fig. 7-2. They are not
+eleven mechanisms. They are a **node-value versus edge-rate** distinction
+crossed with a **carrier** distinction — and GSSK already models carriers as
+Position 1 on nodes and edges. So the eleven collapse to **one waveform
+vocabulary attachable in two places**:
+
+| Attach `forcing` to | It drives | Odum's annotation |
+|---|---|---|
+| a **node** | the node's held value | X / N — a *force* |
+| an **edge** | the edge's rate `k` | J — a *flow* |
+
+```json
+{ "id": "sun", "type": "source", "value": 1.0,
+  "forcing": { "waveform": "sine", "mean": 200, "amplitude": 150,
+               "period": 365, "phase": 91.25, "min": 0 } }
+```
+
+See [ADR 0006](adr/0006-forcing-one-vocabulary-two-attachments.md) for why this
+shape rather than eleven node types, and
+`examples/forced_source_model.json` for a worked model.
+
+### The vocabulary
+
+With `tau = t - t_on` and `frac(x) = x - floor(x)`:
+
+| Waveform | Formula | Parameters |
+|---|---|---|
+| `step` | `v0` if `t < t_on`, else `v1` | `t_on`, `v0`, `v1` |
+| `impulse` | `area/w` on `[t_on, t_on+w)`, else `0`, with `w = config.dt` | `t_on`, `area` |
+| `ramp` | `v0` if `t < t_on`, else `v0 + slope*tau` | `t_on`, `v0`, `slope` |
+| `sawtooth` | `mean + amplitude*(2*frac((tau-phase)/period) - 1)` | `period`, `phase`, `mean`, `amplitude` |
+| `square` | `mean+amplitude` while `frac((tau-phase)/period) < duty`, else `mean-amplitude` | `period`, `phase`, `duty`, `mean`, `amplitude` |
+| `sine` | `mean + amplitude*sin(2*pi*(tau-phase)/period)` | `period`, `phase`, `mean`, `amplitude` |
+| `exponential` | `v0` if `t < t_on`, else `v0*exp(rate*tau)` | `t_on`, `v0`, `rate` |
+| `jitter` | `mean + amplitude*(2u-1)`, `u` from the instance RNG | `mean`, `amplitude` |
+
+`t_on` defaults to `config.t_start`. `min` and `max` clamp the result **after**
+the formula, so the waveform and its bound stay separately legible; omit either
+for no bound in that direction.
+
+### Conventions worth stating plainly
+
+**`phase` is a time offset, not an angle.** It is in the same units as `t` —
+not radians, not a fraction of the period — and it is **subtracted**, so a
+positive phase *delays* the waveform. In the example above, `period: 365` with
+`phase: 91.25` moves the peak from day 91 to midsummer at day 182.5. An
+ambiguous phase convention is how two implementations diverge while both look
+correct.
+
+**`impulse` is area-normalised.** It delivers `area / dt` over one nominal step,
+so its *integral* is `area` at any `dt`. A bare amplitude would make the
+delivered quantity depend on step size — a discretisation artefact dressed up as
+physics.
+
+**A storage node cannot be forced.** Its value is the *integral* of its flows,
+so forcing it asserts two different things about one quantity. `GSSK_Init`
+returns `GSSK_ERR_SCHEMA_VIOLATION` naming the node rather than ignoring the
+block. Force the source that feeds it, or the edge that drains it.
+
+**A periodic waveform needs a positive `period`.** `sine`, `square` and
+`sawtooth` are rejected without one, rather than quietly behaving as constants.
+
+### Evaluation happens at solver stage times
+
+Waveforms are sampled at the RK4 / DOPRI5 **stage** times, not once per step.
+This is not a detail. Sampling once per step leaves the forcing first-order
+while the state is fourth- or fifth-order — the run completes, the trajectory
+looks smooth, and the only way to see it is a convergence study. Integrating a
+sine-forced source against its closed form:
+
+| | dt 0.2→0.1 | dt 0.1→0.05 | dt 0.05→0.025 |
+|---|---|---|---|
+| stage times (what GSSK does) | 16.02× | 16.01× | 16.00× |
+| once per step | 1.97× | 1.98× | 1.99× |
+
+### Jitter and reproducibility
+
+`jitter` draws from the instance-owned SplitMix64 stream (`GSSK_SetSeed` /
+`GSSK_NextRandom`), never libc `rand()`, and is **latched once per accepted
+step**. A fresh draw per stage would make the trajectory depend on solver
+internals: the same model would answer differently under `rk4` and `dopri5` for
+reasons that are not physics.
+
+`GSSK_Reset` deliberately does **not** rewind the random stream —
+`GSSK_EnsembleForecast` and `GSSK_CalibrateMonteCarlo` perturb and then reset
+once per run, and rewinding would collapse an ensemble to a single trajectory.
+To repeat a jitter run exactly:
+
+```c
+GSSK_SetSeed(inst, GSSK_GetSeed(inst));
+GSSK_Reset(inst);
+```
+
+### Asking the kernel, rather than reimplementing it
+
+```c
+int    GSSK_GetNodeForcingKind(GSSK_Instance *inst, size_t node_idx);
+int    GSSK_GetEdgeForcingKind(GSSK_Instance *inst, size_t edge_idx);
+double GSSK_EvaluateNodeForcing(GSSK_Instance *inst, size_t node_idx, double t);
+double GSSK_EvaluateEdgeForcing(GSSK_Instance *inst, size_t edge_idx, double t);
+```
+
+These are the **same evaluator the derivative path uses**, exported so a
+consumer can render a forcing curve without reimplementing the formulas — a
+reimplementation diverges, which is the whole reason they exist. Flat scalars,
+not a struct pointer, so no layout crosses the WASM boundary.
+
+`jitter` ignores `t` and returns the value latched for the current step; drawing
+fresh would advance the RNG, so merely asking what the model is doing would
+change what it does. An unforced element evaluates to its declared `value` or
+`k`, so a consumer can plot everything on one axis without first asking which
+elements are forced.
+
 ## Carriers
 
 A **carrier** identifies the physical substance flowing through a sub-network. Carriers separate the graph into domains that can be independently conserved.

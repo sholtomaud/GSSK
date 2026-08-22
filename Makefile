@@ -65,7 +65,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-node-types test-unknown-keys test-stage-times test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-node-types test-unknown-keys test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -211,6 +211,34 @@ $(TARGET_TEST_NODETYPE): $(TEST_DIR)/test_node_type_validation.c $(TARGET_LIB)
 test-node-types: all $(TARGET_TEST_NODETYPE)
 	@echo "Running node type validation tests..."
 	@./$(TARGET_TEST_NODETYPE)
+
+# Forcing functions — one waveform vocabulary, two attachment points. The
+# convergence test is the one that catches forcing sampled once per STEP
+# instead of once per STAGE; every other test here passes either way.
+TARGET_TEST_FORCING = $(BIN_DIR)/test_forcing
+
+$(TARGET_TEST_FORCING): $(TEST_DIR)/test_forcing.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-forcing: all $(TARGET_TEST_FORCING)
+	@echo "Running forcing function tests..."
+	@./$(TARGET_TEST_FORCING)
+
+# WASM forcing parity — requirement 3: sin/exp must stay in the ONE pinned
+# artifact and must not silently differ from native. The native binary writes
+# its evaluator's answers to JSON; the JS side reads them back and compares
+# bit-for-bit through the built dist/gssk.js. Needs `make wasm` (or
+# `make wasm-container`) to have produced dist/, and a node on PATH.
+TARGET_DUMP_FORCING = $(BIN_DIR)/dump_forcing_native
+
+$(TARGET_DUMP_FORCING): $(TEST_DIR)/dump_forcing_native.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-forcing-wasm: all $(TARGET_DUMP_FORCING)
+	@mkdir -p tests/results
+	@./$(TARGET_DUMP_FORCING) tests/results/forcing_native.json
+	@test -f $(DIST_DIR)/gssk.js || { echo "dist/gssk.js missing — run 'make wasm' or 'make wasm-container' first"; exit 1; }
+	@node tests/wasm/forcing_parity.cjs
 
 # Stage times — the solver must hand each derivative evaluation the right time.
 # Pinned BEFORE anything consumes t, so the rest of the suite can hold "nothing
@@ -428,6 +456,8 @@ WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_
 "_GSSK_CalibrateGradient","_GSSK_CalibrateMonteCarlo",\
 "_GSSK_GetMutationCount","_GSSK_GetMutationRecord","_GSSK_SetMutationCause",\
 "_GSSK_ClearMutationLog","_GSSK_ExportMutationLog","_GSSK_Replay",\
+"_GSSK_GetNodeForcingKind","_GSSK_GetEdgeForcingKind",\
+"_GSSK_EvaluateNodeForcing","_GSSK_EvaluateEdgeForcing",\
 "_GSSK_GetCarrierCount","_GSSK_GetCarrier","_GSSK_GetNodeCarrier",\
 "_GSSK_GetCarrierID","_GSSK_GetCarrierUnit","_GSSK_GetCarrierConserved",\
 "_GSSK_FindCarrierIdx",\
@@ -500,7 +530,7 @@ wasm-container: container-image-wasm
 
 # Full native build + both test suites under real GCC with -Werror.
 test-linux: container-image-linux
-	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-stage-times && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics'
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics'
 
 # Same under Linux clang, the other half of CI's build-native matrix.
 test-linux-clang: container-image-linux

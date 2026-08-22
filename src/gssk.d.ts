@@ -104,6 +104,32 @@ export interface GSSKModule {
   _malloc(size: number): number;
   _free(ptr: number): void;
 
+  /**
+   * Phase H — Forcing functions.
+   *
+   * Waveform kinds: 0 none, 1 step, 2 impulse, 3 ramp, 4 sawtooth, 5 square,
+   * 6 sine, 7 exponential, 8 jitter.
+   *
+   * Flat scalars by design — no GSSK_Forcing struct crosses the boundary, for
+   * the same reason the flat carrier getters exist.
+   */
+  /** Waveform kind attached to the node, or 0 for unforced / out of range. */
+  _GSSK_GetNodeForcingKind(kernelPtr: number, nodeIdx: number): number;
+  /** Waveform kind attached to the edge, or 0 for unforced / out of range. */
+  _GSSK_GetEdgeForcingKind(kernelPtr: number, edgeIdx: number): number;
+  /**
+   * The node's forcing value at time t — THE SAME evaluator the derivative
+   * path uses, so a rendered curve cannot drift from the simulated one.
+   * Falls back to the node's declared value when unforced; 0 if out of range.
+   *
+   * JITTER ignores `t` and returns the value latched for the CURRENT step.
+   * Drawing fresh would advance the RNG, so asking what the model is doing
+   * would change what it does.
+   */
+  _GSSK_EvaluateNodeForcing(kernelPtr: number, nodeIdx: number, t: number): number;
+  /** As above, for the edge's rate k. */
+  _GSSK_EvaluateEdgeForcing(kernelPtr: number, edgeIdx: number, t: number): number;
+
   /** Phase 5 — Multi-carrier schema. */
   /** Number of carriers declared in the top-level carriers array. */
   _GSSK_GetCarrierCount(kernelPtr: number): number;

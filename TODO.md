@@ -369,6 +369,21 @@ general-purpose ODE library. The wedge is:
 - [x] **Composite macro-expansion timing:** chose **(A) parse-time expansion** —
       composites expand in `GSSK_Init`; mutation log references primitives.
 
+### 7.1b Forcing functions (Phase H)
+
+- [x] One waveform vocabulary attachable to a node's held value (Odum X/N) or
+      an edge's rate k (Odum J) — `step`, `impulse`, `ramp`, `sawtooth`,
+      `square`, `sine`, `exponential`, `jitter`. NOT eleven node types; see
+      [ADR 0006](docs/adr/0006-forcing-one-vocabulary-two-attachments.md).
+- [x] Evaluated at RK4/DOPRI5 stage times, proven by a fourth-order
+      convergence study (16x per halving; a once-per-step implementation
+      gives 2x and passes everything else).
+- [x] `jitter` latched once per accepted step from the instance RNG.
+- [x] Shared evaluator exported (`GSSK_EvaluateNodeForcing` /
+      `GSSK_EvaluateEdgeForcing`) so consumers do not reimplement the formulas.
+- [ ] Drive a source from observed data (tabulated series) — tracked in `crux`
+      as `h8c-data-driven-forcing`.
+
 ### 7.2 New Fundamental Node Types
 
 - [x] `type: "interaction"` — multi-input production/work gate.
