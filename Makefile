@@ -65,7 +65,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-node-types test-unknown-keys test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -211,6 +211,19 @@ $(TARGET_TEST_NODETYPE): $(TEST_DIR)/test_node_type_validation.c $(TARGET_LIB)
 test-node-types: all $(TARGET_TEST_NODETYPE)
 	@echo "Running node type validation tests..."
 	@./$(TARGET_TEST_NODETYPE)
+
+# Phase C.4 — inflation emerges from net-energy decline. Asserts the CLAIM
+# (boom/bust, rising feedback fraction, falling net-per-gross, rising price at
+# a constant money supply) rather than a trajectory; `make test` already does
+# the golden CSV comparison.
+TARGET_TEST_NETENERGY = $(BIN_DIR)/test_net_energy
+
+$(TARGET_TEST_NETENERGY): $(TEST_DIR)/test_net_energy.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-net-energy: all $(TARGET_TEST_NETENERGY)
+	@echo "Running net-energy feedback tests..."
+	@./$(TARGET_TEST_NETENERGY)
 
 # Forcing functions — one waveform vocabulary, two attachment points. The
 # convergence test is the one that catches forcing sampled once per STEP
@@ -543,7 +556,7 @@ wasm-container: container-image-wasm
 
 # Full native build + both test suites under real GCC with -Werror.
 test-linux: container-image-linux
-	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics'
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy'
 
 # Same under Linux clang, the other half of CI's build-native matrix.
 test-linux-clang: container-image-linux

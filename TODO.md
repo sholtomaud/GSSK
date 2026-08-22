@@ -365,7 +365,11 @@ general-purpose ODE library. The wedge is:
       landed in Phase C: `params.price_node` (C.0) points the diamond at a state
       node, and C.3 makes that node relax toward `M/W` (ADR 0005). The static
       `price` param remains the fallback when no `price_node` is given.
-      Phase C is tracked in `crux`, not in this file.
+      Phase C is tracked in `crux`, not in this file. C.4 has since landed:
+      `examples/odum_countercurrent.json` makes inflation emerge from
+      net-energy decline (Odum 1973 points 1-3) with the money supply pinned,
+      and needed no kernel change — C.3's `params.numerator_node` was the
+      missing piece.
 - [x] **Composite macro-expansion timing:** chose **(A) parse-time expansion** —
       composites expand in `GSSK_Init`; mutation log references primitives.
 
