@@ -110,6 +110,15 @@ jobs:
       - name: Phase C unit suites (price, ratio, delivered work, price dynamics)
         run: make test-price-node test-ratio test-delivered-work test-price-dynamics
 
+      # C.4 asserts the CLAIM rather than a trajectory: boom/bust, a feedback
+      # fraction that rises as the reserve depletes, net-per-gross falling and
+      # price rising across the depletion phase — all with the money supply
+      # pinned, which is what makes the inflation attributable to net energy
+      # rather than to money. The golden CSV in `make test` cannot check any of
+      # that; it only pins digits.
+      - name: Net-energy feedback tests (Phase C.4)
+        run: make test-net-energy
+
   # ────────────────────────────────────────────────────────────
   # Quality gate — all Linux-only checks as serial steps.
   # One checkout, one apt-get, one runner.

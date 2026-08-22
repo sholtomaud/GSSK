@@ -1,0 +1,290 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "odum-countercurrent",
+    "description": "Phase C.4 \u2014 inflation emerges from net-energy decline. Odum's Figure-2 structure: getting energy costs energy, fed back from the structure, and the fuel resource is a depleting storage. As fuel depletes the feedback fraction rises, net energy falls, and price rises. Odum (1973) 'Energy, Ecology and Economics', points 1-3."
+  },
+  "_the_claim": "Inflation here is not a monetary phenomenon and not a supply/demand artefact. The money supply is held CONSTANT for the whole run (see `buyer`), and nothing external pushes on price. Price rises because the denominator of M/W falls: each unit of gross energy extracted costs more energy to extract as the reserve depletes, so the NET energy reaching the economy collapses faster than the gross. That is Odum's point 1-3 and it is the whole reason this model exists.",
+  "_reading_the_run": "Two phases, separated by the structure's peak at t~29. BOOM (t=0..29): fuel 1000 -> 246, structure 1 -> 391, net/gross ~0.95 -> 0.85, price FALLS \u2014 energy is abundant and cheap. BUST (t=29..70): fuel 246 -> 20, structure 391 -> 22, net/gross 0.85 -> 0.27, price 25 -> 18745, a 741x rise. The price index rises monotonically across the whole bust.",
+  "_no_kernel_change_was_needed": "This task was filed expecting to touch src/gssk.c. It did not, and the reason is C.3: `params.numerator_node` (ADR 0005) lets a `ratio` edge name its numerator instead of taking it from the origin, so `wg_tap_feedback` below can read k*Q_yield/Q_fuel from a PINNED origin without consuming either. Without that, the gross-energy tap would have had to originate at `yield` and would have double-debited the very flow it measures \u2014 the exact hazard ADR 0003 named and ADR 0005 closed.",
+  "_what_this_is_not": "The imposed price notation (Odum Fig. 23-3d), not the price-generating transactor (23-3c). The exchange computes F_money = P x F_goods, so price is a control on the pathway; what C.3 and C.4 add is that the imposed number is computed from the system's own state. See ADR 0005's 'Fidelity to Odum' section. The money loop is also OPEN here \u2014 `d1-money-conserved-gnp-loop` closes it.",
+  "carriers": [
+    {
+      "id": "energy",
+      "unit": "kWh",
+      "conserved": true
+    },
+    {
+      "id": "money",
+      "unit": "AUD",
+      "conserved": true,
+      "_note": "Declared conserved, but the loop is open in THIS model \u2014 buyer is a pinned source and `spent` is a sink, so the per-carrier conservation error for money reflects that net outflow rather than a numerical leak. ADR 0004's carrier check reports it; d1 closes the loop."
+    },
+    {
+      "id": "signal",
+      "unit": "AUD/kWh",
+      "conserved": false,
+      "_note": "Price, and the two energy-throughput taps. Signals are not stocks of a substance and must stay out of the energy and money conservation checks."
+    }
+  ],
+  "nodes": [
+    {
+      "id": "fuel",
+      "type": "storage",
+      "value": 1000.0,
+      "carrier": "energy",
+      "_note": "The depleting reserve. A STORAGE, not a source \u2014 that is the whole difference from every earlier Phase C model, and it is what makes the feedback fraction move."
+    },
+    {
+      "id": "yield",
+      "type": "storage",
+      "value": 0.0,
+      "carrier": "energy",
+      "_note": "The extraction pipeline: gross energy lifted out of the reserve, before the cost of lifting it is paid. Deliberately fast (k_delivered = 5.0) so it holds little and tracks gross closely. Its existence is what makes gross energy a NODE VALUE rather than only a flow, which is what lets both taps below read it without consuming anything."
+    },
+    {
+      "id": "structure",
+      "type": "storage",
+      "value": 1.0,
+      "carrier": "energy",
+      "_note": "The economy / built capital. It both RECEIVES net energy and GATES extraction \u2014 you need machinery to get fuel, and more machinery gets more fuel. That two-way dependence is the loop that produces boom and bust."
+    },
+    {
+      "id": "heat",
+      "type": "sink",
+      "value": 0.0,
+      "carrier": "energy",
+      "_note": "Degraded energy. Both the feedback cost and depreciation end here."
+    },
+    {
+      "id": "ex",
+      "type": "exchange",
+      "value": 0.0,
+      "carrier": "energy",
+      "params": {
+        "k": 0.003,
+        "price": 999.0,
+        "price_node": "price"
+      },
+      "_note": "The transaction diamond. `price` is a poison value: if price_node resolution regresses, the trajectory diverges obviously instead of subtly. k is small on purpose \u2014 the trade must not drain the structure faster than fuel depletion drives it, or the collapse would be a market artefact rather than a net-energy one."
+    },
+    {
+      "id": "consumed",
+      "type": "sink",
+      "value": 0.0,
+      "carrier": "energy"
+    },
+    {
+      "id": "buyer",
+      "type": "source",
+      "value": 1.0,
+      "carrier": "money",
+      "_note": "M, the money supply, NORMALISED TO 1.0 so that `price` is a dimensionless price INDEX rather than a price level \u2014 the quantity the claim is actually about. It is a SOURCE, so compute_derivatives pins it and M is exactly constant for the whole run. That is an experimental control, not an oversight: with M fixed, every movement in P = M/W is attributable to W, and 'inflation emerges from net-energy decline' becomes testable rather than asserted. d1 replaces this pinned source with a conserved GNP loop.",
+      "_why_normalised": "Measured, not assumed. With M = 1000 the price level reached ~1.9e4, the signal sink accumulated 4.3e5, and the golden CSV differed between macOS clang and Linux GCC by exactly 1e-6 at t=59.12 \u2014 right at csv_compare's ABSOLUTE 1e-6 tolerance, which at that magnitude demands 2e-12 relative agreement. That is tighter than two compilers agree, because they make different FMA-contraction choices and RK4 amplifies the difference over 3500 steps. Normalising M to 1.0 scales the sink to 2.9e3 and the two platforms now agree BIT-FOR-BIT on every column. The dynamics are unchanged \u2014 same peak, same 741x rise, same net/gross curve \u2014 because P = M/W is linear in M and the exchange's k absorbs the rest."
+    },
+    {
+      "id": "spent",
+      "type": "sink",
+      "value": 0.0,
+      "carrier": "money"
+    },
+    {
+      "id": "unity",
+      "type": "source",
+      "value": 1.0,
+      "carrier": "signal",
+      "_note": "Pinned origin for the non-consuming taps. An edge is a flow and debits its origin; sources are pinned to dQ/dt = 0, so the debit is discarded (ADR 0003)."
+    },
+    {
+      "id": "W",
+      "type": "storage",
+      "value": 0.0,
+      "carrier": "signal",
+      "_note": "NET energy reaching the economy, low-passed. This is ADR 0003's delivered-work signal with a new referent: in C.3 W was trade throughput, here it is net energy. It is the denominator of the price ratio, and its collapse is the mechanism of the inflation."
+    },
+    {
+      "id": "W_gross",
+      "type": "storage",
+      "value": 0.0,
+      "carrier": "signal",
+      "_note": "GROSS energy lifted, low-passed, on the same time constant as W so the ratio W/W_gross is a fair comparison. Carried only so net-energy-per-gross is observable \u2014 it is the quantity Odum's argument turns on."
+    },
+    {
+      "id": "price",
+      "type": "storage",
+      "value": 0.02,
+      "carrier": "signal",
+      "_note": "P relaxes toward M/W rather than being assigned to it (ADR 0005). The lag is real and visible: when W turns over at t~24.3, P keeps falling for about 0.2 time units (~1/alpha) before it turns. That is why the acceptance claim is stated over the DEPLETION PHASE \u2014 from the structure's peak at t~29 \u2014 rather than from the instant W peaks."
+    },
+    {
+      "id": "s_leak",
+      "type": "sink",
+      "value": 0.0,
+      "carrier": "signal"
+    }
+  ],
+  "edges": [
+    {
+      "id": "extraction",
+      "origin": "fuel",
+      "target": "yield",
+      "carrier": "energy",
+      "logic": "interaction",
+      "params": {
+        "k": 0.0004,
+        "control_node": "structure"
+      },
+      "_note": "Odum's work gate. Gross extraction needs BOTH the reserve and the machinery: F = k x Q_fuel x Q_structure. Neither alone extracts anything."
+    },
+    {
+      "id": "feedback",
+      "origin": "yield",
+      "target": "heat",
+      "carrier": "energy",
+      "logic": "ratio",
+      "params": {
+        "k": 263.0,
+        "control_node": "fuel",
+        "threshold": 1.0
+      },
+      "_note": "THE MECHANISM. The energy spent getting energy: F = k x Q_yield / Q_fuel. Inversely proportional to what is left, so a full reserve is cheap to lift from and a depleted one is dear \u2014 deeper wells, thinner seams, lower pressure. The feedback FRACTION is (k/Q_fuel)/(k/Q_fuel + k_delivered): about 5% at Q_fuel = 1000, 34% at 100, 51% at 50. That rise is what drives everything downstream. threshold is the denominator floor: without it the cost of the last drop is infinite, which is physically true and numerically useless."
+    },
+    {
+      "id": "delivered",
+      "origin": "yield",
+      "target": "structure",
+      "carrier": "energy",
+      "logic": "linear",
+      "params": {
+        "k": 5.0
+      },
+      "_note": "Net energy reaching the economy \u2014 what is left of the gross after the feedback cost is paid."
+    },
+    {
+      "id": "depreciation",
+      "origin": "structure",
+      "target": "heat",
+      "carrier": "energy",
+      "logic": "linear",
+      "params": {
+        "k": 0.08
+      },
+      "_note": "Capital decays. This is what the net energy has to outrun; when it stops outrunning it, the structure turns over. The peak is where k_delivered x Q_yield falls through 0.08 x Q_structure."
+    },
+    {
+      "id": "supply",
+      "origin": "structure",
+      "target": "ex",
+      "carrier": "energy"
+    },
+    {
+      "id": "payment",
+      "origin": "buyer",
+      "target": "ex",
+      "carrier": "money"
+    },
+    {
+      "id": "sold",
+      "origin": "ex",
+      "target": "consumed",
+      "carrier": "energy"
+    },
+    {
+      "id": "revenue",
+      "origin": "ex",
+      "target": "spent",
+      "carrier": "money"
+    },
+    {
+      "id": "w_tap",
+      "origin": "unity",
+      "target": "W",
+      "carrier": "signal",
+      "logic": "interaction",
+      "params": {
+        "k": 5.0,
+        "control_node": "yield"
+      },
+      "_note": "Replicates the `delivered` flow (same k, reading the same node) from a pinned origin, so measuring net energy does not consume it. control_node reads Q_yield without debiting it."
+    },
+    {
+      "id": "w_leak",
+      "origin": "W",
+      "target": "s_leak",
+      "carrier": "signal",
+      "logic": "linear",
+      "params": {
+        "k": 1.0
+      },
+      "_note": "The low-pass. W settles at (inflow)/k, so k sets both the time constant and the SCALE of W \u2014 and therefore the level of P, since P = M/W. ADR 0003 called this out: alpha sets how fast price adjusts, this k sets what W means."
+    },
+    {
+      "id": "wg_tap_delivered",
+      "origin": "unity",
+      "target": "W_gross",
+      "carrier": "signal",
+      "logic": "interaction",
+      "params": {
+        "k": 5.0,
+        "control_node": "yield"
+      },
+      "_note": "Gross = delivered + feedback, so W_gross is fed by two taps that replicate both. This is the first."
+    },
+    {
+      "id": "wg_tap_feedback",
+      "origin": "unity",
+      "target": "W_gross",
+      "carrier": "signal",
+      "logic": "ratio",
+      "params": {
+        "k": 263.0,
+        "numerator_node": "yield",
+        "control_node": "fuel",
+        "threshold": 1.0
+      },
+      "_note": "The second, and the edge that made this whole model expressible without a kernel change. It replicates `feedback` \u2014 k x Q_yield / Q_fuel \u2014 from a PINNED origin, naming the numerator with C.3's params.numerator_node instead of taking it from the origin. Before ADR 0005 this tap could only have originated at `yield`, which would have double-debited the flow it exists to measure. Every parameter must match `feedback` exactly, including the threshold floor, or W_gross measures a different model than the one running."
+    },
+    {
+      "id": "wg_leak",
+      "origin": "W_gross",
+      "target": "s_leak",
+      "carrier": "signal",
+      "logic": "linear",
+      "params": {
+        "k": 1.0
+      },
+      "_note": "Same time constant as w_leak. If these two diverge, W/W_gross stops being net-per-gross and becomes an artefact of two different filters."
+    },
+    {
+      "id": "p_target",
+      "origin": "unity",
+      "target": "price",
+      "carrier": "signal",
+      "logic": "ratio",
+      "params": {
+        "k": 5.0,
+        "numerator_node": "buyer",
+        "control_node": "W",
+        "threshold": 0.005
+      },
+      "_note": "alpha x M / W. numerator_node reads M without consuming it (ADR 0005 Decision 2). The floor is set 10x below the smallest W the run reaches (0.052 at t_end), so the clamp never binds \u2014 t_end is chosen for that. If the floor bound, price would flatten and the monotonic-rise claim would be about the clamp instead of the physics."
+    },
+    {
+      "id": "p_relax",
+      "origin": "price",
+      "target": "s_leak",
+      "carrier": "signal",
+      "logic": "linear",
+      "params": {
+        "k": 5.0
+      },
+      "_note": "alpha x P. The two alphas MUST be equal: if they diverge to k_in and k_out the fixed point becomes (k_in/k_out) x M/W, quietly reintroducing the merely-proportional Tier 1 behaviour. Nothing in the kernel can catch that \u2014 both models are legal \u2014 which is why tests/test_net_energy.c asserts the fixed point equals M/W as an equality."
+    }
+  ],
+  "config": {
+    "t_start": 0,
+    "t_end": 70,
+    "dt": 0.02,
+    "method": "rk4"
+  }
+}
