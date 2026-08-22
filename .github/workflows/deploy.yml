@@ -52,6 +52,12 @@ jobs:
       - name: Node type validation tests
         run: make test-node-types
 
+      # A key the parser does not recognise must be an error, not silence.
+      # Also the check that catches the serialiser emitting a key the parser
+      # will not take back — it has already caught one ("active").
+      - name: Unknown key rejection tests
+        run: make test-unknown-keys
+
       # The flat carrier getters exist to keep GSSK_Carrier's struct layout off
       # the WASM boundary. This suite also asserts they agree with
       # GSSK_GetCarrier at every index, so the two paths cannot drift.

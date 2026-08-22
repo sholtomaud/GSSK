@@ -32,6 +32,35 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ### BREAKING
 
+- **An unrecognised model *key* is now rejected instead of silently ignored.** `GSSK_Init` returns `GSSK_ERR_SCHEMA_VIOLATION` for a key it does not recognise at the root object, in a node object, in an edge object, in edge `params`, or in `config`. The message names both the key and its container so an authoring UI can highlight the element that is wrong — `Schema Error: Edge 'e1' params has unknown key 'bogus_param'.`
+
+  The hazard is sharpest for a feature the kernel does not yet have. This model used to load, return `GSSK_SUCCESS` and run to completion with `forcing`, `nonsense_top_level_key` and `bogus_param` all ignored in silence:
+
+  ```json
+  {"metadata":{"schema_version":4},
+   "forcing":{"sun":{"waveform":"sine","amplitude":5,"period":24}},
+   "nonsense_top_level_key":123,
+   "nodes":[...], "edges":[{"...":"...","params":{"k":0.5,"bogus_param":9}}]}
+  ```
+
+  A model authored against a kernel that *has* forcing, loaded by one that does not, therefore produced a plausible completed run with no diagnostic. Its JSON — and any external content hash of it, which is what `metadata.model_hash` carries, since the kernel round-trips that field and never computes it — says "forced". Its trajectory says "constant". Nothing reconciles the two. This is the same hazard class as the node-`type` fallback below: a wrong key is not a smaller mistake than a wrong type, it is the same mistake one level up.
+
+  **Any key beginning with `_` is accepted everywhere, at every level.** That is load-bearing rather than a courtesy: `examples/household_model_annotated.json` and `examples/price_dynamics_model.json` carry `_note` and `_mechanism` throughout, and `gssk.schema.json` documents the convention.
+
+  `GSSK_AddNode` and `GSSK_AddEdge` apply the same check — they are separate parsers. A rejected add is a true no-op: the check runs before the `realloc`, so counts are unchanged and the instance is still steppable.
+
+  **This makes the kernel agree with a contract the project already publishes.** `gssk.schema.json` has always set `additionalProperties: false` at the root and on `Node`, `Edge`, `EdgeParams` and `Config`, and permitted `^_` keys via `patternProperties`. `make test-schema` caught violations in `examples/`; nothing caught them at runtime for a *consumer's* model, which is where it matters. See [ADR 0004](adr/0004-schema-advisory.md).
+
+  **Migration**: a model carrying a stray key now fails to load; correct or `_`-prefix the key. Nothing in `examples/`, `tests/schema_fixtures/` or the fuzz corpus changed — all 18 loadable models still load, and the two fuzz seeds that fail still fail for their original, unrelated reasons (one is not JSON, one has no `nodes` array).
+
+### Fixed
+
+- **The serialiser emitted `"active"`, a key the published schema forbids.** `build_topology_json` writes `"active": false` for an edge deactivated via `GSSK_DeactivateEdge`, but `active` appeared nowhere in the parser and `Edge` sets `additionalProperties: false` — so the kernel was emitting output its own schema rejects. It went unnoticed because no model in `examples/` or `tests/schema_fixtures/` has a deactivated edge, so the `tests/results/serialized/` corpus never contained one. Found by the stricter parser above, which is exactly what it is for. `active` is now declared in the schema and accepted on load, and `tests/test_unknown_keys.c` covers the deactivated-edge round-trip directly.
+
+  Note what is *not* fixed here: `GSSK_Init` accepts `active` but does not act on it. Deactivation survives the round-trip through `params.k`, which `GSSK_DeactivateEdge` sets to `0.0`, so the trajectory is reproduced — but `edges[i].active` is not, and that flag is read by topology classification, so a reloaded edge is *active with k = 0* rather than *inactive*. That is a behavioural change and is tracked separately.
+
+### BREAKING
+
 - **An unrecognised node `type` is now rejected instead of silently becoming a `storage` node.** `parse_node_type` returned `NODE_STORAGE` for any string it did not recognise, so `"storge"`, `"Source"` or `"producer_"` produced a *different model* that ran to completion and reported success. `GSSK_Init` now returns `GSSK_ERR_SCHEMA_VIOLATION` for any type that is neither one of the nine primitives (`storage`, `source`, `sink`, `constant`, `interaction`, `gain`, `loop_limited`, `exchange`, `switch`), a built-in composite (`producer`, `consumer`, `misc_box`, `system_frame`), nor an archetype declared in the model's own `archetypes` block. The message names the node id and the offending string — `Schema Error: Node 'grasss' has unknown type 'storge'.` — so an authoring UI can highlight the element that is wrong.
 
   `GSSK_AddNode` rejects the same strings, and additionally rejects composite and archetype names: it performs no expansion, so `{"type":"producer"}` added at runtime had been becoming a single storage node rather than the producer subgraph. It now fails with a message saying composites can only be added at `GSSK_Init`. A rejected add is a true no-op — nothing is allocated or grown before the check, so the instance a drag-and-drop editor is mutating is left exactly as it was and remains steppable. Expanding composites at runtime is a separate change and is not attempted here.

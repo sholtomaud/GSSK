@@ -333,6 +333,11 @@
           "default": null,
           "description": "ID of a paired counter-flow edge. Used to model commodity-payment pairs where money flows opposite to goods (e.g. 'salary_payment' coupled with 'labour_delivery'). Kernel uses this for quality accounting directionality."
         },
+        "active": {
+          "type": "boolean",
+          "default": true,
+          "description": "Emitted as false by GSSK_SerializeModel for an edge that has been deactivated via GSSK_DeactivateEdge. Informational on load: GSSK_Init accepts the key but does not act on it, because deactivation is already carried in the round-trip by params.k, which DeactivateEdge sets to 0. Present here because the serialiser emits it, and output this project's own schema rejects would be a defect."
+        },
         "visual": {
           "type": "object",
           "additionalProperties": true,
