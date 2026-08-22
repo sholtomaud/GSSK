@@ -52,6 +52,12 @@ jobs:
       - name: Node type validation tests
         run: make test-node-types
 
+      # The flat carrier getters exist to keep GSSK_Carrier's struct layout off
+      # the WASM boundary. This suite also asserts they agree with
+      # GSSK_GetCarrier at every index, so the two paths cannot drift.
+      - name: Carrier accessor tests
+        run: make test-carrier-api
+
       # Phase C asserts things a CSV regression cannot see. The C.3 suite in
       # particular runs the same relaxation under RK4 and under IDC against an
       # analytic solution: a flow that reads a node other than its origin has

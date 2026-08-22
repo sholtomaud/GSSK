@@ -208,6 +208,29 @@ export class GSSKSimulator {
   edgeCarrier(index)    { const p = this.#mod._GSSK_GetEdgeCarrier(this.#inst, index); return p ? readString(this.#mod, p) : ''; }
   nodeCarrier(index)    { const p = this.#mod._GSSK_GetNodeCarrier(this.#inst, index); return p ? readString(this.#mod, p) : ''; }
 
+  // Flat carrier getters. Deliberately NOT _GSSK_GetCarrier — that returns a
+  // pointer to a GSSK_Carrier struct, and decoding it here would bake the
+  // kernel's field offsets, bool width and padding into this binding.
+  carrierID(idx)        { return readString(this.#mod, this.#mod._GSSK_GetCarrierID(this.#inst, idx)); }
+  // The y-axis label. Carriers with different units may not share a scale.
+  carrierUnit(idx)      { return readString(this.#mod, this.#mod._GSSK_GetCarrierUnit(this.#inst, idx)); }
+  carrierConserved(idx) { return this.#mod._GSSK_GetCarrierConserved(this.#inst, idx) !== 0; }
+
+  // Convenience: every declared carrier as {id, unit, conserved}.
+  get carriers() {
+    const out = [];
+    for (let i = 0; i < this.carrierCount; i++)
+      out.push({ id: this.carrierID(i), unit: this.carrierUnit(i), conserved: this.carrierConserved(i) });
+    return out;
+  }
+
+  findCarrier(id) {
+    const p = writeString(this.#mod, id);
+    const r = this.#mod._GSSK_FindCarrierIdx(this.#inst, p);
+    this.#mod._free(p);
+    return r;
+  }
+
   carrierConservationError(carrierIdx) {
     return this.#mod._GSSK_GetCarrierConservationError(this.#inst, carrierIdx);
   }

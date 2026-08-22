@@ -66,9 +66,37 @@ const char *GSSK_GetEdgeCarrier(GSSK_Instance *inst, int edgeIdx);
 int                  GSSK_GetCarrierCount(GSSK_Instance *inst);
 const GSSK_Carrier  *GSSK_GetCarrier(GSSK_Instance *inst, int idx);
 double               GSSK_GetCarrierConservationError(GSSK_Instance *inst, int carrierIdx);
+
+/* Flat accessors — same data, no struct layout */
+const char *GSSK_GetCarrierID(GSSK_Instance *inst, size_t idx);
+const char *GSSK_GetCarrierUnit(GSSK_Instance *inst, size_t idx);
+int         GSSK_GetCarrierConserved(GSSK_Instance *inst, size_t idx);
+int         GSSK_FindCarrierIdx(GSSK_Instance *inst, const char *id);
 ```
 
-`GSSK_Carrier` is a struct with fields `id[64]`, `unit[32]`, and `conserved` (bool).
+`GSSK_Carrier` is a struct with fields `id[32]`, `unit[32]`, and `conserved`
+(bool).
+
+**Which to call.** In C, either — `GSSK_GetCarrier` hands back the whole struct
+and there is nothing to decode. **Across the WASM boundary, use the flat
+getters.** `_GSSK_GetCarrier` returns a bare heap pointer, so reading `unit` or
+`conserved` from JS means assuming field offsets, the width of `bool`, and the
+absence of trailing padding. None of those are part of any ABI contract, and a
+field reorder invalidates all of them by returning plausible garbage rather than
+by failing. The flat getters carry no layout across the boundary.
+
+`unit` is the y-axis label a plotting consumer would otherwise hardcode, and
+`conserved` together with `unit` is what a consumer needs to decide that two
+series may not share a scale (ADR-6, ADR-8).
+
+**Out-of-range conventions differ, deliberately:**
+
+| Call | Out of range |
+|---|---|
+| `GSSK_GetCarrier` | `NULL` |
+| `GSSK_GetCarrierID` / `GSSK_GetCarrierUnit` | `""` (never `NULL`), following `GSSK_GetNodeCarrier` |
+| `GSSK_GetCarrierConserved` | `0` — indistinguishable from a declared non-conserved carrier, so bound-check against `GSSK_GetCarrierCount` first if the difference matters |
+| `GSSK_FindCarrierIdx` | `-1` when not found, matching `GSSK_FindNodeIdx` / `GSSK_FindEdgeIdx` |
 
 ### Sensitivity
 
@@ -202,6 +230,11 @@ const sim = await GSSKSimulator.create(jsonStr, {
 | `sim.nodeCarrier(i)` | `string` | Node carrier ID |
 | `sim.findEdge(id)` | `number` | Index or -1 |
 | `sim.findNode(id)` | `number` | Index or -1 |
+| `sim.carrierID(i)` | `string` | Carrier id at index i |
+| `sim.carrierUnit(i)` | `string` | Carrier unit at index i — the y-axis label |
+| `sim.carrierConserved(i)` | `boolean` | Whether carrier i was declared conserved |
+| `sim.carriers` | `{id,unit,conserved}[]` | All declared carriers |
+| `sim.findCarrier(id)` | `number` | Index of named carrier, or -1 |
 | `sim.carrierConservationError(i)` | `number` | Per-carrier error |
 | `sim.serializeModel()` | `string` | JSON model |
 | `sim.serializeSnapshot()` | `string` | JSON model + snapshot |
