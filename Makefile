@@ -65,7 +65,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -294,6 +294,21 @@ $(TARGET_TEST_UNKNOWNKEY): $(TEST_DIR)/test_unknown_keys.c $(TARGET_LIB)
 test-unknown-keys: all $(TARGET_TEST_UNKNOWNKEY)
 	@echo "Running unknown key tests..."
 	@./$(TARGET_TEST_UNKNOWNKEY)
+
+# Deactivation must survive serialise -> reload. GSSK_DeactivateEdge cleared
+# `active` AND set k to 0, so the round-trip reproduced the trajectory (k = 0
+# kills the flow either way) while losing the flag — and the flag is what the
+# ~20 sites that COUNT active elements read: motif detection, the isolated-duet
+# test, the closed-system conservation check. GSSK_DeactivateNode was lost
+# outright, having no k to hide behind.
+TARGET_TEST_DEACT = $(BIN_DIR)/test_deactivation_round_trip
+
+$(TARGET_TEST_DEACT): $(TEST_DIR)/test_deactivation_round_trip.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-deactivation: all $(TARGET_TEST_DEACT)
+	@echo "Running deactivation round-trip tests..."
+	@./$(TARGET_TEST_DEACT)
 
 # Carrier accessors — the flat getters that keep GSSK_Carrier's struct layout
 # from crossing the WASM boundary. Also asserts the flat path and
@@ -556,7 +571,7 @@ wasm-container: container-image-wasm
 
 # Full native build + both test suites under real GCC with -Werror.
 test-linux: container-image-linux
-	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy'
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-deactivation && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy'
 
 # Same under Linux clang, the other half of CI's build-native matrix.
 test-linux-clang: container-image-linux

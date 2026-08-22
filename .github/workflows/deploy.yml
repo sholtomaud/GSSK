@@ -94,6 +94,13 @@ jobs:
       - name: Unknown key rejection tests
         run: make test-unknown-keys
 
+      # Deactivation has to survive serialise -> reload. It did not: the edge
+      # case reloaded as ACTIVE WITH k = 0, which reproduces the trajectory and
+      # loses the topology, and the node case was lost outright. A trajectory
+      # regression cannot see either, which is why this is its own suite.
+      - name: Deactivation round-trip tests
+        run: make test-deactivation
+
       # The flat carrier getters exist to keep GSSK_Carrier's struct layout off
       # the WASM boundary. This suite also asserts they agree with
       # GSSK_GetCarrier at every index, so the two paths cannot drift.
