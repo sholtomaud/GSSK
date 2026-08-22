@@ -46,6 +46,29 @@ int           GSSK_GetStepCount(GSSK_Instance *inst);
 double        GSSK_GetConservationError(GSSK_Instance *inst);
 ```
 
+**`GSSK_GetState` returns the live state array, not a copy.** Streaming a run
+therefore needs nothing beyond `GSSK_Step` and `GSSK_GetState` — you own the
+loop — but the pointer has a lifetime:
+
+| Call | Effect on a previously returned pointer |
+|---|---|
+| `GSSK_Step`, `GSSK_StepAdaptive` | Stays valid — the step writes through the same array |
+| `GSSK_Reset` | Stays valid — values rewritten in place |
+| `GSSK_AddEdge` | Stays valid — grows the edge arrays, not the state array |
+| `GSSK_DeactivateEdge`, `GSSK_DeactivateNode` | Stays valid — flags only |
+| **`GSSK_AddNode`** | **Invalidates it** — the state array is `realloc`'d and may relocate |
+| `GSSK_Free` | Invalidates it |
+
+`GSSK_AddNode` also changes `GSSK_GetStateSize`. Re-fetch both rather than
+caching; a `realloc` frequently returns the same block, so a cached pointer
+fails intermittently rather than immediately. A *rejected* `GSSK_AddNode`
+validates before it reallocs and so does not invalidate the pointer.
+
+Across WASM the same rule applies to the heap views: re-read `mod.HEAPF64` as
+well as re-calling `_GSSK_GetState`, and never hold a `Float64Array` across a
+call into the kernel. See [the streaming recipe](cookbook.md#stream-results-as-the-simulation-runs-c-and-js)
+for both loops.
+
 ### Node / Edge Access
 
 ```c

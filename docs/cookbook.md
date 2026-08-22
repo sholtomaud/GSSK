@@ -31,6 +31,106 @@ int main(void) {
 }
 ```
 
+## Stream results as the simulation runs (C and JS)
+
+Streaming needs **no kernel API beyond `GSSK_Step` and `GSSK_GetState`**, both
+of which exist and are both exported to WASM. There is no callback interface, no
+`GSSK_Run`-with-sink, and none is needed: you own the loop, so you decide what
+happens between steps — write a CSV row, push a WebSocket frame, update a chart,
+throttle, or stop early.
+
+### The C loop
+
+```c
+GSSK_Instance *inst = NULL;
+if (GSSK_Init(json, &inst) != GSSK_SUCCESS) { /* handle */ }
+
+size_t n  = GSSK_GetStateSize(inst);
+double dt = GSSK_GetDt(inst);
+
+while (GSSK_GetCurrentTime(inst) < GSSK_GetTEnd(inst) - 1e-12) {
+    GSSK_Status st = GSSK_Step(inst, dt);
+    if (st == GSSK_ERR_DIVERGENCE) break;      /* NaN/Inf; state is not usable */
+
+    /* Re-fetch each iteration. It costs one load, and it is correct
+       unconditionally — see the lifetime rule below. */
+    const double *state = GSSK_GetState(inst);
+    printf("%.4f", GSSK_GetCurrentTime(inst));
+    for (size_t i = 0; i < n; i++) printf(",%.6f", state[i]);
+    printf("\n");
+}
+GSSK_Free(inst);
+```
+
+Use `GSSK_StepAdaptive(inst)` instead of `GSSK_Step` when you want the solver to
+choose the step size; the reading pattern is identical, and `GSSK_GetLastStepSize`
+tells you how far the step actually went.
+
+### Pointer lifetime — the rule that makes "just call GetState" safe
+
+`GSSK_GetState` returns a pointer to the kernel's live state array, not a copy.
+So the advice is only safe if the aliasing rules are stated:
+
+| Call | Effect on a previously returned `GSSK_GetState` pointer |
+|---|---|
+| `GSSK_Step`, `GSSK_StepAdaptive` | **Stays valid.** The step writes through the same array. |
+| `GSSK_Reset` | **Stays valid.** Values are rewritten in place. |
+| `GSSK_AddEdge` | **Stays valid.** It grows the edge arrays, not the state array. |
+| `GSSK_DeactivateEdge`, `GSSK_DeactivateNode` | **Stays valid.** Deactivation flags; it does not shrink the arrays. |
+| `GSSK_AddNode` | **INVALIDATES it.** The state array is `realloc`'d, which may relocate it. |
+| `GSSK_Free` | Invalidates it, obviously. |
+
+`GSSK_AddNode` is the one that bites, and it bites intermittently: a `realloc`
+often returns the same block, so a cached pointer appears to work and then
+one-in-several-adds silently starts reading freed memory. In a probe adding 64
+nodes to a 2-node model, the array relocated on 16 of the 64 adds.
+
+**So: do not cache the pointer across anything but a step.** Re-fetch it, which
+is what the loop above does. A *rejected* `GSSK_AddNode` does not invalidate it
+— the validation happens before the `realloc` — but there is no reason to rely
+on that.
+
+Note also that `GSSK_GetStateSize` changes after `GSSK_AddNode`. Re-read the
+size along with the pointer if your loop mutates topology.
+
+`GSSK_Replay` calls `GSSK_AddNode` internally when the log contains one, but it
+builds its own instance and hands it back, so this is not a mid-stream hazard
+unless you are streaming from the instance it returned — in which case the same
+rule applies to it.
+
+### The JS/WASM loop
+
+Same two calls, one extra wrinkle. `_GSSK_GetState` returns an *offset into the
+WASM heap*, and the JS-side typed-array views are objects that can be replaced
+when the heap grows. So the WASM version of the aliasing rule is: **re-read
+`mod.HEAPF64` as well as the pointer**, and never hold a `Float64Array` view
+across a call into the kernel.
+
+```js
+import { GSSKSimulator } from './js/gssk.js';
+
+const sim = await GSSKSimulator.create(json, { wasmPath: 'dist/gssk.wasm' });
+
+while (sim.currentTime < sim.endTime - 1e-12) {
+  sim.step();
+  // `sim.state` re-fetches the pointer, re-reads HEAPF64, and returns a copy.
+  onRow(sim.currentTime, sim.state);
+}
+sim.free();
+```
+
+`sim.state` already does the right thing: it calls `_GSSK_GetState` fresh, reads
+`this.#mod.HEAPF64.buffer` fresh, and `.slice()`s so you get a copy rather than
+a window onto kernel memory. If you drop to the raw module instead of the
+binding, do the same three things — the shape to avoid is hoisting
+`const heap = mod.HEAPF64` or `const ptr = mod._GSSK_GetState(inst)` out of the
+loop.
+
+As currently built, `dist/gssk.wasm` does **not** enable
+`ALLOW_MEMORY_GROWTH`, so the heap is fixed and the views are in fact never
+replaced today. Do not depend on that: it is a build flag, re-reading costs
+nothing, and the pattern above is correct either way.
+
 ## Load a model from a JSON file (Python)
 
 ```python
