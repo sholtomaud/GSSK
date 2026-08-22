@@ -65,7 +65,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-node-types test-unknown-keys test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-node-types test-unknown-keys test-stage-times test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -211,6 +211,21 @@ $(TARGET_TEST_NODETYPE): $(TEST_DIR)/test_node_type_validation.c $(TARGET_LIB)
 test-node-types: all $(TARGET_TEST_NODETYPE)
 	@echo "Running node type validation tests..."
 	@./$(TARGET_TEST_NODETYPE)
+
+# Stage times — the solver must hand each derivative evaluation the right time.
+# Pinned BEFORE anything consumes t, so the rest of the suite can hold "nothing
+# changed at all" as its criterion. Builds the sources directly with the probe
+# macro rather than linking $(TARGET_LIB): the recorder must not exist in the
+# shipped library, and this task adds no public API.
+TARGET_TEST_STAGET = $(BIN_DIR)/test_stage_times
+STAGET_SRC = $(SRC_DIR)/gssk.c $(SRC_DIR)/advanced.c $(SRC_DIR)/cJSON.c
+
+$(TARGET_TEST_STAGET): $(TEST_DIR)/test_stage_times.c $(STAGET_SRC) directories
+	$(CC) $(CFLAGS) -DGSSK_STAGE_TIME_PROBE $< $(STAGET_SRC) -o $@ $(LDFLAGS)
+
+test-stage-times: $(TARGET_TEST_STAGET)
+	@echo "Running stage time tests..."
+	@./$(TARGET_TEST_STAGET)
 
 # Unknown key rejection — a key the parser does not recognise must be an error,
 # not silence. Same hazard class as the node-type fallback: a model authored
@@ -485,7 +500,7 @@ wasm-container: container-image-wasm
 
 # Full native build + both test suites under real GCC with -Werror.
 test-linux: container-image-linux
-	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics'
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-stage-times && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics'
 
 # Same under Linux clang, the other half of CI's build-native matrix.
 test-linux-clang: container-image-linux

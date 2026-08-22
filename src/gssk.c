@@ -462,6 +462,28 @@ static bool model_keys_ok(const cJSON *root, char *err, size_t errcap) {
   return true;
 }
 
+/* =========================================================================
+ * Stage-time probe — TEST BUILDS ONLY
+ *
+ * tests/test_stage_times.c has to assert the time handed to each derivative
+ * evaluation, and asserting the arithmetic by re-deriving it in the test would
+ * just be the same mistake written twice. So the probe records what the solver
+ * actually passed.
+ *
+ * Compiled out entirely unless GSSK_STAGE_TIME_PROBE is defined, which only
+ * the `test-stage-times` target does. Nothing here reaches the shipped
+ * library, the public header, or the WASM export list — this task adds no
+ * public API, and a debug hook is not an exception to that.
+ * ========================================================================= */
+#ifdef GSSK_STAGE_TIME_PROBE
+void (*gssk_probe_on_derivative)(double t) = NULL;
+void (*gssk_probe_on_adjoint)(double t)    = NULL;
+#  define GSSK_PROBE(fn, t) \
+     do { if (fn) (fn)(t); } while (0)
+#else
+#  define GSSK_PROBE(fn, t) ((void)0)
+#endif
+
 /* Decodes a primitive type string.  The NODE_STORAGE tail is a decode default,
  * not a fallback for unknown input: callers validate with
  * is_primitive_node_type (or find_archetype) before getting here. */
@@ -551,8 +573,11 @@ static int find_edge_idx(GSSK_Instance *inst, const char *id) {
  * stocks.  Processing nodes themselves never accumulate Q (boundary handled
  * by compute_derivatives below). */
 
-static void compute_interaction_node(GSSK_Instance *inst, size_t ni,
+static void compute_interaction_node(GSSK_Instance *inst, double t, size_t ni,
                                      const double *state, double *deriv) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   /* Multi-input product gate.  First incoming edge → "energy" (consumed).
    * Remaining incoming edges → "control" inputs (not consumed, multiplicative).
    * F = node_k × ∏ state[origin]; output evenly partitioned over outputs. */
@@ -589,8 +614,11 @@ static void compute_interaction_node(GSSK_Instance *inst, size_t ni,
   }
 }
 
-static void compute_gain_node(GSSK_Instance *inst, size_t ni,
+static void compute_gain_node(GSSK_Instance *inst, double t, size_t ni,
                               const double *state, double *deriv) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   /* Constant-gain amplifier.  First incoming edge → control (not consumed).
    * Second (if any) → energy source.  If energy source is a STORAGE node,
    * draw F from it; otherwise (SOURCE/CONSTANT) treat as free supply. */
@@ -628,8 +656,11 @@ static void compute_gain_node(GSSK_Instance *inst, size_t ni,
   }
 }
 
-static void compute_loop_limited_node(GSSK_Instance *inst, size_t ni,
+static void compute_loop_limited_node(GSSK_Instance *inst, double t, size_t ni,
                                       const double *state, double *deriv) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   /* Michaelis-Menten loop-limited converter.  Single incoming edge. */
   int in_orig = -1;
   for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -663,8 +694,11 @@ static void compute_loop_limited_node(GSSK_Instance *inst, size_t ni,
   }
 }
 
-static void compute_switch_node(GSSK_Instance *inst, size_t ni,
+static void compute_switch_node(GSSK_Instance *inst, double t, size_t ni,
                                 const double *state, double *deriv) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   /* Digital switch.  First incoming edge → flow source (consumed when ON).
    * Second (optional) → sensor (not consumed).  If only one input, it acts
    * as both flow source and sensor. */
@@ -782,8 +816,11 @@ static void apply_transaction_coupling(double F_primary, double price,
   if (money_to   >= 0) deriv[money_to]   += F_money;
 }
 
-static void compute_exchange_node(GSSK_Instance *inst, size_t ni,
+static void compute_exchange_node(GSSK_Instance *inst, double t, size_t ni,
                                   const double *state, double *deriv) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   ExchangeLegs L = resolve_exchange_legs(inst, ni);
   if (L.goods_in < 0) return;
 
@@ -796,8 +833,9 @@ static void compute_exchange_node(GSSK_Instance *inst, size_t ni,
                              L.money_in, L.money_out, deriv);
 }
 
-static void compute_derivatives(GSSK_Instance *inst, const double *state,
-                                double *deriv) {
+static void compute_derivatives(GSSK_Instance *inst, double t,
+                                const double *state, double *deriv) {
+  GSSK_PROBE(gssk_probe_on_derivative, t);
   memset(deriv, 0, inst->node_count * sizeof(double));
 
   /* v3 edges — skip any edge whose origin OR target is a v4 processing node.
@@ -849,11 +887,11 @@ static void compute_derivatives(GSSK_Instance *inst, const double *state,
   /* v4 processing nodes — call per-type helper */
   for (size_t i = 0; i < inst->node_count; i++) {
     switch (inst->nodes[i].type) {
-    case NODE_INTERACTION:  compute_interaction_node(inst, i, state, deriv); break;
-    case NODE_GAIN:         compute_gain_node(inst, i, state, deriv); break;
-    case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, i, state, deriv); break;
-    case NODE_SWITCH:       compute_switch_node(inst, i, state, deriv); break;
-    case NODE_EXCHANGE:     compute_exchange_node(inst, i, state, deriv); break;
+    case NODE_INTERACTION:  compute_interaction_node(inst, t, i, state, deriv); break;
+    case NODE_GAIN:         compute_gain_node(inst, t, i, state, deriv); break;
+    case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, state, deriv); break;
+    case NODE_SWITCH:       compute_switch_node(inst, t, i, state, deriv); break;
+    case NODE_EXCHANGE:     compute_exchange_node(inst, t, i, state, deriv); break;
     default: break;
     }
   }
@@ -888,8 +926,11 @@ static void compute_derivatives(GSSK_Instance *inst, const double *state,
  * A[origin][origin] -= same conductance.
  * Source/constant nodes: row zeroed (dQ/dt = 0 boundary condition).
  */
-static void build_flow_matrix(GSSK_Instance *inst, const double *state,
+static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state,
                               double *A) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   size_t n = inst->node_count;
   memset(A, 0, n * n * sizeof(double));
 
@@ -965,8 +1006,11 @@ static void build_flow_matrix(GSSK_Instance *inst, const double *state,
  * Threshold edges: f += k if Q_origin > threshold (treated as constant this step).
  * Source/constant node rows zeroed (dQ/dt = 0 boundary condition).
  */
-static void build_forcing_vector(GSSK_Instance *inst, const double *state,
+static void build_forcing_vector(GSSK_Instance *inst, double t, const double *state,
                                  double *f) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   size_t n = inst->node_count;
   memset(f, 0, n * sizeof(double));
 
@@ -1125,23 +1169,24 @@ static void expm_pade33(const double *A, const double *v, double *result,
  * RK4 step using instance scratchpads (fast path, not re-entrant).
  * Writes result to Q_out. Q_out may alias inst->tmp_state.
  */
-static void rk4_step_ex(GSSK_Instance *inst, const double *Q_in,
+static void rk4_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
                         double *Q_out, double dt) {
   size_t n = inst->node_count;
-  /* k1 → inst->dQ */
-  compute_derivatives(inst, Q_in, inst->dQ);
-  /* k2 staging → inst->tmp_state, k2 → inst->k2 */
+  /* Classical RK4 c-nodes: 0, 1/2, 1/2, 1. */
+  /* k1 at c1 = 0 → inst->dQ */
+  compute_derivatives(inst, t, Q_in, inst->dQ);
+  /* k2 at c2 = 1/2; staging → inst->tmp_state, k2 → inst->k2 */
   for (size_t i = 0; i < n; i++)
     inst->tmp_state[i] = Q_in[i] + 0.5 * dt * inst->dQ[i];
-  compute_derivatives(inst, inst->tmp_state, inst->k2);
-  /* k3 staging → inst->tmp_state, k3 → inst->k3 */
+  compute_derivatives(inst, t + 0.5 * dt, inst->tmp_state, inst->k2);
+  /* k3 at c3 = 1/2; staging → inst->tmp_state, k3 → inst->k3 */
   for (size_t i = 0; i < n; i++)
     inst->tmp_state[i] = Q_in[i] + 0.5 * dt * inst->k2[i];
-  compute_derivatives(inst, inst->tmp_state, inst->k3);
-  /* k4 staging → inst->tmp_state, k4 → inst->k4 */
+  compute_derivatives(inst, t + 0.5 * dt, inst->tmp_state, inst->k3);
+  /* k4 at c4 = 1; staging → inst->tmp_state, k4 → inst->k4 */
   for (size_t i = 0; i < n; i++)
     inst->tmp_state[i] = Q_in[i] + dt * inst->k3[i];
-  compute_derivatives(inst, inst->tmp_state, inst->k4);
+  compute_derivatives(inst, t + dt, inst->tmp_state, inst->k4);
   /* final (reads dQ/k2/k3/k4 only — safe even when Q_out == inst->tmp_state) */
   for (size_t i = 0; i < n; i++)
     Q_out[i] = Q_in[i] + (dt / 6.0) * (inst->dQ[i] + 2.0 * inst->k2[i]
@@ -1152,7 +1197,7 @@ static void rk4_step_ex(GSSK_Instance *inst, const double *Q_in,
  * RK4 step with heap-allocated scratchpads (safe for re-entrant calls
  * from find_threshold_crossing while inst scratchpads hold RK4 result).
  */
-static void rk4_step_alloc(GSSK_Instance *inst, const double *Q_in,
+static void rk4_step_alloc(GSSK_Instance *inst, double t, const double *Q_in,
                             double *Q_out, double dt) {
   size_t n = inst->node_count;
   double *buf = malloc(5 * n * sizeof(double));
@@ -1162,13 +1207,14 @@ static void rk4_step_alloc(GSSK_Instance *inst, const double *Q_in,
   double *k3  = buf + 2 * n;
   double *k4  = buf + 3 * n;
   double *tmp = buf + 4 * n;
-  compute_derivatives(inst, Q_in, k1);
+  /* Classical RK4 c-nodes: 0, 1/2, 1/2, 1 — as rk4_step_ex. */
+  compute_derivatives(inst, t, Q_in, k1);
   for (size_t i = 0; i < n; i++) tmp[i] = Q_in[i] + 0.5 * dt * k1[i];
-  compute_derivatives(inst, tmp, k2);
+  compute_derivatives(inst, t + 0.5 * dt, tmp, k2);
   for (size_t i = 0; i < n; i++) tmp[i] = Q_in[i] + 0.5 * dt * k2[i];
-  compute_derivatives(inst, tmp, k3);
+  compute_derivatives(inst, t + 0.5 * dt, tmp, k3);
   for (size_t i = 0; i < n; i++) tmp[i] = Q_in[i] + dt * k3[i];
-  compute_derivatives(inst, tmp, k4);
+  compute_derivatives(inst, t + dt, tmp, k4);
   for (size_t i = 0; i < n; i++)
     Q_out[i] = Q_in[i] + (dt / 6.0) * (k1[i] + 2.0*k2[i] + 2.0*k3[i] + k4[i]);
   free(buf);
@@ -1205,7 +1251,7 @@ static bool network_is_isolated_duet(GSSK_Instance *inst, size_t *out_edge,
  * otherwise Padé (3,3) for the full flow matrix.
  * Writes to Q_out (must not alias inst scratchpads).
  */
-static void idc_step_ex(GSSK_Instance *inst, const double *Q_in,
+static void idc_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
                         double *Q_out, double dt) {
   size_t n = inst->node_count;
 
@@ -1230,8 +1276,8 @@ static void idc_step_ex(GSSK_Instance *inst, const double *Q_in,
     free(A); free(f);
     return;
   }
-  build_flow_matrix(inst, Q_in, A);
-  build_forcing_vector(inst, Q_in, f);
+  build_flow_matrix(inst, t, Q_in, A);
+  build_forcing_vector(inst, t, Q_in, f);
 
   /* Phase 7 — treat processing-node contributions as additive forcing this
    * step (linearised about Q_in).  Lets IDC reproduce RK4 for v4 models. */
@@ -1240,11 +1286,11 @@ static void idc_step_ex(GSSK_Instance *inst, const double *Q_in,
     if (pf) {
       for (size_t i = 0; i < inst->node_count; i++) {
         switch (inst->nodes[i].type) {
-        case NODE_INTERACTION:  compute_interaction_node(inst, i, Q_in, pf); break;
-        case NODE_GAIN:         compute_gain_node(inst, i, Q_in, pf); break;
-        case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, i, Q_in, pf); break;
-        case NODE_SWITCH:       compute_switch_node(inst, i, Q_in, pf); break;
-        case NODE_EXCHANGE:     compute_exchange_node(inst, i, Q_in, pf); break;
+        case NODE_INTERACTION:  compute_interaction_node(inst, t, i, Q_in, pf); break;
+        case NODE_GAIN:         compute_gain_node(inst, t, i, Q_in, pf); break;
+        case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, Q_in, pf); break;
+        case NODE_SWITCH:       compute_switch_node(inst, t, i, Q_in, pf); break;
+        case NODE_EXCHANGE:     compute_exchange_node(inst, t, i, Q_in, pf); break;
         default: break;
         }
       }
@@ -1356,7 +1402,7 @@ static void emit_event(GSSK_Instance *inst, double t,
  *   Providing it avoids one redundant rk4_step_alloc call when the caller
  *   already has the endpoint (e.g. do_threshold_substep).
  */
-static double find_threshold_crossing(GSSK_Instance *inst,
+static double find_threshold_crossing(GSSK_Instance *inst, double t,
     const double *Q_before, double dt, size_t edge_idx, double *Q_cross,
     const double *Q_at_dt) {
   GSSK_EdgeInternal *e = &inst->edges[edge_idx];
@@ -1378,7 +1424,7 @@ static double find_threshold_crossing(GSSK_Instance *inst,
   if (Q_at_dt)
     memcpy(Q_b, Q_at_dt, n * sizeof(double));
   else
-    rk4_step_alloc(inst, Q_before, Q_b, dt);
+    rk4_step_alloc(inst, t, Q_before, Q_b, dt);
   double fb = Q_b[orig] - thr;
 
   double mid = 0.5 * (a + b);
@@ -1391,7 +1437,7 @@ static double find_threshold_crossing(GSSK_Instance *inst,
           ? a + (b - a) * (-fa) / denom_fp
           : 0.5 * (a + b);
 
-    rk4_step_alloc(inst, Q_before, Q_m, mid);
+    rk4_step_alloc(inst, t, Q_before, Q_m, mid);
     double fm = Q_m[orig] - thr;
 
     if (fabs(fm) < 1e-10 || (b - a) < 1e-12 * dt) break;
@@ -1464,7 +1510,7 @@ static void do_threshold_substep(GSSK_Instance *inst,
     if (iter == 0 && Q_full_step != NULL)
       memcpy(Q_trial, Q_full_step, n * sizeof(double));
     else
-      rk4_step_alloc(inst, Q_cur, Q_trial, t_rem);
+      rk4_step_alloc(inst, t_base + t_elapsed, Q_cur, Q_trial, t_rem);
 
     /* --- scan all threshold edges for crossings in [0, t_rem] ------------ */
     struct { size_t ei; double tc; int dir; } ci[GSSK_MAX_EVENTS_PER_STEP];
@@ -1488,8 +1534,8 @@ static void do_threshold_substep(GSSK_Instance *inst,
       if (was_above == is_above) continue; /* no sign change — no crossing */
 
       /* Illinois refinement; pass Q_trial as pre-computed endpoint */
-      double tc = find_threshold_crossing(inst, Q_cur, t_rem, ei,
-                                          Q_cross_t, Q_trial);
+      double tc = find_threshold_crossing(inst, t_base + t_elapsed, Q_cur,
+                                          t_rem, ei, Q_cross_t, Q_trial);
       if (n_ci < GSSK_MAX_EVENTS_PER_STEP) {
         ci[n_ci].ei  = ei;
         ci[n_ci].tc  = tc;
@@ -1545,7 +1591,7 @@ static void do_threshold_substep(GSSK_Instance *inst,
  * Uses inst scratchpads: dQ (k1), k2..k4 (existing), k5/k6/k7 (Phase 2).
  * Stages are computed through inst->tmp_state; Q_out must equal inst->tmp_state.
  */
-static void dopri5_step(GSSK_Instance *inst, const double *Q_in,
+static void dopri5_step(GSSK_Instance *inst, double t, const double *Q_in,
                         double *Q_out, double *Q_err, double h) {
   size_t n = inst->node_count;
   double *k1 = inst->dQ;      /* stage 1 derivative */
@@ -1557,37 +1603,40 @@ static void dopri5_step(GSSK_Instance *inst, const double *Q_in,
   double *k7 = inst->k7;
   double *s  = inst->tmp_state; /* staging buffer (= Q_out) */
 
-  /* Stage 1 */
-  compute_derivatives(inst, Q_in, k1);
+  /* DOPRI5 c-nodes: (0, 1/5, 3/10, 4/5, 8/9, 1, 1).  These were written down
+   * in the stage comments below long before there was a `t` for them to
+   * offset; they are now used rather than described. */
+  /* Stage 1 at c1 = 0 */
+  compute_derivatives(inst, t, Q_in, k1);
 
   /* Stage 2 at c2 = 1/5 */
   for (size_t i = 0; i < n; i++)
     s[i] = Q_in[i] + h * (1.0/5.0 * k1[i]);
-  compute_derivatives(inst, s, k2);
+  compute_derivatives(inst, t + (1.0/5.0) * h, s, k2);
 
   /* Stage 3 at c3 = 3/10 */
   for (size_t i = 0; i < n; i++)
     s[i] = Q_in[i] + h * (3.0/40.0 * k1[i] + 9.0/40.0 * k2[i]);
-  compute_derivatives(inst, s, k3);
+  compute_derivatives(inst, t + (3.0/10.0) * h, s, k3);
 
   /* Stage 4 at c4 = 4/5 */
   for (size_t i = 0; i < n; i++)
     s[i] = Q_in[i] + h * (44.0/45.0 * k1[i] - 56.0/15.0 * k2[i]
                           + 32.0/9.0  * k3[i]);
-  compute_derivatives(inst, s, k4);
+  compute_derivatives(inst, t + (4.0/5.0) * h, s, k4);
 
   /* Stage 5 at c5 = 8/9 */
   for (size_t i = 0; i < n; i++)
     s[i] = Q_in[i] + h * (19372.0/6561.0  * k1[i] - 25360.0/2187.0 * k2[i]
                           + 64448.0/6561.0 * k3[i] -   212.0/ 729.0 * k4[i]);
-  compute_derivatives(inst, s, k5);
+  compute_derivatives(inst, t + (8.0/9.0) * h, s, k5);
 
   /* Stage 6 at c6 = 1 */
   for (size_t i = 0; i < n; i++)
     s[i] = Q_in[i] + h * (9017.0/3168.0 * k1[i] -  355.0/33.0    * k2[i]
                           + 46732.0/5247.0 * k3[i] +  49.0/176.0   * k4[i]
                           - 5103.0/18656.0 * k5[i]);
-  compute_derivatives(inst, s, k6);
+  compute_derivatives(inst, t + h, s, k6);
 
   /* 5th-order propagated solution → s (= Q_out = inst->tmp_state) */
   for (size_t i = 0; i < n; i++)
@@ -1598,7 +1647,7 @@ static void dopri5_step(GSSK_Instance *inst, const double *Q_in,
                           + 11.0/84.0    * k6[i]);
 
   /* Stage 7 at c7 = 1 (derivative at accepted solution; needed for error) */
-  compute_derivatives(inst, s, k7);
+  compute_derivatives(inst, t + h, s, k7);
 
   if (Q_out != s) memcpy(Q_out, s, n * sizeof(double));
 
@@ -1650,12 +1699,12 @@ static double dopri5_new_h(double err_norm, double h,
  * Used as a heuristic for h_max: h_max ≤ 3.5 / λ_bound.
  * Returns 0 if allocation fails or all entries are zero.
  */
-static double gershgorin_spectral_bound(GSSK_Instance *inst,
+static double gershgorin_spectral_bound(GSSK_Instance *inst, double t,
                                          const double *state) {
   size_t n = inst->node_count;
   double *A = calloc(n * n, sizeof(double));
   if (!A) return 0.0;
-  build_flow_matrix(inst, state, A);
+  build_flow_matrix(inst, t, state, A);
   double lam = 0.0;
   for (size_t i = 0; i < n; i++) {
     double row = fabs(A[i * n + i]);
@@ -1739,7 +1788,7 @@ static GSSK_Status adaptive_step_ex(GSSK_Instance *inst,
 
   /* Spectral-radius heuristic for h_max */
   if (inst->config.h_max == 0.0) {
-    double lam = gershgorin_spectral_bound(inst, inst->state);
+    double lam = gershgorin_spectral_bound(inst, t_abs_base, inst->state);
     if (lam > 1e-15)
       h_max = fmin(h_max, 3.5 / lam);
   }
@@ -1765,7 +1814,10 @@ static GSSK_Status adaptive_step_ex(GSSK_Instance *inst,
     if (h > t_rem) h = t_rem;
 
     /* DOPRI5 trial step → inst->tmp_state; error → Q_err */
-    dopri5_step(inst, inst->state, inst->tmp_state, Q_err, h);
+    /* Sub-step k starts at t_abs_base + t_elapsed, NOT at t_abs_base — the
+     * stage times must advance within the step, not restart from its start. */
+    dopri5_step(inst, t_abs_base + t_elapsed, inst->state, inst->tmp_state,
+                Q_err, h);
 
     double err_norm = dopri5_err_norm(inst->state, inst->tmp_state, Q_err,
                                        n, atol, rtol);
@@ -1840,7 +1892,10 @@ static GSSK_Status adaptive_step_ex(GSSK_Instance *inst,
  * Called after every GSSK_Step() if quality_enabled.
  * ========================================================================= */
 
-static void compute_quality_pass(GSSK_Instance *inst, const double *state) {
+static void compute_quality_pass(GSSK_Instance *inst, double t, const double *state) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   size_t n = inst->node_count;
   double *M = calloc(n * n, sizeof(double));   /* system matrix (-A^T) */
   double *b = calloc(n, sizeof(double));        /* RHS */
@@ -1988,7 +2043,10 @@ static void compute_quality_pass(GSSK_Instance *inst, const double *state) {
  * Build n×n Jacobian J[i][j] = ∂(dQ_i/dt)/∂Q_j at given state.
  * Only storage nodes have non-zero rows; source/constant rows zeroed.
  */
-static void build_jacobian(GSSK_Instance *inst, const double *state, double *J) {
+static void build_jacobian(GSSK_Instance *inst, double t, const double *state, double *J) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   size_t n = inst->node_count;
   memset(J, 0, n * n * sizeof(double));
 
@@ -2209,8 +2267,11 @@ static void build_jacobian(GSSK_Instance *inst, const double *state, double *J) 
  * Compute n-vector ∂f/∂k_{edge_idx} at given state.
  * b[orig] -= dF/dk, b[tgt] += dF/dk.
  */
-static void compute_param_deriv(GSSK_Instance *inst, const double *state,
+static void compute_param_deriv(GSSK_Instance *inst, double t, const double *state,
                                  size_t edge_idx, double *b) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   size_t n = inst->node_count;
   memset(b, 0, n * sizeof(double));
   if (edge_idx >= inst->edge_count) return;
@@ -2254,7 +2315,7 @@ static void compute_param_deriv(GSSK_Instance *inst, const double *state,
  * Called at the START of GSSK_Step with the pre-step state, so S and Q
  * advance together in a first-order explicit coupled scheme.
  */
-static void sens_euler_step(GSSK_Instance *inst, const double *state,
+static void sens_euler_step(GSSK_Instance *inst, double t, const double *state,
                              double dt) {
   size_t n = inst->node_count;
   size_t m = inst->sens_param_count;
@@ -2266,10 +2327,10 @@ static void sens_euler_step(GSSK_Instance *inst, const double *state,
   double *bj = malloc(n * sizeof(double));
   if (!J || !B || !dS || !bj) { free(J); free(B); free(dS); free(bj); return; }
 
-  build_jacobian(inst, state, J);
+  build_jacobian(inst, t, state, J);
 
   for (size_t j = 0; j < m; j++) {
-    compute_param_deriv(inst, state, inst->sens_param_idx[j], bj);
+    compute_param_deriv(inst, t, state, inst->sens_param_idx[j], bj);
     for (size_t i = 0; i < n; i++) B[i * m + j] = bj[i];
   }
 
@@ -2293,8 +2354,11 @@ static void sens_euler_step(GSSK_Instance *inst, const double *state,
  * On return, out_dTr[n] holds ∂Tr[i]/∂k_j for all nodes i.
  * Requires quality accounting to be enabled and transformity to be valid.
  */
-static void compute_quality_sensitivity(GSSK_Instance *inst, size_t edge_idx,
+static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t edge_idx,
                                          double *out_dTr) {
+  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
+   * nothing may become so without a stage-time test. */
+  (void)t;
   size_t n = inst->node_count;
   memset(out_dTr, 0, n * sizeof(double));
   if (!inst->quality_enabled || !inst->transformity) return;
@@ -3518,7 +3582,7 @@ GSSK_Status GSSK_Step(GSSK_Instance *inst, double dt) {
 
   /* ---- Phase 3: forward sensitivity Euler step (pre-step, using Q(t)) ---- */
   if (inst->sens_param_count > 0 && inst->sens_matrix)
-    sens_euler_step(inst, inst->state, dt);
+    sens_euler_step(inst, inst->current_t, inst->state, dt);
 
   /* ---- Phase 5: save Q_before for per-carrier conservation (reuse idc_state) ---- */
   if (inst->carrier_count > 0)
@@ -3534,14 +3598,14 @@ GSSK_Status GSSK_Step(GSSK_Instance *inst, double dt) {
 
   /* ---- EULER: independent simple path ---- */
   if (inst->config.method == GSSK_METHOD_EULER) {
-    compute_derivatives(inst, inst->state, inst->dQ);
+    compute_derivatives(inst, inst->current_t, inst->state, inst->dQ);
     for (size_t i = 0; i < n; i++)
       inst->state[i] += inst->dQ[i] * dt;
     goto post_step;
   }
 
   /* ---- RK4 step → inst->tmp_state (ground truth for all non-EULER modes) ---- */
-  rk4_step_ex(inst, inst->state, inst->tmp_state, dt);
+  rk4_step_ex(inst, inst->current_t, inst->state, inst->tmp_state, dt);
 
   /* ---- Threshold event detection with sub-stepping (Phase 1.3) ---- */
   /* do_threshold_substep handles simultaneous events, degenerate starts,
@@ -3567,7 +3631,7 @@ GSSK_Status GSSK_Step(GSSK_Instance *inst, double dt) {
   /* ---- IDC step → inst->idc_state (AUTO / INCIPIENT) ---- */
   /* incipient_eligible is always true (Phase 1.4); idc_step_ex handles
    * all edge types (limit via linearisation, threshold via forcing). */
-  idc_step_ex(inst, inst->state, inst->idc_state, dt);
+  idc_step_ex(inst, inst->current_t, inst->state, inst->idc_state, dt);
 
   /* ---- Per-edge error estimates ---- */
   compute_per_edge_errors(inst, inst->tmp_state, inst->idc_state);
@@ -3606,7 +3670,7 @@ post_step:
 
   /* ---- Quality accounting pass ---- */
   if (inst->quality_enabled)
-    compute_quality_pass(inst, inst->state);
+    compute_quality_pass(inst, inst->current_t + dt, inst->state);
 
   inst->current_t += dt;
   inst->step_count++;
@@ -4466,7 +4530,7 @@ GSSK_Status GSSK_StepAdaptive(GSSK_Instance *inst) {
   /* h_next was updated by adaptive_step_ex (PI suggestion from last sub-step) */
 
   if (inst->quality_enabled)
-    compute_quality_pass(inst, inst->state);
+    compute_quality_pass(inst, inst->current_t, inst->state);
 
   for (size_t i = 0; i < n; i++)
     if (inst->state[i] < 0.0) inst->state[i] = 0.0;
@@ -5089,13 +5153,21 @@ GSSK_Status GSSK_RunAdjoint(GSSK_Instance *inst,
 
   memset(out_gradient, 0, m * sizeof(double));
 
-  /* Backward integration: Euler on dλ/dt = -Jᵀ·λ (reversed: Δλ = +dt·Jᵀ·λ) */
+  /* Backward integration: Euler on dλ/dt = -Jᵀ·λ (reversed: Δλ = +dt·Jᵀ·λ)
+   *
+   * traj[s] is the state at t0 + s*dt, and s runs DOWNWARD, so t_s decreases
+   * across the loop and the final iteration is at exactly t0.  This is the one
+   * place where getting the direction wrong would be invisible: the gradient
+   * would still be finite and plausible.  tests/test_stage_times.c asserts the
+   * sequence is monotonically decreasing and lands on t_start. */
   for (int s = (int)steps; s >= 0; s--) {
     double *Q_s = traj + (size_t)s * n;
+    double  t_s = t0 + (double)s * dt;
+    GSSK_PROBE(gssk_probe_on_adjoint, t_s);
 
     /* Accumulate gradient: g_j += dt · (λᵀ · B_j(Q_s)) */
     for (size_t j = 0; j < m; j++) {
-      compute_param_deriv(inst, Q_s, param_edge_indices[j], bj);
+      compute_param_deriv(inst, t_s, Q_s, param_edge_indices[j], bj);
       double c = 0.0;
       for (size_t k = 0; k < n; k++) c += lam[k] * bj[k];
       out_gradient[j] += dt * c;
@@ -5104,7 +5176,7 @@ GSSK_Status GSSK_RunAdjoint(GSSK_Instance *inst,
     if (s == 0) break;
 
     /* Adjoint step backward: λ(t-dt) = λ(t) + dt·Jᵀ(Q_s)·λ(t) */
-    build_jacobian(inst, Q_s, J);
+    build_jacobian(inst, t_s, Q_s, J);
     for (size_t k = 0; k < n; k++) {
       double sum = 0.0;
       for (size_t i = 0; i < n; i++) sum += J[i * n + k] * lam[i];
@@ -5133,7 +5205,7 @@ double GSSK_GetTransformitySensitivity(GSSK_Instance *inst,
 
   double *dTr = malloc(inst->node_count * sizeof(double));
   if (!dTr) return 0.0;
-  compute_quality_sensitivity(inst, edge_idx, dTr);
+  compute_quality_sensitivity(inst, inst->current_t, edge_idx, dTr);
   double result = dTr[node_idx];
   free(dTr);
   return result;

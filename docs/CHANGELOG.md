@@ -6,6 +6,18 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### Changed
+
+- **Simulation time is now threaded through the ODE core.** `compute_derivatives` takes an explicit `double t`, and every call site passes the correct *stage* time: classical RK4 at `t`, `t+h/2`, `t+h/2`, `t+h`; DOPRI5 at `t + c_i·h` for `c = (0, 1/5, 3/10, 4/5, 8/9, 1, 1)`. The whole derivative surface is covered, not just RK4 — both `rk4_step` variants, DOPRI5's seven stages, the IDC path (`build_flow_matrix`, `build_forcing_vector` and the processing-node helpers), `build_jacobian`, `compute_param_deriv`, `compute_quality_pass`, `compute_quality_sensitivity`, threshold sub-stepping, and the adjoint's backward integration.
+
+  **Nothing consumes `t` yet, and every trajectory is bit-identical.** `tests/expected/` is untouched and `make test` passes against it unchanged — that is the acceptance criterion, not a side note. Landing the threading on its own means any later trajectory change is attributable to the feature that uses `t` rather than to a mistake in threading it through 16 call sites and seven solver stages.
+
+  The DOPRI5 c-nodes were *already written down* — `/* Stage 2 at c2 = 1/5 */` and so on — and thrown away, because there was no `t` for them to offset. They are now used rather than described.
+
+  This exists for forcing functions, and it is the trap that feature would otherwise fall into: a waveform sampled once per **step** instead of once per **stage** is first-order while the state is fourth- or fifth-order. The run completes, the trajectory looks smooth, and the order loss is invisible without a convergence study.
+
+  `make test-stage-times` records the time the solver actually hands each derivative evaluation and asserts the sequence, rather than re-deriving the arithmetic in the test — which would just be the same mistake written twice. It covers the two sharp cases: adaptive sub-stepping, where stage 1 of sub-step 2 must be at `t + h₁` and not `t`, and the adjoint, which runs time backwards and must land on `t_start`. The recorder is compiled in only under `-DGSSK_STAGE_TIME_PROBE`, which only that target defines; it is not in `gssk.h`, not in the shipped library, and not in the WASM export list. **No public API change and no schema change.**
+
 ### Added
 
 - **Flat carrier accessors that carry no struct layout across the WASM boundary.** `GSSK_GetCarrierID`, `GSSK_GetCarrierUnit`, `GSSK_GetCarrierConserved` and `GSSK_FindCarrierIdx`, all four exported to WASM and typed in `src/gssk.d.ts`.
