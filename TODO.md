@@ -281,7 +281,10 @@ general-purpose ODE library. The wedge is:
       edge logic explanations, emergy accounting, steady-state derivation,
       cross-carrier sensitivity, analytical formula vs simulation output.
 - [x] Annotated JSON: `examples/household_model_annotated.json` — `_note`
-      fields on every node, edge and config block (kernel ignores unknown keys).
+      fields on every node, edge and config block. The kernel no longer ignores
+      unknown keys — since `h8b-reject-unknown-model-keys` an unrecognised key
+      is a `GSSK_ERR_SCHEMA_VIOLATION` — but `_`-prefixed keys are accepted at
+      every level, which is what makes these annotations legal.
 - [x] Notebook: `examples/household_notebook.ipynb` — uses CLI + CSV;
       sections: multi-carrier time series, steady-state verification,
       cross-carrier sensitivity sweep (k_grocery → pantry), summary table.

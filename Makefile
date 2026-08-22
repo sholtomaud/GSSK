@@ -65,7 +65,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-node-types test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-node-types test-unknown-keys test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -211,6 +211,20 @@ $(TARGET_TEST_NODETYPE): $(TEST_DIR)/test_node_type_validation.c $(TARGET_LIB)
 test-node-types: all $(TARGET_TEST_NODETYPE)
 	@echo "Running node type validation tests..."
 	@./$(TARGET_TEST_NODETYPE)
+
+# Unknown key rejection — a key the parser does not recognise must be an error,
+# not silence. Same hazard class as the node-type fallback: a model authored
+# against a kernel with a feature this one lacks otherwise runs to completion
+# and reports success while producing a different trajectory from the one its
+# JSON describes.
+TARGET_TEST_UNKNOWNKEY = $(BIN_DIR)/test_unknown_keys
+
+$(TARGET_TEST_UNKNOWNKEY): $(TEST_DIR)/test_unknown_keys.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-unknown-keys: all $(TARGET_TEST_UNKNOWNKEY)
+	@echo "Running unknown key tests..."
+	@./$(TARGET_TEST_UNKNOWNKEY)
 
 # Carrier accessors — the flat getters that keep GSSK_Carrier's struct layout
 # from crossing the WASM boundary. Also asserts the flat path and
@@ -471,7 +485,7 @@ wasm-container: container-image-wasm
 
 # Full native build + both test suites under real GCC with -Werror.
 test-linux: container-image-linux
-	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics'
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics'
 
 # Same under Linux clang, the other half of CI's build-native matrix.
 test-linux-clang: container-image-linux

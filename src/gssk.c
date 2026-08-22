@@ -301,6 +301,167 @@ static bool is_primitive_node_type(const char *s) {
          strcmp(s, "switch")       == 0;
 }
 
+/* =========================================================================
+ * Unknown-key rejection
+ *
+ * gssk.schema.json already sets additionalProperties:false at the root and on
+ * Node, Edge, EdgeParams and Config, and permits ^_ annotation keys via
+ * patternProperties.  The kernel did not agree: it read the keys it knew and
+ * ignored the rest in silence, so a model authored against a kernel with a
+ * feature this one lacks -- `forcing`, say -- loaded, ran to completion and
+ * reported success while producing a DIFFERENT trajectory from the one its
+ * JSON describes.  Its content hash says "forced", its output says
+ * "constant", and nothing reconciles the two.  For a kernel whose case rests
+ * on reproducibility that is the worst available failure mode: not a crash, a
+ * quietly different model.  This is the hazard ADR 0004 left open and that
+ * reject-unknown-node-types closed for node `type`; a wrong key is the same
+ * mistake one level up.
+ *
+ * EVERY SET BELOW MUST BE UPDATED WHEN A KEY IS ADDED TO THE PARSER OR THE
+ * SERIALISER.  A set that drifts from the parser reintroduces this bug in the
+ * opposite direction -- rejecting models that are in fact valid -- which is
+ * worse, because it breaks working models rather than broken ones.  The
+ * companion check is `make test-schema`, which validates the same corpora
+ * against gssk.schema.json; the two must be edited together.
+ * ========================================================================= */
+
+/* Root.  All seven the parser reads, plus `mutation_log`, which GSSK_Init
+ * deliberately does NOT restore from (it restores from snapshot.mutation_log)
+ * but which the schema documents as an archival copy. */
+static const char *const ROOT_KEYS[] = {
+  "metadata", "carriers", "nodes", "edges", "config", "archetypes",
+  "mutation_log", "snapshot"
+};
+
+/* Node.  `visual` is not read by the kernel at all -- the schema declares it
+ * as UI layout hints with additionalProperties:true -- but it is part of the
+ * published surface, so rejecting it would break every authoring UI. */
+static const char *const NODE_KEYS[] = {
+  "id", "type", "value", "carrier", "params", "quality_input",
+  "output_mode", "visual"
+};
+
+/* Edge.  `active` is here because build_topology_json EMITS it for a
+ * deactivated edge.  Serialised output that the parser will not take back is
+ * exactly what this check exists to catch, and the first thing it caught. */
+static const char *const EDGE_KEYS[] = {
+  "id", "origin", "target", "logic", "params", "carrier", "output_mode",
+  "coupled_edge", "active", "visual"
+};
+
+static const char *const EDGE_PARAM_KEYS[] = {
+  "k", "control_node", "numerator_node", "threshold"
+};
+
+static const char *const CONFIG_KEYS[] = {
+  "t_start", "t_end", "dt", "method", "solver_tolerance",
+  "rel_tol", "abs_tol", "h_min", "h_max"
+};
+
+#define GSSK_NELEMS(a) (sizeof(a) / sizeof((a)[0]))
+
+/* Reports the first unrecognised key in `obj`, or NULL if every key is known.
+ *
+ * A key beginning with '_' is accepted at every level, unconditionally.  This
+ * is load-bearing, not a courtesy: examples/household_model_annotated.json and
+ * examples/price_dynamics_model.json carry `_note` and `_mechanism` blocks
+ * throughout, and gssk.schema.json documents the convention with
+ * patternProperties.  Annotations are how a model explains itself, which is
+ * the whole point of the Phase G archival story. */
+static const char *first_unknown_key(const cJSON *obj,
+                                     const char *const *allowed, size_t n) {
+  if (!cJSON_IsObject(obj)) return NULL;
+  for (const cJSON *it = obj->child; it; it = it->next) {
+    if (!it->string) continue;
+    if (it->string[0] == '_') continue;
+    bool known = false;
+    for (size_t i = 0; i < n && !known; i++)
+      if (strcmp(it->string, allowed[i]) == 0) known = true;
+    if (!known) return it->string;
+  }
+  return NULL;
+}
+
+/* An edge's id if it has one, otherwise its position, so the message always
+ * points at something the author can find.  Written into `buf` because the
+ * index form has no storage of its own. */
+static const char *element_label(const cJSON *obj, size_t idx,
+                                 const char *kind, char *buf, size_t cap) {
+  const cJSON *id = cJSON_GetObjectItem(obj, "id");
+  if (cJSON_IsString(id) && id->valuestring && id->valuestring[0])
+    snprintf(buf, cap, "%s '%s'", kind, id->valuestring);
+  else
+    snprintf(buf, cap, "%s at index %zu", kind, idx);
+  return buf;
+}
+
+/* Validates node keys, and the keys of any object the node owns.  Shared by
+ * GSSK_Init and GSSK_AddNode -- they are separate parsers, which is why
+ * test_node_type_validation.c has to cover both, and the same applies here. */
+static bool node_keys_ok(const cJSON *node, size_t idx,
+                         char *err, size_t errcap) {
+  char label[96];
+  const char *bad = first_unknown_key(node, NODE_KEYS, GSSK_NELEMS(NODE_KEYS));
+  if (bad) {
+    snprintf(err, errcap, "Schema Error: %s has unknown key '%s'.",
+             element_label(node, idx, "Node", label, sizeof(label)), bad);
+    return false;
+  }
+  return true;
+}
+
+static bool edge_keys_ok(const cJSON *edge, size_t idx,
+                         char *err, size_t errcap) {
+  char label[96];
+  const char *bad = first_unknown_key(edge, EDGE_KEYS, GSSK_NELEMS(EDGE_KEYS));
+  if (bad) {
+    snprintf(err, errcap, "Schema Error: %s has unknown key '%s'.",
+             element_label(edge, idx, "Edge", label, sizeof(label)), bad);
+    return false;
+  }
+  const cJSON *params = cJSON_GetObjectItem(edge, "params");
+  bad = first_unknown_key(params, EDGE_PARAM_KEYS, GSSK_NELEMS(EDGE_PARAM_KEYS));
+  if (bad) {
+    snprintf(err, errcap, "Schema Error: %s params has unknown key '%s'.",
+             element_label(edge, idx, "Edge", label, sizeof(label)), bad);
+    return false;
+  }
+  return true;
+}
+
+/* One pass over the whole model, run before anything is allocated, so a
+ * rejection cannot leave a half-built instance behind. */
+static bool model_keys_ok(const cJSON *root, char *err, size_t errcap) {
+  const char *bad = first_unknown_key(root, ROOT_KEYS, GSSK_NELEMS(ROOT_KEYS));
+  if (bad) {
+    snprintf(err, errcap, "Schema Error: model has unknown top-level key '%s'.",
+             bad);
+    return false;
+  }
+
+  const cJSON *nodes = cJSON_GetObjectItem(root, "nodes");
+  if (cJSON_IsArray(nodes)) {
+    size_t i = 0;
+    for (const cJSON *n = nodes->child; n; n = n->next, i++)
+      if (!node_keys_ok(n, i, err, errcap)) return false;
+  }
+
+  const cJSON *edges = cJSON_GetObjectItem(root, "edges");
+  if (cJSON_IsArray(edges)) {
+    size_t i = 0;
+    for (const cJSON *e = edges->child; e; e = e->next, i++)
+      if (!edge_keys_ok(e, i, err, errcap)) return false;
+  }
+
+  const cJSON *config = cJSON_GetObjectItem(root, "config");
+  bad = first_unknown_key(config, CONFIG_KEYS, GSSK_NELEMS(CONFIG_KEYS));
+  if (bad) {
+    snprintf(err, errcap, "Schema Error: config has unknown key '%s'.", bad);
+    return false;
+  }
+  return true;
+}
+
 /* Decodes a primitive type string.  The NODE_STORAGE tail is a decode default,
  * not a fallback for unknown input: callers validate with
  * is_primitive_node_type (or find_archetype) before getting here. */
@@ -2549,6 +2710,15 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     return GSSK_ERR_INVALID_JSON;
   }
 
+  /* ---- Key validation, before anything is allocated ---- */
+  /* Run first so a rejection cannot leave a half-built instance behind, and
+   * so the diagnostic names the authoring mistake rather than whatever
+   * downstream check happens to trip over its consequence. */
+  if (!model_keys_ok(root, inst->error_msg, sizeof(inst->error_msg))) {
+    cJSON_Delete(root);
+    return GSSK_ERR_SCHEMA_VIOLATION;
+  }
+
   GSSK_Status status = GSSK_SUCCESS;
 
   /* ---- 0. Metadata (v3) ---- */
@@ -3787,6 +3957,16 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
     return GSSK_ERR_INVALID_JSON;
   }
 
+  /* Same check GSSK_Init runs, on the same key set.  AddNode is a separate
+   * parser, so it needs its own call site; this is why
+   * test_node_type_validation.c covers both paths and why test_unknown_keys.c
+   * does too.  Before the realloc, so a rejected add is a true no-op. */
+  if (!node_keys_ok(node, inst->node_count,
+                    inst->error_msg, sizeof(inst->error_msg))) {
+    cJSON_Delete(node);
+    return GSSK_ERR_SCHEMA_VIOLATION;
+  }
+
   cJSON *id   = cJSON_GetObjectItem(node, "id");
   cJSON *type = cJSON_GetObjectItem(node, "type");
   cJSON *val  = cJSON_GetObjectItem(node, "value");
@@ -3924,6 +4104,15 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
     snprintf(inst->error_msg, sizeof(inst->error_msg),
              "GSSK_AddEdge: JSON parse error");
     return GSSK_ERR_INVALID_JSON;
+  }
+
+  /* Covers the edge object and its `params`, as GSSK_Init does.  Joins the
+   * origin/target/logic/k/numerator_node checks that already run before the
+   * realloc, so a rejected add leaves the instance exactly as it was. */
+  if (!edge_keys_ok(edge, inst->edge_count,
+                    inst->error_msg, sizeof(inst->error_msg))) {
+    cJSON_Delete(edge);
+    return GSSK_ERR_SCHEMA_VIOLATION;
   }
 
   cJSON *origin    = cJSON_GetObjectItem(edge, "origin");
