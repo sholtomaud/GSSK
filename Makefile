@@ -227,8 +227,17 @@ test-forcing: all $(TARGET_TEST_FORCING)
 # WASM forcing parity — requirement 3: sin/exp must stay in the ONE pinned
 # artifact and must not silently differ from native. The native binary writes
 # its evaluator's answers to JSON; the JS side reads them back and compares
-# bit-for-bit through the built dist/gssk.js. Needs `make wasm` (or
-# `make wasm-container`) to have produced dist/, and a node on PATH.
+# through the built dist/gssk.js. Needs `make wasm` (or `make wasm-container`)
+# to have produced dist/.
+#
+# NODE resolution, and why it is not just `node`. Under the emsdk CI action,
+# PATH contains the emsdk root, and that directory holds a SUBDIRECTORY named
+# `node`. A bare `node` resolves to the directory and the shell reports
+# "Permission denied" — which reads like a sandbox problem and is not one.
+# emsdk exports EMSDK_NODE pointing at the real binary, so prefer it. Override
+# with `make test-forcing-wasm NODE=/path/to/node` if neither applies.
+NODE ?= $(if $(EMSDK_NODE),$(EMSDK_NODE),node)
+
 TARGET_DUMP_FORCING = $(BIN_DIR)/dump_forcing_native
 
 $(TARGET_DUMP_FORCING): $(TEST_DIR)/dump_forcing_native.c $(TARGET_LIB)
@@ -238,7 +247,11 @@ test-forcing-wasm: all $(TARGET_DUMP_FORCING)
 	@mkdir -p tests/results
 	@./$(TARGET_DUMP_FORCING) tests/results/forcing_native.json
 	@test -f $(DIST_DIR)/gssk.js || { echo "dist/gssk.js missing — run 'make wasm' or 'make wasm-container' first"; exit 1; }
-	@node tests/wasm/forcing_parity.cjs
+	@command -v $(NODE) >/dev/null 2>&1 || { \
+		echo "node not found or not executable: $(NODE)"; \
+		echo "  set EMSDK_NODE, or run: make test-forcing-wasm NODE=/path/to/node"; \
+		exit 1; }
+	@$(NODE) tests/wasm/forcing_parity.cjs
 
 # Stage times — the solver must hand each derivative evaluation the right time.
 # Pinned BEFORE anything consumes t, so the rest of the suite can hold "nothing
