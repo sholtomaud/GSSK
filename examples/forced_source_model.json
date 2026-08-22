@@ -1,0 +1,63 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "forced-source",
+    "description": "Phase H — Odum's forcing functions (Systems Ecology Fig. 7-2) as ONE waveform vocabulary attached in TWO places. A sinusoidal solar source drives a producer; a square-wave harvest drains it; a step change in the drain's rate arrives partway through the run."
+  },
+
+  "_why_one_vocabulary": "Odum draws eleven forcing annotations, but they are not eleven mechanisms. They are a node-value versus edge-rate distinction crossed with a carrier distinction, and GSSK already models carriers as Position 1 on nodes and edges. So the eleven collapse to one vocabulary times two attachment points: forcing on a NODE drives its held value (Odum X/N, a force), forcing on an EDGE drives its rate k (Odum J, a flow). See docs/adr/0006.",
+
+  "_why_stage_times_matter": "Every waveform here is evaluated at the RK4 stage times, not once per step. Sampling once per step would leave the forcing first-order while the state is fourth-order — the run would still complete and the trajectory would still look smooth. tests/test_forcing.c catches it with a convergence study: this model's shape gives ~16x error reduction per halving of dt, and ~2x if the forcing is sampled per step.",
+
+  "carriers": [
+    { "id": "energy", "unit": "kcal/m2/day", "conserved": true }
+  ],
+
+  "nodes": [
+    { "id": "sun", "type": "source", "value": 1.0, "carrier": "energy",
+      "quality_input": 1.0,
+      "forcing": {
+        "waveform": "sine",
+        "mean": 200.0,
+        "amplitude": 150.0,
+        "period": 365.0,
+        "phase": 91.25,
+        "min": 0.0
+      },
+      "_note": "The annual solar cycle. phase is a TIME offset in days and is SUBTRACTED, so 91.25 (a quarter period) delays the peak to midsummer at t=182.5 rather than t=91.25. min:0 clamps the winter trough at zero, because insolation does not go negative — the clamp is applied after the formula, not folded into it." },
+
+    { "id": "producer", "type": "storage", "value": 100.0, "carrier": "energy",
+      "_note": "A storage node CANNOT carry a forcing block: its value is the integral of its flows, so forcing it is a contradiction. GSSK_Init rejects it rather than ignoring it." },
+
+    { "id": "harvest", "type": "sink", "value": 0.0, "carrier": "energy" }
+  ],
+
+  "edges": [
+    { "id": "photosynthesis", "origin": "sun", "target": "producer",
+      "carrier": "energy", "logic": "linear", "params": { "k": 0.25 },
+      "_note": "Unforced. flow = k x sun(t), so the seasonal signal reaches the producer through the SOURCE's value — Odum's X/N attachment." },
+
+    { "id": "cropping", "origin": "producer", "target": "harvest",
+      "carrier": "energy", "logic": "linear", "params": { "k": 0.02 },
+      "forcing": {
+        "waveform": "square",
+        "mean": 0.02,
+        "amplitude": 0.02,
+        "period": 30.0,
+        "duty": 0.2
+      },
+      "_note": "Odum's J attachment: forcing on an EDGE drives its rate k. A six-day cropping window every thirty days — k alternates between mean+amplitude (0.04) and mean-amplitude (0.0), so the drain is fully off between harvests. params.k is what an unforced edge would use and is ignored while forcing is present." },
+
+    { "id": "respiration", "origin": "producer", "target": "harvest",
+      "carrier": "energy", "logic": "linear", "params": { "k": 0.05 },
+      "forcing": {
+        "waveform": "step",
+        "t_on": 180.0,
+        "v0": 0.05,
+        "v1": 0.09
+      },
+      "_note": "A step change in maintenance cost at day 180 — a regime shift, Odum's step forcing. Before t_on the rate is v0; at and after t_on it is v1. The boundary is closed on the right." }
+  ],
+
+  "config": { "t_start": 0, "t_end": 730, "dt": 0.5, "method": "rk4" }
+}

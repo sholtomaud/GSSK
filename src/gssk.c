@@ -35,6 +35,10 @@
  * count against this limit. */
 #define GSSK_MAX_EVENTS_PER_STEP 8
 
+/* Phase H — forcing.  Defined here rather than relying on M_PI, which is not
+ * in C99's <math.h> and disappears under -std=c99 on glibc. */
+#define GSSK_PI 3.14159265358979323846
+
 /* =========================================================================
  * Internal types
  * ========================================================================= */
@@ -48,6 +52,34 @@ typedef enum {
   NODE_SWITCH        /* Phase 7: digital switching box */
 } GSSK_NodeType;
 typedef enum { OUTPUT_PARTITION, OUTPUT_REPLICATE } GSSK_OutputMode;
+
+/* Phase H — forcing.  One parameter block serves the whole vocabulary; each
+ * waveform reads the fields it needs and ignores the rest.  Kept flat rather
+ * than a union so that serialisation, the schema and the evaluator all see the
+ * same shape, and so adding a waveform cannot silently alias another's field.
+ *
+ * `latched` / `has_latch` exist only for JITTER: the draw happens once per
+ * ACCEPTED step, never per stage.  A fresh draw per stage would make the
+ * trajectory depend on solver internals — the same model giving different
+ * answers under rk4 and dopri5 for reasons that are not physics. */
+typedef struct {
+  GSSK_ForcingKind kind;
+  double t_on;       /* onset; defaults to config.t_start (see has_t_on) */
+  bool   has_t_on;   /* false = t_on not authored, fill from config.t_start */
+  double v0, v1;     /* step: before/after.  ramp/exponential: v0 = start */
+  double area;       /* impulse: integral, held constant across dt */
+  double slope;      /* ramp */
+  double rate;       /* exponential */
+  double period;     /* sawtooth/square/sine */
+  double phase;      /* TIME offset, subtracted; positive delays */
+  double duty;       /* square: fraction of the period spent high */
+  double mean;       /* sawtooth/square/sine/jitter: centre */
+  double amplitude;  /* sawtooth/square/sine/jitter: half-range */
+  double min, max;   /* clamp, applied after the formula */
+  bool   has_min, has_max;
+  double latched;    /* jitter: value drawn for the current step */
+  bool   has_latch;
+} GSSK_ForcingInternal;
 
 typedef struct {
   char           id[64];
@@ -72,6 +104,11 @@ typedef struct {
    * never have to infer membership from the "{instance}__{member}" id. */
   int     composite_idx;  /* index into inst->composites[]; -1 = declared directly */
   char    role[64];       /* archetype template id ("body"/"gate"/…); "" if none */
+  /* Phase H — drives this node's HELD VALUE (Odum X / N, a force).  Only
+   * meaningful for nodes that hold rather than accumulate: forcing a storage
+   * node is rejected at parse time, because a storage node's value is the
+   * integral of its flows and forcing it is a contradiction. */
+  GSSK_ForcingInternal forcing;
 } GSSK_NodeInternal;
 
 typedef struct {
@@ -87,6 +124,8 @@ typedef struct {
   GSSK_OutputMode output_mode;
   bool            active;
   char            carrier[32];   /* Odum Position 1 carrier label — metadata only */
+  /* Phase H — drives this edge's RATE k (Odum J, a flow). */
+  GSSK_ForcingInternal forcing;
 } GSSK_EdgeInternal;
 
 /* Internal event record (Phase 1.3) */
@@ -256,6 +295,13 @@ struct GSSK_Instance {
   /* Phase 5 — Multi-Carrier */
   GSSK_Carrier *carriers;            /* carrier definitions from "carriers" array */
   size_t        carrier_count;
+  /* Phase H — number of nodes plus edges declaring `forcing`.  Zero for every
+   * model that does not use the feature, which is what lets the whole thing
+   * cost one predicate on those models. */
+  size_t        forcing_count;
+  /* Scratch holding the state with node forcing applied, so compute_derivatives
+   * can keep taking a const state.  Allocated only when forcing_count > 0. */
+  double       *forced_state;
   double       *carrier_cons_error;  /* per-carrier conservation error, last step */
 
   /* Phase 8 — Archetype System */
@@ -338,7 +384,7 @@ static const char *const ROOT_KEYS[] = {
  * published surface, so rejecting it would break every authoring UI. */
 static const char *const NODE_KEYS[] = {
   "id", "type", "value", "carrier", "params", "quality_input",
-  "output_mode", "visual"
+  "output_mode", "visual", "forcing"
 };
 
 /* Edge.  `active` is here because build_topology_json EMITS it for a
@@ -346,7 +392,7 @@ static const char *const NODE_KEYS[] = {
  * exactly what this check exists to catch, and the first thing it caught. */
 static const char *const EDGE_KEYS[] = {
   "id", "origin", "target", "logic", "params", "carrier", "output_mode",
-  "coupled_edge", "active", "visual"
+  "coupled_edge", "active", "visual", "forcing"
 };
 
 static const char *const EDGE_PARAM_KEYS[] = {
@@ -463,6 +509,315 @@ static bool model_keys_ok(const cJSON *root, char *err, size_t errcap) {
 }
 
 /* =========================================================================
+ * Phase H — parsing the forcing block
+ * ========================================================================= */
+
+static const char *const FORCING_KIND_NAMES[] = {
+  "none", "step", "impulse", "ramp", "sawtooth", "square",
+  "sine", "exponential", "jitter"
+};
+
+static int parse_forcing_kind(const char *s) {
+  if (!s) return -1;
+  for (size_t i = 0; i < sizeof(FORCING_KIND_NAMES) / sizeof(FORCING_KIND_NAMES[0]); i++)
+    if (strcmp(s, FORCING_KIND_NAMES[i]) == 0) return (int)i;
+  return -1;
+}
+
+static const char *forcing_kind_str(GSSK_ForcingKind k) {
+  return ((size_t)k < sizeof(FORCING_KIND_NAMES) / sizeof(FORCING_KIND_NAMES[0]))
+         ? FORCING_KIND_NAMES[k] : "none";
+}
+
+/* Accepted keys inside a `forcing` object.  Same rule and the same reason as
+ * the h8b key sets: this MUST be updated when a waveform parameter is added,
+ * because a set that drifts from the parser rejects valid models. */
+static const char *const FORCING_KEYS[] = {
+  "waveform", "t_on", "v0", "v1", "area", "slope", "rate",
+  "period", "phase", "duty", "mean", "amplitude", "min", "max"
+};
+
+static double json_num(const cJSON *o, const char *key, double dflt) {
+  const cJSON *it = cJSON_GetObjectItem(o, key);
+  return cJSON_IsNumber(it) ? it->valuedouble : dflt;
+}
+
+/* Parses one `forcing` object into `out`.  Returns false and writes a message
+ * naming the container on any error.  `where` is a caller-formatted label such
+ * as "Node 'sun'" so the diagnostic points at the element an authoring UI has
+ * to highlight. */
+static bool parse_forcing(const cJSON *fo, const char *where,
+                          GSSK_ForcingInternal *out, char *err, size_t errcap) {
+  memset(out, 0, sizeof(*out));
+  out->kind = GSSK_FORCING_NONE;
+  if (!fo) return true;
+
+  if (!cJSON_IsObject(fo)) {
+    snprintf(err, errcap, "Schema Error: %s forcing must be an object.", where);
+    return false;
+  }
+
+  const char *bad = first_unknown_key(fo, FORCING_KEYS, GSSK_NELEMS(FORCING_KEYS));
+  if (bad) {
+    snprintf(err, errcap, "Schema Error: %s forcing has unknown key '%s'.",
+             where, bad);
+    return false;
+  }
+
+  const cJSON *w = cJSON_GetObjectItem(fo, "waveform");
+  if (!cJSON_IsString(w) || !w->valuestring) {
+    snprintf(err, errcap,
+             "Schema Error: %s forcing is missing a 'waveform' string.", where);
+    return false;
+  }
+  int kind = parse_forcing_kind(w->valuestring);
+  if (kind <= 0) {  /* "none" is not an authorable waveform either */
+    snprintf(err, errcap,
+             "Schema Error: %s forcing has unknown waveform '%s'. Expected one of: "
+             "step, impulse, ramp, sawtooth, square, sine, exponential, jitter.",
+             where, w->valuestring);
+    return false;
+  }
+  out->kind = (GSSK_ForcingKind)kind;
+
+  /* t_on defaults to config.t_start, so "from the beginning" needs no
+   * ceremony — but `config` is parsed AFTER nodes and edges, so t_start is not
+   * known yet. Record whether it was authored and let
+   * apply_forcing_t_on_defaults fill the rest in once config is read. Reading
+   * inst->config.t_start here would silently give 0 for every model whose run
+   * does not start at zero. */
+  out->has_t_on  = cJSON_IsNumber(cJSON_GetObjectItem(fo, "t_on"));
+  out->t_on      = json_num(fo, "t_on", 0.0);
+  out->v0        = json_num(fo, "v0", 0.0);
+  out->v1        = json_num(fo, "v1", 0.0);
+  out->area      = json_num(fo, "area", 0.0);
+  out->slope     = json_num(fo, "slope", 0.0);
+  out->rate      = json_num(fo, "rate", 0.0);
+  out->period    = json_num(fo, "period", 0.0);
+  out->phase     = json_num(fo, "phase", 0.0);
+  out->duty      = json_num(fo, "duty", 0.5);
+  out->mean      = json_num(fo, "mean", 0.0);
+  out->amplitude = json_num(fo, "amplitude", 0.0);
+
+  const cJSON *mn = cJSON_GetObjectItem(fo, "min");
+  const cJSON *mx = cJSON_GetObjectItem(fo, "max");
+  if (cJSON_IsNumber(mn)) { out->has_min = true; out->min = mn->valuedouble; }
+  if (cJSON_IsNumber(mx)) { out->has_max = true; out->max = mx->valuedouble; }
+  if (out->has_min && out->has_max && out->min > out->max) {
+    snprintf(err, errcap,
+             "Schema Error: %s forcing has min (%g) above max (%g).",
+             where, out->min, out->max);
+    return false;
+  }
+
+  /* A periodic waveform with no period is not a slow waveform, it is an
+   * authoring mistake — and silently treating it as a constant is exactly the
+   * quiet-wrong-model failure h8b exists to remove. */
+  if ((out->kind == GSSK_FORCING_SINE || out->kind == GSSK_FORCING_SQUARE ||
+       out->kind == GSSK_FORCING_SAWTOOTH) && !(out->period > 0.0)) {
+    snprintf(err, errcap,
+             "Schema Error: %s forcing waveform '%s' requires a positive 'period'.",
+             where, forcing_kind_str(out->kind));
+    return false;
+  }
+  if (out->kind == GSSK_FORCING_SQUARE && (out->duty < 0.0 || out->duty > 1.0)) {
+    snprintf(err, errcap,
+             "Schema Error: %s forcing 'duty' must be in [0, 1], got %g.",
+             where, out->duty);
+    return false;
+  }
+  return true;
+}
+
+/* Fills in the t_on default for every forcing block that did not author one.
+ * Must run after `config` is parsed and before the first evaluation. */
+static void apply_forcing_t_on_defaults(GSSK_Instance *inst) {
+  double t0 = inst->config.t_start;
+  for (size_t i = 0; i < inst->node_count; i++)
+    if (inst->nodes[i].forcing.kind != GSSK_FORCING_NONE &&
+        !inst->nodes[i].forcing.has_t_on)
+      inst->nodes[i].forcing.t_on = t0;
+  for (size_t i = 0; i < inst->edge_count; i++)
+    if (inst->edges[i].forcing.kind != GSSK_FORCING_NONE &&
+        !inst->edges[i].forcing.has_t_on)
+      inst->edges[i].forcing.t_on = t0;
+}
+
+/* =========================================================================
+ * Phase H — the forcing evaluator
+ *
+ * ONE implementation.  GSSK_EvaluateNodeForcing / GSSK_EvaluateEdgeForcing and
+ * the derivative path all land here, so a consumer rendering a curve and the
+ * kernel integrating it cannot disagree.  That is the whole reason the
+ * evaluator is exposed at all: without it consumers reimplement the formulas,
+ * and their reimplementation diverges.
+ * ========================================================================= */
+
+/* frac(x) = x - floor(x), so it is well-defined for negative tau rather than
+ * inheriting fmod's sign.  This is half of the phase convention. */
+static double forcing_frac(double x) { return x - floor(x); }
+
+/* Evaluate `f` at absolute time t.  `dt_nominal` is config.dt, used only as
+ * the impulse width — taken from the model rather than from the solver's
+ * current step so that an adaptive sub-step cannot change the impulse's
+ * integral. */
+static double eval_forcing(const GSSK_ForcingInternal *f, double t,
+                           double dt_nominal, double fallback) {
+  if (!f || f->kind == GSSK_FORCING_NONE) return fallback;
+
+  double tau = t - f->t_on;
+  double v;
+
+  switch (f->kind) {
+  case GSSK_FORCING_STEP:
+    v = (t < f->t_on) ? f->v0 : f->v1;
+    break;
+
+  case GSSK_FORCING_IMPULSE: {
+    /* Area-normalised over one nominal dt: height = area/w on a window of
+     * width w, so the integral is `area` whatever dt is.  A bare amplitude
+     * would make the delivered quantity depend on the step size, which is a
+     * discretisation artefact masquerading as physics. */
+    double w = (dt_nominal > 0.0) ? dt_nominal : 1.0;
+    v = (tau >= 0.0 && tau < w) ? (f->area / w) : 0.0;
+    break;
+  }
+
+  case GSSK_FORCING_RAMP:
+    v = (t < f->t_on) ? f->v0 : f->v0 + f->slope * tau;
+    break;
+
+  case GSSK_FORCING_SAWTOOTH:
+    v = (f->period > 0.0)
+        ? f->mean + f->amplitude * (2.0 * forcing_frac((tau - f->phase) / f->period) - 1.0)
+        : f->mean;
+    break;
+
+  case GSSK_FORCING_SQUARE:
+    v = (f->period > 0.0 &&
+         forcing_frac((tau - f->phase) / f->period) < f->duty)
+        ? f->mean + f->amplitude
+        : f->mean - f->amplitude;
+    break;
+
+  case GSSK_FORCING_SINE:
+    v = (f->period > 0.0)
+        ? f->mean + f->amplitude * sin(2.0 * GSSK_PI * (tau - f->phase) / f->period)
+        : f->mean;
+    break;
+
+  case GSSK_FORCING_EXPONENTIAL:
+    v = (t < f->t_on) ? f->v0 : f->v0 * exp(f->rate * tau);
+    break;
+
+  case GSSK_FORCING_JITTER:
+    /* Never draws here.  The draw is latched once per accepted step by
+     * latch_forcing_jitter; evaluating must be free of side effects, or
+     * asking the model what it is doing would change what it does. */
+    v = f->has_latch ? f->latched : f->mean;
+    break;
+
+  case GSSK_FORCING_NONE:
+  default:
+    return fallback;
+  }
+
+  /* Clamp last, and only to bounds the model declared. */
+  if (f->has_min && v < f->min) v = f->min;
+  if (f->has_max && v > f->max) v = f->max;
+  return v;
+}
+
+/* The node's value at time t: its forcing if it has one, else its held value.
+ * `state` rather than initial_value, so an unforced node still reads whatever
+ * the solver stage is carrying. */
+static double forced_node_value(const GSSK_Instance *inst, size_t i,
+                                const double *state, double t) {
+  return eval_forcing(&inst->nodes[i].forcing, t, inst->config.dt, state[i]);
+}
+
+/* The edge's rate at time t. */
+static double forced_edge_k(const GSSK_Instance *inst, const GSSK_EdgeInternal *e,
+                            double t) {
+  return eval_forcing(&e->forcing, t, inst->config.dt, e->k);
+}
+
+/* Writes the forced values into the LIVE state vector for every forced node.
+ *
+ * The derivative path substitutes forcing into a scratch copy, which is enough
+ * to integrate correctly — but it leaves inst->state showing the node's
+ * DECLARED value, so GSSK_GetState and the CSV would report a sine-forced
+ * source as a flat line while the storage it drives visibly oscillates. The
+ * physics would be right and the output would be misleading, which is its own
+ * kind of quietly-wrong.
+ *
+ * Safe because only nodes pinned to dQ/dt = 0 can be forced (storage forcing
+ * is rejected at parse time), so nothing here overwrites an integrated value.
+ * Called after each accepted step and once at init. */
+static void sync_forced_node_state(GSSK_Instance *inst, double t) {
+  if (inst->forcing_count == 0) return;
+  for (size_t i = 0; i < inst->node_count; i++)
+    if (inst->nodes[i].forcing.kind != GSSK_FORCING_NONE)
+      inst->state[i] = eval_forcing(&inst->nodes[i].forcing, t,
+                                    inst->config.dt, inst->state[i]);
+}
+
+/* Latches one jitter draw per ACCEPTED step.
+ *
+ * Requirement 2 of the upstream proposal, and the subtle one. A fresh draw per
+ * RK4 stage makes the trajectory depend on solver internals: the same model
+ * gives different answers under rk4 and dopri5, for reasons that are not
+ * physics. It must also not draw on a REJECTED adaptive sub-step, or the
+ * stream position — and therefore the whole trajectory — would depend on the
+ * error controller's search path.
+ *
+ * Draws from the instance-owned SplitMix64 stream (GSSK_SetSeed /
+ * GSSK_NextRandom), never libc rand(), so a forced model stays reproducible
+ * and a snapshot round-trip resumes the same sequence. */
+static void latch_forcing_jitter(GSSK_Instance *inst) {
+  if (inst->forcing_count == 0) return;
+  for (size_t i = 0; i < inst->node_count; i++) {
+    GSSK_ForcingInternal *f = &inst->nodes[i].forcing;
+    if (f->kind != GSSK_FORCING_JITTER) continue;
+    f->latched   = f->mean + f->amplitude * (2.0 * GSSK_NextRandomUniform(inst, 0.0, 1.0) - 1.0);
+    f->has_latch = true;
+  }
+  for (size_t i = 0; i < inst->edge_count; i++) {
+    GSSK_ForcingInternal *f = &inst->edges[i].forcing;
+    if (f->kind != GSSK_FORCING_JITTER) continue;
+    f->latched   = f->mean + f->amplitude * (2.0 * GSSK_NextRandomUniform(inst, 0.0, 1.0) - 1.0);
+    f->has_latch = true;
+  }
+}
+
+/* Returns `state` unchanged when the model declares no node forcing, and a
+ * scratch copy with the forced nodes overwritten when it does.
+ *
+ * Only source/constant/processing nodes can be forced (storage is rejected at
+ * parse time), and compute_derivatives pins those to dQ/dt = 0, so their value
+ * never comes from integration.  Overwriting them here is therefore the whole
+ * of "the node holds a driven value".
+ *
+ * Safe to reuse one instance-owned buffer: the returned pointer is consumed
+ * entirely within a single compute_derivatives call, and compute_derivatives
+ * never nests. */
+static const double *apply_node_forcing(GSSK_Instance *inst, double t,
+                                        const double *state) {
+  if (inst->forcing_count == 0 || !inst->forced_state) return state;
+
+  bool any = false;
+  for (size_t i = 0; i < inst->node_count; i++)
+    if (inst->nodes[i].forcing.kind != GSSK_FORCING_NONE) { any = true; break; }
+  if (!any) return state;   /* forcing_count counted edges only */
+
+  memcpy(inst->forced_state, state, inst->node_count * sizeof(double));
+  for (size_t i = 0; i < inst->node_count; i++)
+    if (inst->nodes[i].forcing.kind != GSSK_FORCING_NONE)
+      inst->forced_state[i] = forced_node_value(inst, i, state, t);
+  return inst->forced_state;
+}
+
+/* =========================================================================
  * Stage-time probe — TEST BUILDS ONLY
  *
  * tests/test_stage_times.c has to assert the time handed to each derivative
@@ -575,8 +930,11 @@ static int find_edge_idx(GSSK_Instance *inst, const char *id) {
 
 static void compute_interaction_node(GSSK_Instance *inst, double t, size_t ni,
                                      const double *state, double *deriv) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   /* Multi-input product gate.  First incoming edge → "energy" (consumed).
    * Remaining incoming edges → "control" inputs (not consumed, multiplicative).
@@ -616,8 +974,11 @@ static void compute_interaction_node(GSSK_Instance *inst, double t, size_t ni,
 
 static void compute_gain_node(GSSK_Instance *inst, double t, size_t ni,
                               const double *state, double *deriv) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   /* Constant-gain amplifier.  First incoming edge → control (not consumed).
    * Second (if any) → energy source.  If energy source is a STORAGE node,
@@ -658,8 +1019,11 @@ static void compute_gain_node(GSSK_Instance *inst, double t, size_t ni,
 
 static void compute_loop_limited_node(GSSK_Instance *inst, double t, size_t ni,
                                       const double *state, double *deriv) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   /* Michaelis-Menten loop-limited converter.  Single incoming edge. */
   int in_orig = -1;
@@ -696,8 +1060,11 @@ static void compute_loop_limited_node(GSSK_Instance *inst, double t, size_t ni,
 
 static void compute_switch_node(GSSK_Instance *inst, double t, size_t ni,
                                 const double *state, double *deriv) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   /* Digital switch.  First incoming edge → flow source (consumed when ON).
    * Second (optional) → sensor (not consumed).  If only one input, it acts
@@ -818,8 +1185,11 @@ static void apply_transaction_coupling(double F_primary, double price,
 
 static void compute_exchange_node(GSSK_Instance *inst, double t, size_t ni,
                                   const double *state, double *deriv) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   ExchangeLegs L = resolve_exchange_legs(inst, ni);
   if (L.goods_in < 0) return;
@@ -838,6 +1208,13 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
   GSSK_PROBE(gssk_probe_on_derivative, t);
   memset(deriv, 0, inst->node_count * sizeof(double));
 
+  /* Phase H — node forcing.  Applied into a scratch copy rather than mutating
+   * the caller's buffer: `state` is const, and the RK4 staging buffers are the
+   * solver's own.  Evaluated HERE, inside the derivative, so it is sampled at
+   * the STAGE time — sampling once per step instead would leave the forcing
+   * first-order while the state is fourth- or fifth-order. */
+  state = apply_node_forcing(inst, t, state);
+
   /* v3 edges — skip any edge whose origin OR target is a v4 processing node.
    * Those edges only carry topology information; the per-type helper computes
    * the actual flow contribution. */
@@ -850,32 +1227,34 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
 
     double flow   = 0.0;
     double Q_orig = state[e->origin_idx];
+    /* Phase H — the edge's rate at THIS stage time (Odum J, a flow). */
+    double k      = forced_edge_k(inst, e, t);
 
     switch (e->logic) {
     case GSSK_LOGIC_CONSTANT:
-      flow = e->k;
+      flow = k;
       break;
     case GSSK_LOGIC_LINEAR:
-      flow = e->k * Q_orig;
+      flow = k * Q_orig;
       break;
     case GSSK_LOGIC_INTERACTION:
       if (e->control_idx != -1)
-        flow = e->k * Q_orig * state[e->control_idx];
+        flow = k * Q_orig * state[e->control_idx];
       break;
     case GSSK_LOGIC_LIMIT: {
       double C = -1.0;
       if (e->control_idx != -1) C = state[e->control_idx];
       else if (e->threshold > 0.0) C = e->threshold;
       if (C > 1e-9)
-        flow = (e->k * Q_orig) / (1.0 + (Q_orig / C));
+        flow = (k * Q_orig) / (1.0 + (Q_orig / C));
       break;
     }
     case GSSK_LOGIC_THRESHOLD:
-      flow = (Q_orig > e->threshold) ? e->k : 0.0;
+      flow = (Q_orig > e->threshold) ? k : 0.0;
       break;
     case GSSK_LOGIC_RATIO:
       if (e->control_idx != -1)
-        flow = e->k * ratio_numer(e, state) /
+        flow = k * ratio_numer(e, state) /
                ratio_denom(state[e->control_idx], e->threshold);
       break;
     }
@@ -928,11 +1307,11 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
  */
 static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state,
                               double *A) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
-  (void)t;
   size_t n = inst->node_count;
   memset(A, 0, n * n * sizeof(double));
+  /* Phase H — the linearisation must be taken at the SAME forced values the
+   * RK4 path sees, or IDC and RK4 disagree on a forced model. */
+  state = apply_node_forcing(inst, t, state);
 
   for (size_t i = 0; i < inst->edge_count; i++) {
     GSSK_EdgeInternal *e = &inst->edges[i];
@@ -944,18 +1323,19 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
       continue;
 
     double conductance = 0.0;
+    double k = forced_edge_k(inst, e, t);
     switch (e->logic) {
     case GSSK_LOGIC_CONSTANT:
       /* constant flow — handled as additive forcing, not via matrix */
       break;
     case GSSK_LOGIC_LINEAR:
-      conductance = e->k;
+      conductance = k;
       A[e->target_idx * (int)n + e->origin_idx] += conductance;
       A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
       break;
     case GSSK_LOGIC_INTERACTION:
       if (e->control_idx != -1) {
-        conductance = e->k * state[e->control_idx];
+        conductance = k * state[e->control_idx];
         A[e->target_idx * (int)n + e->origin_idx] += conductance;
         A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
       }
@@ -967,7 +1347,7 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
       else if (e->threshold > 0.0) C = e->threshold;
       double Q = state[e->origin_idx];
       if (C > 1e-9) {
-        conductance = e->k * C / (C + Q); /* → k as Q→0, → k/2 at Q=C */
+        conductance = k * C / (C + Q); /* → k as Q→0, → k/2 at Q=C */
         A[e->target_idx * (int)n + e->origin_idx] += conductance;
         A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
       }
@@ -979,7 +1359,7 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
        * unless numerator_node names another. */
       if (e->control_idx != -1) {
         int num = ratio_numer_idx(e);
-        conductance = e->k / ratio_denom(state[e->control_idx], e->threshold);
+        conductance = k / ratio_denom(state[e->control_idx], e->threshold);
         A[e->target_idx * (int)n + num] += conductance;
         A[e->origin_idx * (int)n + num] -= conductance;
       }
@@ -1008,11 +1388,9 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
  */
 static void build_forcing_vector(GSSK_Instance *inst, double t, const double *state,
                                  double *f) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
-  (void)t;
   size_t n = inst->node_count;
   memset(f, 0, n * sizeof(double));
+  state = apply_node_forcing(inst, t, state);
 
   for (size_t i = 0; i < inst->edge_count; i++) {
     GSSK_EdgeInternal *e = &inst->edges[i];
@@ -1022,10 +1400,11 @@ static void build_forcing_vector(GSSK_Instance *inst, double t, const double *st
         is_processing_node(inst->nodes[e->target_idx].type))
       continue;
     double flow = 0.0;
+    double k = forced_edge_k(inst, e, t);
     if (e->logic == GSSK_LOGIC_CONSTANT) {
-      flow = e->k;
+      flow = k;
     } else if (e->logic == GSSK_LOGIC_THRESHOLD) {
-      flow = (state[e->origin_idx] > e->threshold) ? e->k : 0.0;
+      flow = (state[e->origin_idx] > e->threshold) ? k : 0.0;
     } else {
       continue;
     }
@@ -1255,6 +1634,31 @@ static void idc_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
                         double *Q_out, double dt) {
   size_t n = inst->node_count;
 
+  /* Phase H — substitute the forced values into the vector this step
+   * PROPAGATES, not merely into the matrix it linearises.
+   *
+   * build_flow_matrix zeroes the rows of source/constant nodes, so a forced
+   * source contributes only as a COLUMN — i.e. as an input to the rows that
+   * read it. If the vector still carried the node's unforced value, the
+   * exponential would propagate that, and a forced source would drive nothing
+   * at all while RK4 on the same model drove it correctly. Found by the
+   * rk4-vs-incipient agreement test, which is exactly what it is for.
+   *
+   * Copied into local scratch rather than used in place because
+   * apply_node_forcing returns an instance-owned buffer that the calls further
+   * down would otherwise overwrite mid-step. */
+  double *Q_forced = NULL;
+  if (inst->forcing_count > 0) {
+    const double *f = apply_node_forcing(inst, t, Q_in);
+    if (f != Q_in) {
+      Q_forced = malloc(n * sizeof(double));
+      if (Q_forced) {
+        memcpy(Q_forced, f, n * sizeof(double));
+        Q_in = Q_forced;
+      }
+    }
+  }
+
   /* Riccati exact duet shortcut */
   size_t di; int A_idx, B_idx;
   if (network_is_isolated_duet(inst, &di, &A_idx, &B_idx)) {
@@ -1265,6 +1669,7 @@ static void idc_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
     memcpy(Q_out, Q_in, n * sizeof(double));
     Q_out[A_idx] = (fabs(denom) > 1e-15) ? S * QA0 / denom : QA0;
     Q_out[B_idx] = S - Q_out[A_idx];
+    free(Q_forced);
     return;
   }
 
@@ -1274,6 +1679,7 @@ static void idc_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
   if (!A || !f) {
     memcpy(Q_out, Q_in, n * sizeof(double));
     free(A); free(f);
+    free(Q_forced);
     return;
   }
   build_flow_matrix(inst, t, Q_in, A);
@@ -1284,13 +1690,18 @@ static void idc_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
   {
     double *pf = calloc(n, sizeof(double));
     if (pf) {
+      /* Phase H — the helpers read node values out of the state they are
+       * handed, so forcing reaches them by forcing that state. This is the
+       * same substitution compute_derivatives makes; without it IDC would
+       * linearise a forced model about its UNforced values. */
+      const double *Q_f = apply_node_forcing(inst, t, Q_in);
       for (size_t i = 0; i < inst->node_count; i++) {
         switch (inst->nodes[i].type) {
-        case NODE_INTERACTION:  compute_interaction_node(inst, t, i, Q_in, pf); break;
-        case NODE_GAIN:         compute_gain_node(inst, t, i, Q_in, pf); break;
-        case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, Q_in, pf); break;
-        case NODE_SWITCH:       compute_switch_node(inst, t, i, Q_in, pf); break;
-        case NODE_EXCHANGE:     compute_exchange_node(inst, t, i, Q_in, pf); break;
+        case NODE_INTERACTION:  compute_interaction_node(inst, t, i, Q_f, pf); break;
+        case NODE_GAIN:         compute_gain_node(inst, t, i, Q_f, pf); break;
+        case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, Q_f, pf); break;
+        case NODE_SWITCH:       compute_switch_node(inst, t, i, Q_f, pf); break;
+        case NODE_EXCHANGE:     compute_exchange_node(inst, t, i, Q_f, pf); break;
         default: break;
         }
       }
@@ -1310,6 +1721,7 @@ static void idc_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
   for (size_t i = 0; i < n; i++)
     Q_out[i] += dt * f[i];
   free(A); free(f);
+  free(Q_forced);
 }
 
 /**
@@ -1893,8 +2305,11 @@ static GSSK_Status adaptive_step_ex(GSSK_Instance *inst,
  * ========================================================================= */
 
 static void compute_quality_pass(GSSK_Instance *inst, double t, const double *state) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   size_t n = inst->node_count;
   double *M = calloc(n * n, sizeof(double));   /* system matrix (-A^T) */
@@ -2044,8 +2459,11 @@ static void compute_quality_pass(GSSK_Instance *inst, double t, const double *st
  * Only storage nodes have non-zero rows; source/constant rows zeroed.
  */
 static void build_jacobian(GSSK_Instance *inst, double t, const double *state, double *J) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   size_t n = inst->node_count;
   memset(J, 0, n * n * sizeof(double));
@@ -2269,8 +2687,11 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
  */
 static void compute_param_deriv(GSSK_Instance *inst, double t, const double *state,
                                  size_t edge_idx, double *b) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   size_t n = inst->node_count;
   memset(b, 0, n * sizeof(double));
@@ -2356,8 +2777,11 @@ static void sens_euler_step(GSSK_Instance *inst, double t, const double *state,
  */
 static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t edge_idx,
                                          double *out_dTr) {
-  /* Threaded for h8 forcing; nothing here is time-dependent yet, and
-   * nothing may become so without a stage-time test. */
+  /* Node forcing reaches this helper through the `state` it is handed, which
+   * the caller has already substituted, and a processing node's rate is
+   * node_k rather than an edge k — so there is nothing time-dependent to read
+   * here. Kept in the signature so the whole derivative surface has one shape.
+   * Nothing may start depending on t without a stage-time test. */
   (void)t;
   size_t n = inst->node_count;
   memset(out_dTr, 0, n * sizeof(double));
@@ -3065,6 +3489,34 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       safe_str_copy(inst->nodes[node_slot].carrier, carrier_str, sizeof(inst->nodes[node_slot].carrier));
     }
 
+    /* Phase H — forcing drives the node's HELD value. */
+    {
+      cJSON *fo = cJSON_GetObjectItem(node, "forcing");
+      if (fo) {
+        char where[96];
+        snprintf(where, sizeof(where), "Node '%s'", id->valuestring);
+        if (!parse_forcing(fo, where,
+                           &inst->nodes[node_slot].forcing,
+                           inst->error_msg, sizeof(inst->error_msg))) {
+          status = GSSK_ERR_SCHEMA_VIOLATION;
+          goto cleanup;
+        }
+        /* A storage node's value is the INTEGRAL of its flows. Forcing it is a
+         * contradiction, and quietly ignoring the block is the failure mode
+         * h8b exists to remove — so it is an error, named as one. */
+        if (inst->nodes[node_slot].type == NODE_STORAGE) {
+          snprintf(inst->error_msg, sizeof(inst->error_msg),
+                   "Schema Error: Node '%s' is a storage node and cannot be forced. "
+                   "A storage node's value is the integral of its flows; force the "
+                   "source or the edge that drives it instead.", id->valuestring);
+          status = GSSK_ERR_SCHEMA_VIOLATION;
+          goto cleanup;
+        }
+        if (inst->nodes[node_slot].forcing.kind != GSSK_FORCING_NONE)
+          inst->forcing_count++;
+      }
+    }
+
     /* Phase 7 — processing-node params block */
     if (cJSON_IsObject(nparams)) {
       cJSON *nk  = cJSON_GetObjectItem(nparams, "k");
@@ -3261,6 +3713,24 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       /* carrier: Odum Position 1 — metadata only, no effect on ODE */
       cJSON *ec = cJSON_GetObjectItem(edge, "carrier");
       if (cJSON_IsString(ec)) { safe_str_copy(inst->edges[i].carrier, ec->valuestring, sizeof(inst->edges[i].carrier)); }
+
+      /* Phase H — forcing drives the edge's RATE k. */
+      cJSON *efo = cJSON_GetObjectItem(edge, "forcing");
+      if (efo) {
+        char where[96];
+        if (inst->edges[i].id[0])
+          snprintf(where, sizeof(where), "Edge '%s'", inst->edges[i].id);
+        else
+          snprintf(where, sizeof(where), "Edge at index %d", i);
+        if (!parse_forcing(efo, where,
+                           &inst->edges[i].forcing,
+                           inst->error_msg, sizeof(inst->error_msg))) {
+          status = GSSK_ERR_SCHEMA_VIOLATION;
+          goto cleanup;
+        }
+        if (inst->edges[i].forcing.kind != GSSK_FORCING_NONE)
+          inst->forcing_count++;
+      }
     }
 
     /* Second pass: resolve coupled_edge references (after all edges parsed) */
@@ -3406,8 +3876,19 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
   inst->current_t  = inst->config.t_start;
   inst->step_count = 0;
 
+  /* Phase H — `config` is only now parsed, so this is the first point at which
+   * a forcing block that did not author t_on can be given its default. */
+  apply_forcing_t_on_defaults(inst);
+
   /* ---- 4. Allocate scratchpads ---- */
   size_t n = inst->node_count;
+
+  /* Phase H — scratch for node forcing.  Allocated only when the model uses
+   * forcing, so an unforced model pays nothing. */
+  if (inst->forcing_count > 0) {
+    inst->forced_state = calloc(n ? n : 1, sizeof(double));
+    if (!inst->forced_state) { status = GSSK_ERR_MALLOC_FAILED; goto cleanup; }
+  }
 
   /* RK4 scratchpads — always allocated (needed for dual-solver verification) */
   inst->k2        = calloc(n, sizeof(double));
@@ -3452,6 +3933,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
   inst->edge_error = calloc(inst->edge_count ? inst->edge_count : 1,
                              sizeof(double));
   if (!inst->edge_error) { status = GSSK_ERR_MALLOC_FAILED; goto cleanup; }
+
+  /* Phase H — seed the state with the forced values at t_start, so the very
+   * first row a consumer reads already shows the waveform rather than the
+   * declared placeholder. */
+  sync_forced_node_state(inst, inst->config.t_start);
 
   /* ---- 5. Classify network ---- */
   GSSK_ReclassifyNetwork(inst);
@@ -3580,6 +4066,12 @@ GSSK_Status GSSK_Step(GSSK_Instance *inst, double dt) {
   size_t n = inst->node_count;
   GSSK_Status ret = GSSK_SUCCESS;
 
+  /* Phase H — one jitter draw for this step, before any stage is evaluated.
+   * Per STEP, never per stage: a fresh draw per stage would make the
+   * trajectory depend on solver internals, so the same model would give
+   * different answers under rk4 and dopri5 for reasons that are not physics. */
+  latch_forcing_jitter(inst);
+
   /* ---- Phase 3: forward sensitivity Euler step (pre-step, using Q(t)) ---- */
   if (inst->sens_param_count > 0 && inst->sens_matrix)
     sens_euler_step(inst, inst->current_t, inst->state, dt);
@@ -3673,6 +4165,8 @@ post_step:
     compute_quality_pass(inst, inst->current_t + dt, inst->state);
 
   inst->current_t += dt;
+  /* Phase H — make the forced values visible in the state the caller reads. */
+  sync_forced_node_state(inst, inst->current_t);
   inst->step_count++;
   scan_motifs_internal(inst);
   return ret;
@@ -4088,6 +4582,14 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
   double *new_k7    = realloc(inst->k7,    new_n * sizeof(double));
   double *new_tmp   = realloc(inst->tmp_state, new_n * sizeof(double));
   double *new_idc   = realloc(inst->idc_state, new_n * sizeof(double));
+  /* Phase H — grow the forcing scratch alongside the rest. Only present when
+   * the model already had a forced element; the case where THIS add is the
+   * first one is handled below, after the growth succeeds. */
+  double *new_forced = inst->forced_state
+                       ? realloc(inst->forced_state, new_n * sizeof(double))
+                       : NULL;
+  if (inst->forced_state && !new_forced) { cJSON_Delete(node); return GSSK_ERR_MALLOC_FAILED; }
+  if (new_forced) inst->forced_state = new_forced;
 
   if (!new_nodes || !new_state || !new_dQ || !new_k2 ||
       !new_k3 || !new_k4 || !new_k5 || !new_k6 || !new_k7 ||
@@ -4143,6 +4645,33 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
   inst->k5[idx] = inst->k6[idx] = inst->k7[idx] = 0.0;
   inst->tmp_state[idx] = inst->idc_state[idx] = 0.0;
 
+  /* Phase H — forcing. Parsed BEFORE the realloc so a rejected add is a true
+   * no-op, as with the type and key checks above. config is already known
+   * here, unlike in GSSK_Init, so the t_on default can be applied directly. */
+  GSSK_ForcingInternal add_forcing;
+  {
+    cJSON *fo = cJSON_GetObjectItem(node, "forcing");
+    char where[96];
+    snprintf(where, sizeof(where), "Node '%s'", id->valuestring);
+    if (!parse_forcing(fo, where, &add_forcing,
+                       inst->error_msg, sizeof(inst->error_msg))) {
+      cJSON_Delete(node);
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+    if (add_forcing.kind != GSSK_FORCING_NONE) {
+      if (parse_node_type(type->valuestring) == NODE_STORAGE) {
+        snprintf(inst->error_msg, sizeof(inst->error_msg),
+                 "Schema Error: Node '%s' is a storage node and cannot be forced. "
+                 "A storage node's value is the integral of its flows; force the "
+                 "source or the edge that drives it instead.", id->valuestring);
+        cJSON_Delete(node);
+        return GSSK_ERR_SCHEMA_VIOLATION;
+      }
+      if (!add_forcing.has_t_on) add_forcing.t_on = inst->config.t_start;
+    }
+  }
+
+
   cJSON *qi = cJSON_GetObjectItem(node, "quality_input");
   if (cJSON_IsNumber(qi) && qi->valuedouble > 0.0)
     inst->nodes[idx].quality_input = qi->valuedouble;
@@ -4153,6 +4682,17 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
 
   cJSON *nc_add = cJSON_GetObjectItem(node, "carrier");
   if (cJSON_IsString(nc_add)) { safe_str_copy(inst->nodes[idx].carrier, nc_add->valuestring, sizeof(inst->nodes[idx].carrier)); }
+
+  inst->nodes[idx].forcing = add_forcing;
+  if (add_forcing.kind != GSSK_FORCING_NONE) {
+    inst->forcing_count++;
+    /* First forced element in this instance — the scratch was not allocated at
+     * init because nothing needed it then. */
+    if (!inst->forced_state) {
+      inst->forced_state = calloc(new_n ? new_n : 1, sizeof(double));
+      if (!inst->forced_state) { cJSON_Delete(node); return GSSK_ERR_MALLOC_FAILED; }
+    }
+  }
 
   inst->node_count = new_n;
   cJSON_Delete(node);
@@ -4190,6 +4730,25 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
     snprintf(inst->error_msg, sizeof(inst->error_msg),
              "GSSK_AddEdge: missing origin/target/logic/params");
     return GSSK_ERR_SCHEMA_VIOLATION;
+  }
+
+  /* Phase H — forcing on the edge's rate. Before the realloc, as above. */
+  GSSK_ForcingInternal add_eforcing;
+  {
+    cJSON *fo = cJSON_GetObjectItem(edge, "forcing");
+    cJSON *eid_j = cJSON_GetObjectItem(edge, "id");
+    char where[96];
+    if (cJSON_IsString(eid_j) && eid_j->valuestring && eid_j->valuestring[0])
+      snprintf(where, sizeof(where), "Edge '%s'", eid_j->valuestring);
+    else
+      snprintf(where, sizeof(where), "Edge at index %zu", inst->edge_count);
+    if (!parse_forcing(fo, where, &add_eforcing,
+                       inst->error_msg, sizeof(inst->error_msg))) {
+      cJSON_Delete(edge);
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+    if (add_eforcing.kind != GSSK_FORCING_NONE && !add_eforcing.has_t_on)
+      add_eforcing.t_on = inst->config.t_start;
   }
 
   int orig_idx = find_node_idx(inst, origin->valuestring);
@@ -4288,6 +4847,9 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
   cJSON *ec_add = cJSON_GetObjectItem(edge, "carrier");
   if (cJSON_IsString(ec_add)) { safe_str_copy(inst->edges[ei].carrier, ec_add->valuestring, sizeof(inst->edges[ei].carrier)); }
 
+  inst->edges[ei].forcing = add_eforcing;
+  if (add_eforcing.kind != GSSK_FORCING_NONE) inst->forcing_count++;
+
   inst->edge_count = new_ec;
   cJSON_Delete(edge);
   append_mutation(inst, GSSK_MUT_ADD_EDGE,
@@ -4339,6 +4901,23 @@ void GSSK_Reset(GSSK_Instance *inst) {
   if (!inst) return;
   for (size_t i = 0; i < inst->node_count; i++)
     inst->state[i] = inst->nodes[i].initial_value;
+
+  /* Phase H — drop any latched jitter, but DO NOT rewind the RNG stream.
+   *
+   * Rewinding here is the obvious-looking change and it is wrong.
+   * GSSK_EnsembleForecast and GSSK_CalibrateMonteCarlo both perturb with
+   * get_random_double and then call GSSK_Reset once per run: rewinding would
+   * hand every run the same perturbation and collapse the ensemble to a
+   * single trajectory. (Tried it; test_advanced's calibration caught it.)
+   *
+   * So Reset means "back to t_start", not "back to the start of the random
+   * stream". To repeat a jitter-forced run exactly, rewind the stream
+   * explicitly — GSSK_SetSeed(inst, GSSK_GetSeed(inst)) — and then Reset.
+   * That keeps reproducibility available without taking exploration away. */
+  for (size_t i = 0; i < inst->node_count; i++)
+    inst->nodes[i].forcing.has_latch = false;
+  for (size_t i = 0; i < inst->edge_count; i++)
+    inst->edges[i].forcing.has_latch = false;
   if (inst->transformity)
     memset(inst->transformity, 0, inst->node_count * sizeof(double));
   if (inst->quality_flow)
@@ -4521,6 +5100,12 @@ GSSK_Status GSSK_StepAdaptive(GSSK_Instance *inst) {
   if (t_rem <= 0.0) return GSSK_SUCCESS;
   if (h > t_rem) h = t_rem;
 
+  /* Phase H — one jitter draw for this step, as in GSSK_Step. Deliberately
+   * here and not inside adaptive_step_ex's sub-step loop: drawing per
+   * sub-step would tie the stream position, and so the whole trajectory, to
+   * the error controller's search path — including its REJECTED attempts. */
+  latch_forcing_jitter(inst);
+
   /* Run adaptive step for exactly h */
   GSSK_Status st = adaptive_step_ex(inst, h, inst->current_t);
   if (st == GSSK_ERR_DIVERGENCE) return st;
@@ -4531,6 +5116,8 @@ GSSK_Status GSSK_StepAdaptive(GSSK_Instance *inst) {
 
   if (inst->quality_enabled)
     compute_quality_pass(inst, inst->current_t, inst->state);
+
+  sync_forced_node_state(inst, inst->current_t);
 
   for (size_t i = 0; i < n; i++)
     if (inst->state[i] < 0.0) inst->state[i] = 0.0;
@@ -4728,6 +5315,38 @@ GSSK_Status GSSK_Replay(const char *initial_json,
 }
 
 /* =========================================================================
+ * Phase H — Forcing public accessors
+ *
+ * All flat scalars. Returning a pointer to GSSK_ForcingInternal would push its
+ * layout across the WASM boundary, which is exactly the hazard the flat
+ * carrier getters were added to remove.
+ * ========================================================================= */
+
+int GSSK_GetNodeForcingKind(GSSK_Instance *inst, size_t node_idx) {
+  if (!inst || node_idx >= inst->node_count) return GSSK_FORCING_NONE;
+  return (int)inst->nodes[node_idx].forcing.kind;
+}
+
+int GSSK_GetEdgeForcingKind(GSSK_Instance *inst, size_t edge_idx) {
+  if (!inst || edge_idx >= inst->edge_count) return GSSK_FORCING_NONE;
+  return (int)inst->edges[edge_idx].forcing.kind;
+}
+
+double GSSK_EvaluateNodeForcing(GSSK_Instance *inst, size_t node_idx, double t) {
+  if (!inst || node_idx >= inst->node_count) return 0.0;
+  /* Falls back to the node's declared value, so a consumer can plot every node
+   * on the same axis without first asking which ones are forced. */
+  return eval_forcing(&inst->nodes[node_idx].forcing, t, inst->config.dt,
+                      inst->nodes[node_idx].initial_value);
+}
+
+double GSSK_EvaluateEdgeForcing(GSSK_Instance *inst, size_t edge_idx, double t) {
+  if (!inst || edge_idx >= inst->edge_count) return 0.0;
+  return eval_forcing(&inst->edges[edge_idx].forcing, t, inst->config.dt,
+                      inst->edges[edge_idx].k);
+}
+
+/* =========================================================================
  * Phase 5 — Multi-carrier public accessors
  * ========================================================================= */
 
@@ -4914,6 +5533,60 @@ static const char *method_str(GSSK_Method m) {
   }
 }
 
+/* Emits a forcing block, or nothing when the element is unforced.
+ *
+ * Every parameter the parser reads must appear here. The two Phase C.3
+ * serialisation defects were both exactly this: a `ratio` edge serialised as
+ * `linear`, and a ratio's denominator floor silently dropped, because the
+ * serialiser was never given the case. Only fields the waveform actually uses
+ * are emitted, so the JSON says what the waveform is rather than carrying nine
+ * zeros the reader has to filter. */
+static void emit_forcing(cJSON *parent, const GSSK_ForcingInternal *f) {
+  if (!f || f->kind == GSSK_FORCING_NONE) return;
+  cJSON *o = cJSON_CreateObject();
+  cJSON_AddStringToObject(o, "waveform", forcing_kind_str(f->kind));
+  if (f->has_t_on) cJSON_AddNumberToObject(o, "t_on", f->t_on);
+
+  switch (f->kind) {
+  case GSSK_FORCING_STEP:
+    cJSON_AddNumberToObject(o, "v0", f->v0);
+    cJSON_AddNumberToObject(o, "v1", f->v1);
+    break;
+  case GSSK_FORCING_IMPULSE:
+    cJSON_AddNumberToObject(o, "area", f->area);
+    break;
+  case GSSK_FORCING_RAMP:
+    cJSON_AddNumberToObject(o, "v0", f->v0);
+    cJSON_AddNumberToObject(o, "slope", f->slope);
+    break;
+  case GSSK_FORCING_EXPONENTIAL:
+    cJSON_AddNumberToObject(o, "v0", f->v0);
+    cJSON_AddNumberToObject(o, "rate", f->rate);
+    break;
+  case GSSK_FORCING_SQUARE:
+    cJSON_AddNumberToObject(o, "duty", f->duty);
+    /* fall through — square is periodic and centred like the others */
+    /* FALLTHROUGH */
+  case GSSK_FORCING_SAWTOOTH:
+  case GSSK_FORCING_SINE:
+    cJSON_AddNumberToObject(o, "period", f->period);
+    cJSON_AddNumberToObject(o, "phase", f->phase);
+    cJSON_AddNumberToObject(o, "mean", f->mean);
+    cJSON_AddNumberToObject(o, "amplitude", f->amplitude);
+    break;
+  case GSSK_FORCING_JITTER:
+    cJSON_AddNumberToObject(o, "mean", f->mean);
+    cJSON_AddNumberToObject(o, "amplitude", f->amplitude);
+    break;
+  case GSSK_FORCING_NONE:
+  default:
+    break;
+  }
+  if (f->has_min) cJSON_AddNumberToObject(o, "min", f->min);
+  if (f->has_max) cJSON_AddNumberToObject(o, "max", f->max);
+  cJSON_AddItemToObject(parent, "forcing", o);
+}
+
 static cJSON *build_topology_json(GSSK_Instance *inst) {
   cJSON *root = cJSON_CreateObject();
   if (!root) return NULL;
@@ -4980,6 +5653,7 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
       cJSON_AddItemToObject(n, "params", np);
     }
 
+    emit_forcing(n, &nd->forcing);
     cJSON_AddItemToArray(nodes, n);
   }
   cJSON_AddItemToObject(root, "nodes", nodes);
@@ -5015,6 +5689,7 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
       cJSON_AddStringToObject(e, "output_mode", "replicate");
     if (!ed->active)
       cJSON_AddFalseToObject(e, "active");
+    emit_forcing(e, &ed->forcing);
     cJSON_AddItemToArray(edges, e);
   }
   cJSON_AddItemToObject(root, "edges", edges);
@@ -5311,6 +5986,7 @@ GSSK_Status GSSK_SerializeSnapshot(GSSK_Instance *inst, char **out_json) {
 
 void GSSK_Free(GSSK_Instance *inst) {
   if (!inst) return;
+  free(inst->forced_state);
   free(inst->state);
   free(inst->dQ);
   free(inst->k2);

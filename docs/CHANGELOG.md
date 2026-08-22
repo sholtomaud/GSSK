@@ -6,6 +6,32 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### Added
+
+- **Forcing functions — Odum's eleven, as one waveform vocabulary attached in two places.** A source node held its declared value for the whole run, so GSSK expressed exactly two of the eleven forcing functions in *Systems Ecology* Fig. 7-2 (constant force and constant flow) and had no representation for the other nine.
+
+  `forcing` on a **node** drives its held value (Odum X/N, a *force*); `forcing` on an **edge** drives its rate `k` (Odum J, a *flow*). Eight waveforms: `step`, `impulse`, `ramp`, `sawtooth`, `square`, `sine`, `exponential`, `jitter`. Odum's eleven are a node-value-versus-edge-rate distinction crossed with a carrier distinction, and carriers were already modelled — so eleven node types would have been the wrong shape. [ADR 0006](adr/0006-forcing-one-vocabulary-two-attachments.md) records that decision and what was rejected. Worked model in `examples/forced_source_model.json`; full vocabulary and formulas in [docs/concepts.md](concepts.md#forcing-functions).
+
+  **Waveforms are evaluated at solver STAGE times, not once per step.** This is the requirement that is easy to get wrong and invisible when you do: sampling once per step leaves the forcing first-order while the state is fourth- or fifth-order, and the run still completes and still looks smooth. Integrating a sine-forced source against its closed form, the error ratio per halving of `dt` is **16.02× / 16.01× / 16.00×** with stage times and **1.97× / 1.98× / 1.99×** without. Every other test in the suite passes either way. `h8a-thread-time-through-ode-core` landed first to make the stage times available.
+
+  **`jitter` is latched once per accepted step**, drawn from the instance SplitMix64 stream (`GSSK_SetSeed`), never libc `rand()`. A per-stage draw would make the trajectory depend on solver internals — the same model answering differently under `rk4` and `dopri5` for reasons that are not physics. The test asserts the *draw sequence* is bit-identical across `rk4`, `incipient` and `adaptive`.
+
+  **A storage node cannot be forced** — its value is the integral of its flows, so forcing it asserts two things about one quantity. `GSSK_Init` and `GSSK_AddNode` both reject it naming the node, rather than ignoring the block, which is the failure mode `h8b` was landed to remove. A periodic waveform without a positive `period` is likewise rejected rather than silently treated as a constant.
+
+  **`phase` is a time offset, not an angle** — same units as `t`, and *subtracted*, so a positive phase delays the waveform. **`impulse` is area-normalised** over one nominal `dt`, so its integral is `area` at any step size. Both conventions are stated in the header, the schema, `docs/concepts.md` and the example, because an ambiguous convention is how two implementations diverge while both look right.
+
+  New accessors, all exported to WASM and typed in `src/gssk.d.ts`: `GSSK_GetNodeForcingKind`, `GSSK_GetEdgeForcingKind`, `GSSK_EvaluateNodeForcing`, `GSSK_EvaluateEdgeForcing`. They are **the same evaluator the derivative path uses** — a test drives each of the eight waveforms and asserts what the evaluator reports equals what the kernel integrated, so the two cannot drift. Flat scalars rather than a struct pointer, for the reason the flat carrier getters exist. `js/gssk.js` gains the matching wrappers.
+
+  Forced node values are written into the live state after each step, so `GSSK_GetState` and the CSV show the waveform. Previously the derivative was correct while a sine-forced source appeared as a flat line next to the storage it was visibly driving.
+
+### Changed
+
+- **`GSSK_Reset` does not rewind the random stream, and now says so.** Behaviour is unchanged; the contract is newly documented because forcing makes it reachable. Rewinding was tried and is wrong: `GSSK_EnsembleForecast` and `GSSK_CalibrateMonteCarlo` perturb with the instance RNG and then reset once per run, so rewinding collapses an ensemble to one trajectory (`test_advanced`'s calibration caught it). `GSSK_Reset` means "back to `t_start`", not "back to the start of the stream". To repeat a `jitter` run exactly, call `GSSK_SetSeed(inst, GSSK_GetSeed(inst))` first.
+
+### Known limitation
+
+- **Trajectories are not bit-identical across platforms**, because the kernel uses the platform's `libm`. Measured three ways on the same eight sample points: the WASM build agrees with Linux GCC **exactly**, and macOS Apple clang's `sin()` is the outlier, differing by 1 ULP at two of the eight. `sin`/`exp`/`pow` are not required by IEEE-754 to be correctly rounded, so this is inherent rather than a defect in any toolchain. It pre-dates forcing — `exp()` was already on the Riccati duet path and `pow()` on the adaptive step controller — but forcing makes it common, since a sine-forced model hits a transcendental on every stage of every step. `make test-forcing-wasm` therefore asserts agreement to 4 ULP rather than bit-equality, with the measurement recorded in the check itself. Whether GSSK should ship its own correctly-rounded transcendentals is a Phase G reconstruction question, tracked as `deterministic-transcendentals-cross-platform`.
+
 ### Changed
 
 - **Simulation time is now threaded through the ODE core.** `compute_derivatives` takes an explicit `double t`, and every call site passes the correct *stage* time: classical RK4 at `t`, `t+h/2`, `t+h/2`, `t+h`; DOPRI5 at `t + c_i·h` for `c = (0, 1/5, 3/10, 4/5, 8/9, 1, 1)`. The whole derivative surface is covered, not just RK4 — both `rk4_step` variants, DOPRI5's seven stages, the IDC path (`build_flow_matrix`, `build_forcing_vector` and the processing-node helpers), `build_jacobian`, `compute_param_deriv`, `compute_quality_pass`, `compute_quality_sensitivity`, threshold sub-stepping, and the adjoint's backward integration.

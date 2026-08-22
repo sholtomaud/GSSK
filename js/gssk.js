@@ -208,6 +208,18 @@ export class GSSKSimulator {
   edgeCarrier(index)    { const p = this.#mod._GSSK_GetEdgeCarrier(this.#inst, index); return p ? readString(this.#mod, p) : ''; }
   nodeCarrier(index)    { const p = this.#mod._GSSK_GetNodeCarrier(this.#inst, index); return p ? readString(this.#mod, p) : ''; }
 
+  // ── Forcing (Phase H) ──────────────────────────────────────────────────────
+  // Kinds: 0 none, 1 step, 2 impulse, 3 ramp, 4 sawtooth, 5 square, 6 sine,
+  // 7 exponential, 8 jitter.
+  nodeForcingKind(idx) { return this.#mod._GSSK_GetNodeForcingKind(this.#inst, idx); }
+  edgeForcingKind(idx) { return this.#mod._GSSK_GetEdgeForcingKind(this.#inst, idx); }
+
+  // The kernel's OWN evaluator. Use this to render a forcing curve rather than
+  // reimplementing the formulas — a reimplementation will diverge, which is the
+  // whole reason the evaluator is exported.
+  evaluateNodeForcing(idx, t) { return this.#mod._GSSK_EvaluateNodeForcing(this.#inst, idx, t); }
+  evaluateEdgeForcing(idx, t) { return this.#mod._GSSK_EvaluateEdgeForcing(this.#inst, idx, t); }
+
   // Flat carrier getters. Deliberately NOT _GSSK_GetCarrier — that returns a
   // pointer to a GSSK_Carrier struct, and decoding it here would bake the
   // kernel's field offsets, bool width and padding into this binding.

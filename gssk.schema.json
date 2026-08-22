@@ -234,6 +234,34 @@
       }
     },
 
+    "Forcing": {
+      "type": "object",
+      "description": "A forcing waveform. ONE vocabulary, attachable in TWO places: on a node it drives the node's held value (Odum X/N, a force); on an edge it drives the edge's rate k (Odum J, a flow). Odum's eleven forcing annotations (Systems Ecology Fig. 7-2) are a node-value vs edge-rate distinction crossed with a carrier distinction, and carriers are already modelled by `carrier` on nodes and edges — so the eleven collapse to this. See docs/adr/0006-forcing-one-vocabulary-two-attachments.md. Evaluated at RK4/DOPRI5 STAGE times, not once per step. PHASE CONVENTION: `phase` is a TIME offset in the same units as t — not radians, not a fraction of the period — and is SUBTRACTED, so a positive phase delays the waveform. Clamping by `min`/`max` is applied last, after the formula.",
+      "required": ["waveform"],
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "waveform": {
+          "type": "string",
+          "enum": ["step", "impulse", "ramp", "sawtooth", "square", "sine", "exponential", "jitter"],
+          "description": "Which waveform. With tau = t - t_on and frac(x) = x - floor(x): step -> v0 if t < t_on else v1. impulse -> area/w on [t_on, t_on+w) else 0, where w is config.dt so the INTEGRAL is `area` at any dt. ramp -> v0 if t < t_on else v0 + slope*tau. sawtooth -> mean + amplitude*(2*frac((tau-phase)/period) - 1). square -> mean+amplitude while frac((tau-phase)/period) < duty, else mean-amplitude. sine -> mean + amplitude*sin(2*PI*(tau-phase)/period). exponential -> v0 if t < t_on else v0*exp(rate*tau). jitter -> mean + amplitude*(2u-1), u from the instance RNG, LATCHED once per accepted step."
+        },
+        "t_on":      { "type": "number", "description": "Onset time. Defaults to config.t_start. Used by step, impulse, ramp and exponential as the switch-on point, and by the periodic waveforms as the origin of tau." },
+        "v0":        { "type": "number", "description": "step: value before t_on. ramp/exponential: value at t_on." },
+        "v1":        { "type": "number", "description": "step: value at and after t_on." },
+        "area":      { "type": "number", "description": "impulse: the INTEGRAL delivered, held constant across dt. A bare amplitude would make the delivered quantity depend on step size — a discretisation artefact masquerading as physics." },
+        "slope":     { "type": "number", "description": "ramp: rate of change per unit time after t_on." },
+        "rate":      { "type": "number", "description": "exponential: growth (positive) or decay (negative) rate. Value is v0*exp(rate*tau)." },
+        "period":    { "type": "number", "exclusiveMinimum": 0, "description": "sine/square/sawtooth: period in time units. REQUIRED and positive for those three — a periodic waveform with no period is an authoring mistake, not a slow waveform, and GSSK_Init rejects it rather than silently treating it as constant." },
+        "phase":     { "type": "number", "description": "sine/square/sawtooth: a TIME offset, not radians and not a fraction of the period. SUBTRACTED, so a positive phase DELAYS the waveform." },
+        "duty":      { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "description": "square: fraction of each period spent at mean+amplitude." },
+        "mean":      { "type": "number", "description": "sine/square/sawtooth/jitter: the centre value." },
+        "amplitude": { "type": "number", "description": "sine/square/sawtooth/jitter: half the peak-to-peak range." },
+        "min":       { "type": "number", "description": "Lower clamp, applied after the formula. Omit for no lower bound." },
+        "max":       { "type": "number", "description": "Upper clamp, applied after the formula. Omit for no upper bound." }
+      }
+    },
+
     "Node": {
       "type": "object",
       "description": "A compartment. Either a fundamental type (storage/source/sink/constant or a Phase 7 processing node) or a composite that expands at GSSK_Init time.",
@@ -260,6 +288,10 @@
           "description": "Odum Position 1 (Code) carrier label for this node. Metadata only; does not affect ODE integration. For a composite, applied to every expanded member that does not declare its own."
         },
         "params": { "$ref": "#/$defs/NodeParams" },
+        "forcing": {
+          "$ref": "#/$defs/Forcing",
+          "description": "Drives this node's HELD value (Odum X/N, a force). REJECTED on a storage node: a storage node's value is the integral of its flows, so forcing it is a contradiction — force the source or the edge that drives it instead. GSSK_Init returns GSSK_ERR_SCHEMA_VIOLATION rather than ignoring the block."
+        },
         "quality_input": {
           "type": "number",
           "minimum": 0.0,
@@ -322,6 +354,10 @@
         },
         "logic": { "$ref": "#/$defs/EdgeLogic" },
         "params": { "$ref": "#/$defs/EdgeParams" },
+        "forcing": {
+          "$ref": "#/$defs/Forcing",
+          "description": "Drives this edge's RATE k (Odum J, a flow). Overrides params.k at every stage time; params.k remains the value used when no forcing is declared."
+        },
         "output_mode": {
           "type": "string",
           "enum": ["partition", "replicate"],

@@ -739,6 +739,109 @@ GSSK_Status GSSK_CalibrateGradient(GSSK_Instance *inst,
                                     int iterations);
 
 /* =========================================================================
+ * Phase H — Forcing functions
+ *
+ * ONE waveform vocabulary, attachable in TWO places.  Odum's eleven forcing
+ * annotations (Systems Ecology Fig. 7-2) are not eleven mechanisms: they are a
+ * node-value versus edge-rate distinction crossed with a carrier distinction,
+ * and GSSK already models carriers (Position 1, `carrier` on nodes and edges).
+ * So the eleven collapse to one vocabulary x two attachment points.
+ *
+ *   forcing on a NODE  -> drives that node's held value  (Odum X / N, a force)
+ *   forcing on an EDGE -> drives that edge's rate k      (Odum J, a flow)
+ *
+ * See docs/adr/0006-forcing-one-vocabulary-two-attachments.md.
+ * ========================================================================= */
+
+/**
+ * @brief Waveform vocabulary.
+ *
+ * Exact formulas, with tau = t - t_on and frac(x) = x - floor(x):
+ *
+ *   STEP         t <  t_on -> v0
+ *                t >= t_on -> v1
+ *   IMPULSE      t in [t_on, t_on + w) -> area / w,  else 0
+ *                w is config.dt, so the INTEGRAL is `area` at any dt.
+ *   RAMP         t <  t_on -> v0
+ *                t >= t_on -> v0 + slope * tau
+ *   SAWTOOTH     mean + amplitude * (2 * frac((tau - phase) / period) - 1)
+ *   SQUARE       frac((tau - phase) / period) <  duty -> mean + amplitude
+ *                                              >= duty -> mean - amplitude
+ *   SINE         mean + amplitude * sin(2 * PI * (tau - phase) / period)
+ *   EXPONENTIAL  t <  t_on -> v0
+ *                t >= t_on -> v0 * exp(rate * tau)
+ *   JITTER       mean + amplitude * (2u - 1), u in [0,1) from the instance RNG
+ *
+ * PHASE CONVENTION, stated because an ambiguous one is how two
+ * implementations diverge: `phase` is a TIME offset in the same units as t.
+ * It is neither radians nor a fraction of the period.  It is SUBTRACTED, so a
+ * positive phase DELAYS the waveform.
+ *
+ * CLAMPING is applied last, after the formula above, and only to the bounds
+ * the model actually declares: `min` then `max`.  A waveform with neither is
+ * unclamped.  Clamping is not folded into the formulas so that the formula and
+ * the bound stay separately legible.
+ */
+typedef enum {
+  GSSK_FORCING_NONE = 0,   /**< No forcing; the value or k is used as declared. */
+  GSSK_FORCING_STEP,
+  GSSK_FORCING_IMPULSE,
+  GSSK_FORCING_RAMP,
+  GSSK_FORCING_SAWTOOTH,
+  GSSK_FORCING_SQUARE,
+  GSSK_FORCING_SINE,
+  GSSK_FORCING_EXPONENTIAL,
+  GSSK_FORCING_JITTER
+} GSSK_ForcingKind;
+
+/**
+ * @brief Waveform kind attached to a node, or GSSK_FORCING_NONE.
+ *
+ * Flat accessor by design.  Returning a struct pointer would push the layout
+ * of the parameter block across the WASM boundary, which is the hazard the
+ * flat carrier getters exist to avoid.
+ *
+ * @return GSSK_FORCING_NONE (0) for an unforced node or an out-of-range index.
+ */
+int GSSK_GetNodeForcingKind(GSSK_Instance *inst, size_t node_idx);
+
+/** @brief As GSSK_GetNodeForcingKind, for the edge at edge_idx. */
+int GSSK_GetEdgeForcingKind(GSSK_Instance *inst, size_t edge_idx);
+
+/**
+ * @brief Value of the node's forcing waveform at time t.
+ *
+ * THE SAME evaluator the derivative path uses — not a second implementation.
+ * Exposed so a consumer can render a forcing curve without reimplementing the
+ * formulas, because a reimplementation will diverge.  Same argument ADR 0001
+ * makes for the transaction diamond's shared helpers.
+ *
+ * JITTER IS DIFFERENT, and must be: it returns the value LATCHED FOR THE
+ * CURRENT STEP and ignores `t`.  Drawing fresh would both make the curve
+ * meaningless and advance the RNG, so merely asking what the model is doing
+ * would change what it does.  Before the first step it returns `mean`.
+ *
+ * REPEATING A JITTER RUN.  The draw is latched once per accepted step from the
+ * instance RNG, so a run is reproducible for a given stream position.
+ * GSSK_Reset does NOT rewind that stream — GSSK_EnsembleForecast and
+ * GSSK_CalibrateMonteCarlo perturb and then Reset once per run, and rewinding
+ * would collapse the ensemble to one trajectory.  To repeat a run exactly,
+ * rewind explicitly and then reset:
+ *
+ *     GSSK_SetSeed(inst, GSSK_GetSeed(inst));
+ *     GSSK_Reset(inst);
+ *
+ * @return The node's declared value if it has no forcing, 0.0 if out of range.
+ */
+double GSSK_EvaluateNodeForcing(GSSK_Instance *inst, size_t node_idx, double t);
+
+/**
+ * @brief Value of the edge's forcing waveform at time t — the edge's rate k.
+ * @return The edge's declared k if it has no forcing, 0.0 if out of range.
+ */
+double GSSK_EvaluateEdgeForcing(GSSK_Instance *inst, size_t edge_idx, double t);
+
+/* =========================================================================
  * Phase 5 — Multi-Carrier Schema
  * ========================================================================= */
 
