@@ -27,6 +27,18 @@
  * Shaped after tests/test_node_type_validation.c, and covering both parsers
  * for the same reason it does: GSSK_Init and GSSK_AddNode/GSSK_AddEdge are
  * separate code paths.
+ *
+ * h8b closed exactly the five levels its acceptance criteria named. The
+ * remaining five -- node `params`, `metadata`, `carriers[]`, `snapshot` (with
+ * its nested objects) and `archetypes` -- are closed by
+ * reject-unknown-keys-remaining-levels and covered in
+ * test_remaining_levels_* below. Every one of them was ALREADY declared with
+ * additionalProperties:false in gssk.schema.json, so that is the same argument
+ * again -- agreement with a published contract, not a new rule.
+ *
+ * Node `params` is the sharpest of them and is the direct analogue of edge
+ * `params`, which h8b did close: `{"type":"exchange","params":{"pric":10}}`
+ * loaded, ignored `pric`, and ran the transaction at the default price.
  */
 
 #include "gssk.h"
@@ -165,6 +177,166 @@ static void test_each_level_accepts_underscore(void) {
 
     printf("  All five levels accept _-prefixed keys\n");
 }
+
+/* ---------------------------------------------------------------- */
+/* The five levels h8b did not reach.
+ *
+ * A second builder rather than five more slots on build(): these levels live
+ * in blocks build()'s model does not have at all (an archetype, a snapshot, a
+ * carrier list), and a ten-argument snprintf whose slots are positional is
+ * exactly how a test ends up asserting something other than what it says. */
+static void build2(char *buf, size_t cap,
+                   const char *meta_extra, const char *carrier_extra,
+                   const char *node_param_extra, const char *arch_extra,
+                   const char *arch_node_extra, const char *arch_edge_extra,
+                   const char *snap_extra, const char *snap_state_extra,
+                   const char *mutlog_extra) {
+    snprintf(buf, cap,
+        "{"
+        "  \"metadata\": { \"schema_version\": 4, \"name\": \"keys\"%s },"
+        "  \"carriers\": [ { \"id\": \"energy\", \"unit\": \"kWh\","
+        "                    \"conserved\": true%s } ],"
+        "  \"archetypes\": {"
+        "    \"widget\": {"
+        "      \"nodes\": ["
+        "        { \"id\": \"body\", \"type\": \"storage\", \"value\": 1.0%s },"
+        "        { \"id\": \"vent\", \"type\": \"sink\",    \"value\": 0.0 }"
+        "      ],"
+        "      \"edges\": ["
+        "        { \"id\": \"bleed\", \"origin\": \"body\", \"target\": \"vent\","
+        "          \"logic\": \"linear\", \"params\": { \"k\": 0.1 }%s }"
+        "      ],"
+        "      \"ports\": { \"in\": \"body\", \"out\": \"body\" }%s"
+        "    }"
+        "  },"
+        "  \"nodes\": ["
+        "    { \"id\": \"src\",  \"type\": \"source\",  \"value\": 10.0 },"
+        "    { \"id\": \"mkt\",  \"type\": \"exchange\", \"value\": 0.0,"
+        "      \"params\": { \"k\": 1.0, \"price\": 2.0%s } },"
+        "    { \"id\": \"tank\", \"type\": \"storage\", \"value\": 0.0 },"
+        "    { \"id\": \"w1\",   \"type\": \"widget\",  \"value\": 3.0 }"
+        "  ],"
+        "  \"edges\": ["
+        "    { \"id\": \"e1\", \"origin\": \"src\", \"target\": \"tank\","
+        "      \"logic\": \"constant\", \"params\": { \"k\": 0.5 } }"
+        "  ],"
+        "  \"config\": { \"t_start\": 0, \"t_end\": 1, \"dt\": 0.1 },"
+        "  \"mutation_log\": ["
+        "    { \"t\": 0.0, \"op\": \"set_edge_k\", \"target_id\": \"e1\","
+        "      \"payload\": \"0.5\", \"cause\": \"user\"%s }"
+        "  ],"
+        "  \"snapshot\": {"
+        "    \"t\": 0.5, \"dt\": 0.1, \"step\": 5,"
+        "    \"state\": [ { \"id\": \"tank\", \"Q\": 2.5, \"Tr\": 0.0%s } ],"
+        "    \"edge_k\": [ { \"id\": \"e1\", \"k\": 0.5 } ],"
+        "    \"solver\": { \"confidence\": \"high\", \"incipient_eligible\": true },"
+        "    \"rng_state\": { \"seed\": \"0x0000000000000001\","
+        "                     \"state\": \"0x0000000000000001\" }%s"
+        "  }"
+        "}",
+        meta_extra, carrier_extra, arch_node_extra, arch_edge_extra, arch_extra,
+        node_param_extra, mutlog_extra, snap_state_extra, snap_extra);
+}
+
+#define B2(...) build2(json, sizeof(json), __VA_ARGS__)
+#define E EMPTY
+
+static void test_remaining_levels_reject(void) {
+    printf("Testing the five levels h8b did not reach...\n");
+    char json[4096];
+
+    /* The baseline has to load, or every rejection below is unfalsifiable. */
+    B2(E, E, E, E, E, E, E, E, E);
+    expect_loads(json, "the build2 baseline");
+
+    /* Sharpest of the five: the direct analogue of edge params, and where a
+     * mistyped tuning constant goes. `pric` used to load and run the
+     * transaction at the default price. */
+    B2(E, E, ", \"pric\": 10", E, E, E, E, E, E);
+    expect_rejected(json, "node params", "pric", "mkt");
+
+    /* Second priority for a different reason: metadata carries model_hash,
+     * which the kernel round-trips and never computes, so a typo'd provenance
+     * key is silently dropped from an artefact whose purpose is provenance. */
+    B2(", \"authorr\": \"me\"", E, E, E, E, E, E, E, E);
+    expect_rejected(json, "metadata", "authorr", "metadata");
+
+    B2(E, ", \"unti\": \"J\"", E, E, E, E, E, E, E);
+    expect_rejected(json, "carrier", "unti", "energy");
+
+    B2(E, E, E, E, E, E, ", \"stepp\": 9", E, E);
+    expect_rejected(json, "snapshot", "stepp", "snapshot");
+
+    B2(E, E, E, E, E, E, E, ", \"QQ\": 1.0", E);
+    expect_rejected(json, "snapshot state entry", "QQ", "tank");
+
+    B2(E, E, E, ", \"portz\": {}", E, E, E, E, E);
+    expect_rejected(json, "archetype", "portz", "widget");
+
+    B2(E, E, E, E, ", \"valu\": 2.0", E, E, E, E);
+    expect_rejected(json, "archetype node", "valu", "body");
+
+    B2(E, E, E, E, E, ", \"origen\": \"body\"", E, E, E);
+    expect_rejected(json, "archetype edge", "origen", "bleed");
+
+    /* The root-level log is archival — GSSK_Init restores from
+     * snapshot.mutation_log and never from here — but the schema describes
+     * both with the same $def, so a typo is caught rather than archived. */
+    B2(E, E, E, E, E, E, E, E, ", \"causse\": \"user\"");
+    expect_rejected(json, "mutation_log entry", "causse", "mutation_log");
+
+    printf("  All remaining levels reject\n");
+}
+
+static void test_remaining_levels_accept_underscore(void) {
+    printf("Testing _-prefixed keys at the remaining levels...\n");
+    char json[4096];
+
+    B2(", \"_provenance\": \"prose\"", E, E, E, E, E, E, E, E);
+    expect_loads(json, "metadata _provenance");
+
+    B2(E, ", \"_why_this_unit\": \"prose\"", E, E, E, E, E, E, E);
+    expect_loads(json, "carrier _why_this_unit");
+
+    B2(E, E, ", \"_why_this_price\": \"prose\"", E, E, E, E, E, E);
+    expect_loads(json, "node params _why_this_price");
+
+    B2(E, E, E, ", \"_mechanism\": \"prose\"", ", \"_note\": \"prose\"",
+       ", \"_note\": \"prose\"", E, E, E);
+    expect_loads(json, "archetype, its node and its edge annotated");
+
+    B2(E, E, E, E, E, E, ", \"_captured_by\": \"prose\"",
+       ", \"_note\": \"prose\"", ", \"_note\": \"prose\"");
+    expect_loads(json, "snapshot, a state entry and a mutation_log entry annotated");
+
+    /* Every new level at once, so no single check is masking another. */
+    B2(", \"_a\": 1", ", \"_b\": 2", ", \"_c\": 3", ", \"_d\": 4", ", \"_e\": 5",
+       ", \"_f\": 6", ", \"_g\": 7", ", \"_h\": 8", ", \"_i\": 9");
+    expect_loads(json, "all remaining levels annotated at once");
+
+    printf("  All remaining levels accept _-prefixed keys\n");
+}
+
+/* `snapshot.dt` is EMITTED by GSSK_SerializeSnapshot and never read back by
+ * GSSK_Init — reload takes dt from `config`. Deriving SNAPSHOT_KEYS from the
+ * parser alone would have left it out and rejected every snapshot the kernel
+ * has ever written. That is the drift direction that breaks working models,
+ * which is worse than the bug being fixed, so it gets its own assertion rather
+ * than relying on the corpus check to notice. */
+static void test_snapshot_dt_is_accepted(void) {
+    printf("Testing snapshot.dt — emitted but never parsed — still loads...\n");
+    char json[4096];
+    B2(E, E, E, E, E, E, E, E, E);
+    CHECK(strstr(json, "\"dt\": 0.1,") != NULL,
+          "the fixture must carry snapshot.dt for this to mean anything");
+    expect_loads(json, "a snapshot carrying dt");
+    printf("  snapshot.dt accepted\n");
+}
+
+#undef B2
+#undef E
+
+/* ---------------------------------------------------------------- */
 
 /* The regression that matters. If the accepted sets drift from what the parser
  * reads, this fails by rejecting models that are in fact valid — which is worse
@@ -364,12 +536,25 @@ static void test_runtime_adds(void) {
         " \"params\":{\"k\":0.1,\"bogus_param\":9}}",
         "AddEdge unknown param", "bogus_param");
 
+    /* node_keys_ok is shared between GSSK_Init and GSSK_AddNode, so extending
+     * it covers this path too — but GSSK_AddNode is a separate parser and the
+     * sharing is the thing being asserted, not assumed. */
+    assert_add_is_noop(1,
+        "{\"id\":\"x\",\"type\":\"exchange\",\"value\":1.0,"
+        " \"params\":{\"k\":1.0,\"pric\":10}}",
+        "AddNode unknown node param", "pric");
+
     /* And the annotation convention holds on the runtime paths too. */
     GSSK_Instance *inst = NULL;
     assert(GSSK_Init(BASE_MODEL, &inst) == GSSK_SUCCESS);
     CHECK(GSSK_AddNode(inst,
             "{\"id\":\"x\",\"type\":\"storage\",\"value\":1.0,\"_note\":\"prose\"}")
           == GSSK_SUCCESS, "AddNode must accept an _-prefixed key: %s",
+          GSSK_GetErrorDescription(inst));
+    CHECK(GSSK_AddNode(inst,
+            "{\"id\":\"y\",\"type\":\"exchange\",\"value\":1.0,"
+            " \"params\":{\"price\":2.0,\"_why\":\"prose\"}}")
+          == GSSK_SUCCESS, "AddNode must accept _-prefixed node params: %s",
           GSSK_GetErrorDescription(inst));
     CHECK(GSSK_AddEdge(inst,
             "{\"id\":\"e9\",\"origin\":\"src\",\"target\":\"x\",\"logic\":\"linear\","
@@ -416,6 +601,9 @@ int main(void) {
 
     test_each_level_rejects();
     test_each_level_accepts_underscore();
+    test_remaining_levels_reject();
+    test_remaining_levels_accept_underscore();
+    test_snapshot_dt_is_accepted();
     test_existing_corpora_still_load();
     test_serialized_output_reloads();
     test_runtime_adds();

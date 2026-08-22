@@ -81,7 +81,10 @@
               "type":    { "$ref": "#/$defs/PrimitiveNodeType" },
               "value":   { "type": "number", "default": 0.0, "description": "Initial state. Overridden by the instance's 'value' for the node named by ports.in." },
               "carrier": { "type": "string", "description": "Odum Position 1 carrier label. Falls back to the instance's carrier if omitted." },
-              "params":  { "$ref": "#/$defs/NodeParams" }
+              "params":  {
+                "$ref": "#/$defs/NodeParams",
+                "description": "Template node parameters. Declared as the full NodeParams for consistency with a model node, but parse_user_archetypes reads only k, C, threshold and price — price_node, k_production, k_respiration and k_metabolism are accepted and ignored on a template. The wider set is kept because narrowing it would reject models this schema calls valid."
+              }
             }
           }
         },
@@ -147,7 +150,7 @@
       "patternProperties": { "^_": true },
       "properties": {
         "t":     { "type": "number", "description": "Simulation time at capture." },
-        "dt":    { "type": "number", "description": "Time step in force at capture." },
+        "dt":    { "type": "number", "description": "Time step in force at capture. Informational: GSSK_Init does NOT read it back — a reloaded snapshot takes dt from 'config', exactly as a model with no snapshot does. Declared and accepted because the serialiser emits it, and a kernel that rejected its own output would be a defect." },
         "step":  { "type": "number", "description": "Steps taken since init." },
         "state": {
           "type": "array",
