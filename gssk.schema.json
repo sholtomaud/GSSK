@@ -303,6 +303,11 @@
           "default": "partition",
           "description": "How quality propagates at bifurcations from this node. partition: quality divides proportionally to flow (Bastianoni split). replicate: each downstream branch receives the full quality (Bastianoni co-product). Does NOT affect ODE integration."
         },
+        "active": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this node takes part in the network. GSSK_Init restores it, so a node deactivated via GSSK_DeactivateNode survives serialise/reload as deactivated. Read as the authored flag alone and never inferred from params.k: an edge with k of 0 is present and carrying nothing, which is not the same network as one the author removed, and the two differ in every pass that counts active elements rather than summing flows. Emitted as false by GSSK_SerializeModel for a deactivated node, and omitted otherwise. Deactivating a node also deactivates every edge touching it; those edges carry their own flag, so restoring a node does not re-cascade."
+        },
         "visual": {
           "type": "object",
           "additionalProperties": true,
@@ -372,7 +377,7 @@
         "active": {
           "type": "boolean",
           "default": true,
-          "description": "Emitted as false by GSSK_SerializeModel for an edge that has been deactivated via GSSK_DeactivateEdge. Informational on load: GSSK_Init accepts the key but does not act on it, because deactivation is already carried in the round-trip by params.k, which DeactivateEdge sets to 0. Present here because the serialiser emits it, and output this project's own schema rejects would be a defect."
+          "description": "Whether this edge takes part in the network. GSSK_Init restores it, so a edge deactivated via GSSK_DeactivateEdge survives serialise/reload as deactivated. Read as the authored flag alone and never inferred from params.k: an edge with k of 0 is present and carrying nothing, which is not the same network as one the author removed, and the two differ in every pass that counts active elements rather than summing flows. Emitted as false by GSSK_SerializeModel for a deactivated edge, and omitted otherwise."
         },
         "visual": {
           "type": "object",

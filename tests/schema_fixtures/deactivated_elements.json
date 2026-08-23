@@ -1,0 +1,30 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "deactivated-elements-fixture",
+    "description": "Schema fixture: an inactive node and an inactive edge. GSSK_DeactivateNode/Edge produce this state at runtime, but no example/ model is authored with it, so tests/results/serialized/ never contained an `active` key and nothing noticed that GSSK_Init accepted it without acting on it."
+  },
+
+  "_covers": "Node.active and Edge.active — parsed by json_active() in src/gssk.c GSSK_Init, emitted by build_topology_json. Loading this fixture and re-serialising it is what puts `\"active\": false` into the corpus the schema is checked against.",
+
+  "nodes": [
+    { "id": "supply",  "type": "source",  "value": 50.0 },
+    { "id": "tank",    "type": "storage", "value": 5.0 },
+    { "id": "drain",   "type": "sink",    "value": 0.0 },
+    { "id": "mothballed", "type": "storage", "value": 3.0, "active": false,
+      "_note": "Taken out of the network, not zeroed. A node has no k, so the flag is the only thing carrying this." }
+  ],
+
+  "edges": [
+    { "id": "fill", "origin": "supply", "target": "tank", "logic": "linear", "params": { "k": 0.2 } },
+    { "id": "leak", "origin": "tank", "target": "drain", "logic": "linear", "params": { "k": 0.05 } },
+    { "id": "bypass", "origin": "tank", "target": "mothballed", "logic": "linear",
+      "params": { "k": 0.3 }, "active": false,
+      "_note": "k is deliberately non-zero. An inactive edge is inactive because of the flag; if the flag were inferred from k this edge would load as live and this fixture would flow." },
+    { "id": "metered", "origin": "supply", "target": "drain", "logic": "linear",
+      "params": { "k": 0.0 },
+      "_note": "The converse case: k of 0 with no `active` key is an ACTIVE edge carrying nothing, and must not be read back as deactivated." }
+  ],
+
+  "config": { "t_start": 0.0, "t_end": 5.0, "dt": 0.1, "method": "rk4" }
+}

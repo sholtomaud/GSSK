@@ -384,7 +384,7 @@ static const char *const ROOT_KEYS[] = {
  * published surface, so rejecting it would break every authoring UI. */
 static const char *const NODE_KEYS[] = {
   "id", "type", "value", "carrier", "params", "quality_input",
-  "output_mode", "visual", "forcing"
+  "output_mode", "visual", "forcing", "active"
 };
 
 /* Edge.  `active` is here because build_topology_json EMITS it for a
@@ -540,6 +540,21 @@ static const char *const FORCING_KEYS[] = {
 static double json_num(const cJSON *o, const char *key, double dflt) {
   const cJSON *it = cJSON_GetObjectItem(o, key);
   return cJSON_IsNumber(it) ? it->valuedouble : dflt;
+}
+
+/* An element's `active` flag, defaulting to true when the key is absent.
+ *
+ * Deliberately NOT derived from k == 0.0.  An edge whose author wrote k: 0 is
+ * present in the network and carrying nothing; a deactivated edge has been
+ * taken out of it.  The two differ everywhere the kernel counts active
+ * elements rather than summing flows -- motif detection, the isolated-duet
+ * test in network_is_isolated_duet, the closed-system conservation check --
+ * so reading the flag back from k would reproduce the trajectory and lose the
+ * topology, which is the defect this exists to fix.  Nodes have no k to read
+ * even if that were acceptable. */
+static bool json_active(const cJSON *o) {
+  const cJSON *it = cJSON_GetObjectItem(o, "active");
+  return cJSON_IsBool(it) ? cJSON_IsTrue(it) : true;
 }
 
 /* Parses one `forcing` object into `out`.  Returns false and writes a message
@@ -3373,6 +3388,12 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     cJSON *nc      = cJSON_GetObjectItem(node, "carrier");
     const char *carrier_str = cJSON_IsString(nc) ? nc->valuestring : NULL;
     cJSON *nparams = cJSON_GetObjectItem(node, "params");
+    /* Read once here, applied by whichever of the three paths below claims
+     * this node.  A composite deactivates as a unit: the serialiser emits its
+     * expanded members individually, so a round-trip never takes this branch
+     * with a composite, but a hand-authored `active: false` on one has only
+     * one sensible reading. */
+    const bool node_active = json_active(node);
 
     GSSK_ADefn *def = find_archetype(inst, type->valuestring);
 
@@ -3418,7 +3439,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         N->type   = parse_node_type(t->type_str);
         N->initial_value = (strcmp(t->id, def->default_in) == 0)
                              ? val->valuedouble : t->value;
-        N->active = true;
+        N->active = node_active;
         inst->state[node_slot + j] = N->initial_value;
         if (t->carrier[0]) safe_str_copy(N->carrier, t->carrier, sizeof(N->carrier));
         else if (carrier_str) safe_str_copy(N->carrier, carrier_str, sizeof(N->carrier));
@@ -3458,7 +3479,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       inst->nodes[node_slot].id[63] = '\0';
       inst->nodes[node_slot].type = NODE_CONSTANT;
       inst->nodes[node_slot].initial_value = val->valuedouble;
-      inst->nodes[node_slot].active = true;
+      inst->nodes[node_slot].active = node_active;
       inst->state[node_slot] = val->valuedouble;
       if (carrier_str) safe_str_copy(inst->nodes[node_slot].carrier, carrier_str, sizeof(inst->nodes[node_slot].carrier));
       node_slot++;
@@ -3470,7 +3491,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
     inst->nodes[node_slot].id[63]        = '\0';
     inst->nodes[node_slot].type          = parse_node_type(type->valuestring);
     inst->nodes[node_slot].initial_value = val->valuedouble;
-    inst->nodes[node_slot].active        = true;
+    inst->nodes[node_slot].active        = node_active;
     inst->nodes[node_slot].price_idx     = -1;  /* resolved in second pass */
     inst->state[node_slot]               = val->valuedouble;
 
@@ -3597,7 +3618,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         int ci = resolve_composite_in(inst, target->valuestring);
         if (ci != -1) inst->edges[i].target_idx = ci;
       }
-      inst->edges[i].active     = true;
+      inst->edges[i].active     = json_active(edge);
       inst->edges[i].coupled_idx = -1;
       inst->edges[i].numerator_idx = -1;
 
@@ -4637,7 +4658,7 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
   inst->nodes[idx].id[63]        = '\0';
   inst->nodes[idx].type          = parse_node_type(type->valuestring);
   inst->nodes[idx].initial_value = val->valuedouble;
-  inst->nodes[idx].active        = true;
+  inst->nodes[idx].active        = json_active(node);
   inst->nodes[idx].price_idx     = -1;  /* memset zeroed it; 0 is a valid index */
   inst->state[idx]               = val->valuedouble;
   inst->dQ[idx]                  = 0.0;
@@ -4828,7 +4849,7 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
   inst->edges[ei].target_idx  = tgt_idx;
   inst->edges[ei].logic       = (GSSK_LogicType)lt;
   inst->edges[ei].k           = k->valuedouble;
-  inst->edges[ei].active      = true;
+  inst->edges[ei].active      = json_active(edge);
   inst->edges[ei].coupled_idx = -1;
   inst->edges[ei].control_idx = -1;
   inst->edges[ei].numerator_idx = numer_idx;
@@ -5633,6 +5654,12 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
       cJSON_AddNumberToObject(n, "quality_input", nd->quality_input);
     if (nd->output_mode == OUTPUT_REPLICATE)
       cJSON_AddStringToObject(n, "output_mode", "replicate");
+    /* Only when false, so the common case stays uncluttered -- and matching
+     * the edge case below.  Without this GSSK_DeactivateNode was lost outright
+     * on round-trip: a node has no k to carry the deactivation the way an edge
+     * accidentally did. */
+    if (!nd->active)
+      cJSON_AddFalseToObject(n, "active");
 
     /* Phase 7 — params block for processing-node types */
     if (is_processing_node(nd->type)) {
