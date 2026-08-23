@@ -399,6 +399,60 @@ static const char *const EDGE_PARAM_KEYS[] = {
   "k", "control_node", "numerator_node", "threshold"
 };
 
+/* Node params.  Wider than what any single node type reads: the first four
+ * configure Phase 7 processing nodes and the last three override internal
+ * conductances on built-in composites.  Matches NodeParams in the schema,
+ * which is the published contract; see the archetype note below for the one
+ * place the parser is narrower than this. */
+static const char *const NODE_PARAM_KEYS[] = {
+  "k", "C", "threshold", "price", "price_node",
+  "k_production", "k_respiration", "k_metabolism"
+};
+
+/* Metadata.  Every one of these is both parsed and re-emitted, so the set is
+ * derived from agreement between the two rather than from either alone. */
+static const char *const METADATA_KEYS[] = {
+  "schema_version", "name", "description", "author", "created_at",
+  "kernel_version", "model_hash"
+};
+
+static const char *const CARRIER_KEYS[] = {
+  "id", "unit", "conserved"
+};
+
+/* Snapshot.  `dt` is here because GSSK_SerializeSnapshot EMITS it and the
+ * restore block does NOT read it -- reload takes dt from `config`, as it does
+ * for a model with no snapshot at all.  Leaving it out would reject every
+ * snapshot the kernel has ever written, which is the failure mode these sets
+ * exist to prevent, in the direction that breaks working models. */
+static const char *const SNAPSHOT_KEYS[] = {
+  "t", "dt", "step", "state", "edge_k", "solver", "rng_state", "mutation_log"
+};
+
+static const char *const SNAP_STATE_KEYS[]  = { "id", "Q", "Tr" };
+static const char *const SNAP_EDGE_K_KEYS[] = { "id", "k" };
+static const char *const SNAP_SOLVER_KEYS[] = { "confidence", "incipient_eligible" };
+static const char *const SNAP_RNG_KEYS[]    = { "seed", "state" };
+
+/* Mutation log entries, shared by `snapshot.mutation_log` (which GSSK_Init
+ * restores from) and the root-level `mutation_log` (which it does not -- see
+ * ROOT_KEYS).  Both are described by the same $def, so both are checked. */
+static const char *const MUTATION_KEYS[] = {
+  "t", "op", "target_id", "payload", "cause"
+};
+
+/* Archetype templates.  `ports` is deliberately absent from any key set of its
+ * own: it is an open map from a user-chosen port name to an internal node id,
+ * so it has no fixed keys to check, and the schema declares it the same way. */
+static const char *const ARCHETYPE_KEYS[]  = { "nodes", "edges", "ports" };
+static const char *const ARCH_NODE_KEYS[]  = { "id", "type", "value", "carrier", "params" };
+static const char *const ARCH_EDGE_KEYS[]  = { "id", "origin", "target", "logic",
+                                               "carrier", "params" };
+/* Narrower than EDGE_PARAM_KEYS, matching the schema: an archetype edge
+ * template has no control_node or numerator_node, because those name model
+ * nodes and a template is written before any instance exists. */
+static const char *const ARCH_EDGE_PARAM_KEYS[] = { "k", "threshold" };
+
 static const char *const CONFIG_KEYS[] = {
   "t_start", "t_end", "dt", "method", "solver_tolerance",
   "rel_tol", "abs_tol", "h_min", "h_max"
@@ -453,6 +507,16 @@ static bool node_keys_ok(const cJSON *node, size_t idx,
              element_label(node, idx, "Node", label, sizeof(label)), bad);
     return false;
   }
+  /* The direct analogue of the edge-params check below, and where a mistyped
+   * tuning constant goes: `{"type":"exchange","params":{"pric":10}}` used to
+   * load and run the transaction at the default price. */
+  const cJSON *params = cJSON_GetObjectItem(node, "params");
+  bad = first_unknown_key(params, NODE_PARAM_KEYS, GSSK_NELEMS(NODE_PARAM_KEYS));
+  if (bad) {
+    snprintf(err, errcap, "Schema Error: %s params has unknown key '%s'.",
+             element_label(node, idx, "Node", label, sizeof(label)), bad);
+    return false;
+  }
   return true;
 }
 
@@ -475,6 +539,126 @@ static bool edge_keys_ok(const cJSON *edge, size_t idx,
   return true;
 }
 
+/* Checks one object against a key set, writing `Schema Error: <where> has
+ * unknown key '<k>'.` on failure.  The levels below are plain objects with no
+ * id of their own, so `where` is a literal rather than an element_label. */
+static bool keys_ok(const cJSON *obj, const char *const *allowed, size_t n,
+                    const char *where, char *err, size_t errcap) {
+  const char *bad = first_unknown_key(obj, allowed, n);
+  if (!bad) return true;
+  snprintf(err, errcap, "Schema Error: %s has unknown key '%s'.", where, bad);
+  return false;
+}
+
+/* Every element of an array of objects, against one key set.  `kind` names the
+ * element in the message via element_label, so an entry with an `id` is named
+ * by it and one without is named by position. */
+static bool array_keys_ok(const cJSON *arr, const char *const *allowed, size_t n,
+                          const char *prefix, const char *kind,
+                          char *err, size_t errcap) {
+  if (!cJSON_IsArray(arr)) return true;
+  size_t i = 0;
+  char label[96];
+  for (const cJSON *it = arr->child; it; it = it->next, i++) {
+    const char *bad = first_unknown_key(it, allowed, n);
+    if (!bad) continue;
+    snprintf(err, errcap, "Schema Error: %s%s has unknown key '%s'.",
+             prefix, element_label(it, i, kind, label, sizeof(label)), bad);
+    return false;
+  }
+  return true;
+}
+
+/* `snapshot` and the four nested objects it owns.  Checked even though
+ * GSSK_Init restores only part of it: a typo in a key the kernel does not read
+ * is still a key the AUTHOR believed would be read. */
+static bool snapshot_keys_ok(const cJSON *root, char *err, size_t errcap) {
+  const cJSON *snap = cJSON_GetObjectItem(root, "snapshot");
+  if (!cJSON_IsObject(snap)) return true;
+
+  if (!keys_ok(snap, SNAPSHOT_KEYS, GSSK_NELEMS(SNAPSHOT_KEYS),
+               "snapshot", err, errcap)) return false;
+  if (!array_keys_ok(cJSON_GetObjectItem(snap, "state"),
+                     SNAP_STATE_KEYS, GSSK_NELEMS(SNAP_STATE_KEYS),
+                     "snapshot ", "state entry", err, errcap)) return false;
+  if (!array_keys_ok(cJSON_GetObjectItem(snap, "edge_k"),
+                     SNAP_EDGE_K_KEYS, GSSK_NELEMS(SNAP_EDGE_K_KEYS),
+                     "snapshot ", "edge_k entry", err, errcap)) return false;
+  if (!array_keys_ok(cJSON_GetObjectItem(snap, "mutation_log"),
+                     MUTATION_KEYS, GSSK_NELEMS(MUTATION_KEYS),
+                     "snapshot ", "mutation_log entry", err, errcap)) return false;
+
+  const cJSON *solver = cJSON_GetObjectItem(snap, "solver");
+  if (cJSON_IsObject(solver) &&
+      !keys_ok(solver, SNAP_SOLVER_KEYS, GSSK_NELEMS(SNAP_SOLVER_KEYS),
+               "snapshot solver", err, errcap)) return false;
+
+  /* The schema allows null here, for snapshots written before seeding
+   * existed; only an object has keys to check. */
+  const cJSON *rng = cJSON_GetObjectItem(snap, "rng_state");
+  if (cJSON_IsObject(rng) &&
+      !keys_ok(rng, SNAP_RNG_KEYS, GSSK_NELEMS(SNAP_RNG_KEYS),
+               "snapshot rng_state", err, errcap)) return false;
+
+  return true;
+}
+
+/* `archetypes` is a map from a user-chosen archetype name to a template, so
+ * its own keys are open and only the templates are checked. */
+static bool archetype_keys_ok(const cJSON *root, char *err, size_t errcap) {
+  const cJSON *arch = cJSON_GetObjectItem(root, "archetypes");
+  if (!cJSON_IsObject(arch)) return true;
+
+  for (const cJSON *a = arch->child; a; a = a->next) {
+    if (!a->string) continue;
+    char where[128];
+    snprintf(where, sizeof(where), "Archetype '%.63s'", a->string);
+    if (!keys_ok(a, ARCHETYPE_KEYS, GSSK_NELEMS(ARCHETYPE_KEYS),
+                 where, err, errcap)) return false;
+
+    char prefix[144];
+    snprintf(prefix, sizeof(prefix), "%s ", where);
+    if (!array_keys_ok(cJSON_GetObjectItem(a, "nodes"),
+                       ARCH_NODE_KEYS, GSSK_NELEMS(ARCH_NODE_KEYS),
+                       prefix, "node", err, errcap)) return false;
+    if (!array_keys_ok(cJSON_GetObjectItem(a, "edges"),
+                       ARCH_EDGE_KEYS, GSSK_NELEMS(ARCH_EDGE_KEYS),
+                       prefix, "edge", err, errcap)) return false;
+
+    /* Template params, one level down.  Node templates take NodeParams, the
+     * same $def a model node takes; edge templates take a narrower set. */
+    const cJSON *ns = cJSON_GetObjectItem(a, "nodes");
+    if (cJSON_IsArray(ns)) {
+      size_t i = 0;
+      char label[96];
+      for (const cJSON *n = ns->child; n; n = n->next, i++) {
+        const char *bad = first_unknown_key(cJSON_GetObjectItem(n, "params"),
+                                            NODE_PARAM_KEYS,
+                                            GSSK_NELEMS(NODE_PARAM_KEYS));
+        if (!bad) continue;
+        snprintf(err, errcap, "Schema Error: %s%s params has unknown key '%s'.",
+                 prefix, element_label(n, i, "node", label, sizeof(label)), bad);
+        return false;
+      }
+    }
+    const cJSON *es = cJSON_GetObjectItem(a, "edges");
+    if (cJSON_IsArray(es)) {
+      size_t i = 0;
+      char label[96];
+      for (const cJSON *e = es->child; e; e = e->next, i++) {
+        const char *bad = first_unknown_key(cJSON_GetObjectItem(e, "params"),
+                                            ARCH_EDGE_PARAM_KEYS,
+                                            GSSK_NELEMS(ARCH_EDGE_PARAM_KEYS));
+        if (!bad) continue;
+        snprintf(err, errcap, "Schema Error: %s%s params has unknown key '%s'.",
+                 prefix, element_label(e, i, "edge", label, sizeof(label)), bad);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 /* One pass over the whole model, run before anything is allocated, so a
  * rejection cannot leave a half-built instance behind. */
 static bool model_keys_ok(const cJSON *root, char *err, size_t errcap) {
@@ -484,6 +668,16 @@ static bool model_keys_ok(const cJSON *root, char *err, size_t errcap) {
              bad);
     return false;
   }
+
+  const cJSON *metadata = cJSON_GetObjectItem(root, "metadata");
+  if (!keys_ok(metadata, METADATA_KEYS, GSSK_NELEMS(METADATA_KEYS),
+               "metadata", err, errcap)) return false;
+
+  if (!array_keys_ok(cJSON_GetObjectItem(root, "carriers"),
+                     CARRIER_KEYS, GSSK_NELEMS(CARRIER_KEYS),
+                     "", "Carrier", err, errcap)) return false;
+
+  if (!archetype_keys_ok(root, err, errcap)) return false;
 
   const cJSON *nodes = cJSON_GetObjectItem(root, "nodes");
   if (cJSON_IsArray(nodes)) {
@@ -505,6 +699,17 @@ static bool model_keys_ok(const cJSON *root, char *err, size_t errcap) {
     snprintf(err, errcap, "Schema Error: config has unknown key '%s'.", bad);
     return false;
   }
+
+  if (!snapshot_keys_ok(root, err, errcap)) return false;
+
+  /* The root-level log is archival -- GSSK_Init restores from
+   * snapshot.mutation_log and never from here (ROOT_KEYS records that
+   * asymmetry) -- but the schema describes both with the same $def, so a typo
+   * in the archival copy is caught rather than written into the artefact. */
+  if (!array_keys_ok(cJSON_GetObjectItem(root, "mutation_log"),
+                     MUTATION_KEYS, GSSK_NELEMS(MUTATION_KEYS),
+                     "mutation_log ", "entry", err, errcap)) return false;
+
   return true;
 }
 
