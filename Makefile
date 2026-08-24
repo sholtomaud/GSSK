@@ -95,6 +95,13 @@ $(TARGET_COMPARE): $(TEST_DIR)/csv_compare.c
 MODELS = $(wildcard examples/*.json)
 RESULTS = $(patsubst examples/%.json,tests/results/%.csv,$(MODELS))
 
+# An `X_annotated.json` is documentation, not a second model: it is `X.json`
+# with `_`-prefixed commentary the kernel ignores. Its golden CSV therefore has
+# to be byte-identical to the plain one, and `make test` checks the two
+# trajectories against each other so an edit to one file cannot silently make
+# the annotated twin describe a model that is no longer running.
+ANNOTATED = $(wildcard examples/*_annotated.json)
+
 test: all test-schema
 	@echo "Running Regression Tests..."
 	@mkdir -p tests/results
@@ -109,6 +116,15 @@ test: all test-schema
 		else \
 			echo "SKIPPED (No expected output found. Run 'make test-update' to generate)"; \
 		fi; \
+	done
+	@echo "Checking annotated twins against their plain models..."
+	@for ann in $(ANNOTATED); do \
+		name=$$(basename $$ann .json); \
+		plain=$${name%_annotated}; \
+		echo -n "Twin $$name == $$plain... "; \
+		./bin/csv_compare tests/results/$$plain.csv tests/results/$$name.csv; \
+		if [ $$? -eq 0 ]; then echo "PASSED"; \
+		else echo "FAILED (an annotated variant has drifted from the model it documents)"; exit 1; fi; \
 	done
 
 test-python: shared
