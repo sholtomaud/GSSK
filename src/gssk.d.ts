@@ -97,8 +97,39 @@ export interface GSSKModule {
   /** Phase 2 — relative total-Q change for the last step (conservation error). */
   _GSSK_GetConservationError(kernelPtr: number): number;
 
+  /**
+   * Runs `runs` perturbed simulations and returns a pointer to a
+   * GSSK_EnsembleResult, or 0 on failure.  Must be released with
+   * _GSSK_FreeEnsembleResult.
+   *
+   * DO NOT decode the returned pointer. Reading it through HEAPU32 bakes field
+   * offsets and `size_t` width into your code, and neither is an ABI contract:
+   * the fields sit at 0/4/8/12/16 under wasm32 but 0/8/16/24/32 in a native
+   * 64-bit build, and -sMEMORY64 moves them again. Use the flat getters below,
+   * for the same reason the GSSK_Carrier getters exist.
+   */
   _GSSK_EnsembleForecast(kernelPtr: number, runs: number, perturbation: number): number;
   _GSSK_FreeEnsembleResult(resPtr: number): void;
+  /** Nodes per step in the result; 0 for a null pointer. Same as _GSSK_GetStateSize. */
+  _GSSK_GetEnsembleNodeCount(resPtr: number): number;
+  /** Time steps in the result; 0 for a null pointer. Both endpoints included. */
+  _GSSK_GetEnsembleStepCount(resPtr: number): number;
+  /**
+   * Envelope values at (step, node). These apply the step-major stride
+   * internally, so nothing outside the kernel repeats `s * nodeCount + n`.
+   *
+   * The envelopes are pointwise statistics ACROSS runs, not three sampled
+   * trajectories: min <= mean <= max holds everywhere. Equality is expected
+   * where every run agrees — constant nodes, and step 0 of every node, since
+   * perturbation only touches edge k.
+   *
+   * Out-of-range indices and a null pointer both return 0.0, which is
+   * indistinguishable from a real 0.0 in the data; bound-check against the
+   * count getters first if that matters.
+   */
+  _GSSK_GetEnsembleMin(resPtr: number, step: number, node: number): number;
+  _GSSK_GetEnsembleMax(resPtr: number, step: number, node: number): number;
+  _GSSK_GetEnsembleMean(resPtr: number, step: number, node: number): number;
   _GSSK_Calibrate(kernelPtr: number, obsPtr: number, obsCount: number, iterations: number): number;
   _GSSK_Free(kernelPtr: number): void;
   _malloc(size: number): number;

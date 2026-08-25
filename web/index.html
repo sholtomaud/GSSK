@@ -373,12 +373,9 @@
                     return;
                 }
 
-                // GSSK_EnsembleResult struct mapping
-                const minEnvPtr = gssk.HEAPU32[resPtr >> 2];
-                const maxEnvPtr = gssk.HEAPU32[(resPtr + 4) >> 2];
-                const meanEnvPtr = gssk.HEAPU32[(resPtr + 8) >> 2];
-                const resNodeCount = gssk.HEAPU32[(resPtr + 12) >> 2];
-                const resStepCount = gssk.HEAPU32[(resPtr + 16) >> 2];
+                // Read through the flat getters, never by decoding the struct:
+                // its field offsets differ between wasm32 and native builds.
+                const resStepCount = gssk._GSSK_GetEnsembleStepCount(resPtr);
 
                 const MAX_CHART_POINTS = 2000;
                 const decimateFactor = Math.max(1, Math.floor(resStepCount / MAX_CHART_POINTS));
@@ -392,9 +389,6 @@
                     // But to keep it clean, let's just do it for the first few nodes if many
                     const color = `hsl(${(i * 137.5) % 360}, 70%, 60%)`;
 
-                    // The envelopes are stored as: [step0_node0, step0_node1, ..., step1_node0, step1_node1, ...]
-                    // Actually checking src/advanced.c: idx = s * node_count + n;
-
                     const minData = [];
                     const maxData = [];
                     const meanData = [];
@@ -402,10 +396,9 @@
                     for (let s = 0; s < resStepCount; s += decimateFactor) {
                         if (i === 0) labels.push((t_start + s * dt).toFixed(1));
 
-                        const idx = s * node_count + i;
-                        const minVal = gssk.HEAPF64[(minEnvPtr >> 3) + idx];
-                        const maxVal = gssk.HEAPF64[(maxEnvPtr >> 3) + idx];
-                        const meanVal = gssk.HEAPF64[(meanEnvPtr >> 3) + idx];
+                        const minVal = gssk._GSSK_GetEnsembleMin(resPtr, s, i);
+                        const maxVal = gssk._GSSK_GetEnsembleMax(resPtr, s, i);
+                        const meanVal = gssk._GSSK_GetEnsembleMean(resPtr, s, i);
 
                         minData.push(minVal);
                         maxData.push(maxVal);

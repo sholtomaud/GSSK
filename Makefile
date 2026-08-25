@@ -505,6 +505,8 @@ WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_
 "_GSSK_GetEdgeErrorEstimate","_GSSK_GetStepErrorEstimate",\
 "_GSSK_GetEventCount","_GSSK_GetEventTime","_GSSK_GetEventEdgeID","_GSSK_GetEventDirection",\
 "_GSSK_EnsembleForecast","_GSSK_FreeEnsembleResult","_GSSK_Calibrate",\
+"_GSSK_GetEnsembleNodeCount","_GSSK_GetEnsembleStepCount",\
+"_GSSK_GetEnsembleMin","_GSSK_GetEnsembleMax","_GSSK_GetEnsembleMean",\
 "_GSSK_GetErrorDescription","_GSSK_Free","_malloc","_free",\
 "_GSSK_StepAdaptive","_GSSK_GetLastStepSize","_GSSK_GetNextStepSize",\
 "_GSSK_GetConservationError","_GSSK_SetDiagHooks",\

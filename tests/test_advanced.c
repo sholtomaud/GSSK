@@ -90,6 +90,102 @@ void test_ensemble() {
     printf("  Ensemble test PASSED\n");
 }
 
+/* The flat accessors are the supported way to read an ensemble result: the
+ * struct's field offsets differ between wasm32 and native builds, so any
+ * consumer that decodes it by hand is wrong on one of the two targets.
+ * This asserts the getters agree with the struct everywhere, that they apply
+ * the step-major stride themselves, and that the documented sentinels hold. */
+void test_ensemble_getters() {
+    printf("Testing Ensemble flat accessors...\n");
+
+    const char *model_json = "{"
+        "\"nodes\": ["
+        "  {\"id\": \"Source\", \"type\": \"source\", \"value\": 10.0},"
+        "  {\"id\": \"Stock\", \"type\": \"storage\", \"value\": 0.0}"
+        "],"
+        "\"edges\": ["
+        "  {\"origin\": \"Source\", \"target\": \"Stock\", \"logic\": \"linear\", \"params\": {\"k\": 1.0}}"
+        "],"
+        "\"config\": {\"t_start\": 0, \"t_end\": 10, \"dt\": 1.0}"
+        "}";
+
+    GSSK_Instance *inst = NULL;
+    assert(GSSK_Init(model_json, &inst) == GSSK_SUCCESS);
+    GSSK_SetSeed(inst, 42);
+
+    GSSK_EnsembleResult *res = GSSK_EnsembleForecast(inst, 10, 0.2);
+    assert(res != NULL);
+
+    /* Counts agree with the struct and with the instance they came from. */
+    assert(GSSK_GetEnsembleNodeCount(res) == res->node_count);
+    assert(GSSK_GetEnsembleStepCount(res) == res->step_count);
+    assert(GSSK_GetEnsembleNodeCount(res) == GSSK_GetStateSize(inst));
+
+    size_t nodes = GSSK_GetEnsembleNodeCount(res);
+    size_t steps = GSSK_GetEnsembleStepCount(res);
+    size_t ties = 0;
+
+    for (size_t s = 0; s < steps; s++) {
+        for (size_t n = 0; n < nodes; n++) {
+            size_t idx = s * nodes + n;   /* the stride the getters hide */
+
+            double lo = GSSK_GetEnsembleMin(res, s, n);
+            double hi = GSSK_GetEnsembleMax(res, s, n);
+            double mu = GSSK_GetEnsembleMean(res, s, n);
+
+            /* Getter agrees with the field it claims to expose: catches a
+             * getter reading the wrong envelope or miscomputing the stride. */
+            assert(lo == res->min_envelope[idx]);
+            assert(hi == res->max_envelope[idx]);
+            assert(mu == res->mean_envelope[idx]);
+
+            /* Pointwise statistics across runs, not three sampled
+             * trajectories: this ordering holds by construction. */
+            assert(lo <= mu);
+            assert(mu <= hi);
+
+            if (lo == hi) ties++;
+        }
+    }
+
+    /* Step 0 is identical in every run — perturbation only touches edge k —
+     * so the three envelopes must coincide there.  This is the equality that
+     * makes a "which trajectory is larger" comparison look unstable. */
+    for (size_t n = 0; n < nodes; n++) {
+        assert(GSSK_GetEnsembleMin(res, 0, n) == GSSK_GetEnsembleMax(res, 0, n));
+        assert(GSSK_GetEnsembleMin(res, 0, n) == GSSK_GetEnsembleMean(res, 0, n));
+    }
+    assert(ties >= nodes);   /* at minimum, all of step 0 */
+
+    /* The Source node is constant, so it ties at every step, while the Stock
+     * node must spread.  Without this the ordering assertions above could pass
+     * on a degenerate ensemble. */
+    size_t src_idx = (size_t)GSSK_FindNodeIdx(inst, "Source");
+    size_t stock_idx = (size_t)GSSK_FindNodeIdx(inst, "Stock");
+    for (size_t s = 0; s < steps; s++) {
+        assert(GSSK_GetEnsembleMin(res, s, src_idx) ==
+               GSSK_GetEnsembleMax(res, s, src_idx));
+    }
+    assert(GSSK_GetEnsembleMax(res, steps - 1, stock_idx) >
+           GSSK_GetEnsembleMin(res, steps - 1, stock_idx));
+
+    /* Documented sentinels: out of range and NULL both yield 0.0 / 0. */
+    assert(GSSK_GetEnsembleMin(res, steps, 0) == 0.0);
+    assert(GSSK_GetEnsembleMax(res, 0, nodes) == 0.0);
+    assert(GSSK_GetEnsembleMean(res, steps, nodes) == 0.0);
+    assert(GSSK_GetEnsembleMin(NULL, 0, 0) == 0.0);
+    assert(GSSK_GetEnsembleMax(NULL, 0, 0) == 0.0);
+    assert(GSSK_GetEnsembleMean(NULL, 0, 0) == 0.0);
+    assert(GSSK_GetEnsembleNodeCount(NULL) == 0);
+    assert(GSSK_GetEnsembleStepCount(NULL) == 0);
+
+    printf("  %zu x %zu envelope, %zu tied points\n", steps, nodes, ties);
+
+    GSSK_FreeEnsembleResult(res);
+    GSSK_Free(inst);
+    printf("  Ensemble accessor test PASSED\n");
+}
+
 /* Phase 7 — interaction node smoke test.  Uses examples/interaction_model.json
  * topology inline: A + B → gate (interaction) → C; src → converter (loop_limited)
  * → D.  Both C and D should monotonically increase from 0 once a few RK4
@@ -697,6 +793,7 @@ void test_rng_seeding() {
 int main() {
     test_calibration();
     test_ensemble();
+    test_ensemble_getters();
     test_interaction_node();
     test_loop_limited_node();
     test_producer_composite();
