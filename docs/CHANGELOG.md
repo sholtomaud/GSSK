@@ -6,6 +6,26 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-08-26
+
+### Breaking
+
+GSSK now **rejects models it previously accepted**. Both changes are listed in full below; they are collected here because they are the reason this is a major bump and not `4.2.0`.
+
+- **An unrecognised model key is rejected** instead of silently ignored — `GSSK_Init` returns `GSSK_ERR_SCHEMA_VIOLATION` where it used to return `GSSK_SUCCESS`. Now enforced at every level of the model, not the five originally named.
+- **An unrecognised node `type` is rejected** instead of silently becoming a `storage` node.
+
+Neither accepts anything `gssk.schema.json` ever declared valid, so a model that validates against the published schema loads unchanged. What breaks is a model carrying a typo'd or extra key that the parser used to swallow — including, specifically, a node whose `type` was misspelled and which has therefore been silently simulated as a `storage` node, possibly for a long time. That is the case worth checking on upgrade: the error is the first time GSSK has ever told you about it.
+
+**To upgrade:** run your models through `GSSK_Init` and read the messages, which name the offending key directly:
+
+```
+Schema Error: Node 'A' has unknown key 'bogus_key'.
+Schema Error: Node 'A' has unknown type 'stroage'.
+```
+
+`make test-schema` validates a model corpus against the schema without running it.
+
 ### Added
 
 - **`GSSK_EnsembleResult` no longer crosses the WASM boundary as a raw struct.** `GSSK_EnsembleForecast` returned a pointer and nothing could read it safely from JS, so every consumer decoded the fields by hand. `web/index.html` did it through `HEAPU32`, under a comment admitting it had gone and read `src/advanced.c` to find the `s * node_count + n` stride; a downstream user independently pinned the same offsets in a golden test, having concluded the layout was an undocumented ABI.
