@@ -688,11 +688,23 @@ typedef struct {
 
 /**
  * @brief Result structure for ensemble forecasting.
+ *
+ * The three envelopes are pointwise statistics ACROSS runs, not three sampled
+ * trajectories: at every (step, node) the kernel keeps the smallest value any
+ * run produced, the largest, and the arithmetic mean over all `runs`.  So
+ * min <= mean <= max holds everywhere by construction.  Equality is common and
+ * is not a bug — a constant node, and step 0 of every node, are identical in
+ * every run because perturbation only touches edge k, so all three envelopes
+ * coincide there.
+ *
+ * Both envelopes and the step/node counts are STEP-MAJOR: element (s, n) lives
+ * at index `s * node_count + n`.  Prefer the flat getters below to computing
+ * that stride yourself — see GSSK_GetEnsembleMin.
  */
 typedef struct {
-  double *min_envelope;  /**< Size: node_count × step_count */
-  double *max_envelope;  /**< Size: node_count × step_count */
-  double *mean_envelope; /**< Size: node_count × step_count */
+  double *min_envelope;  /**< Size: node_count × step_count, step-major */
+  double *max_envelope;  /**< Size: node_count × step_count, step-major */
+  double *mean_envelope; /**< Size: node_count × step_count, step-major */
   size_t node_count;
   size_t step_count;
 } GSSK_EnsembleResult;
@@ -707,6 +719,65 @@ GSSK_EnsembleResult *GSSK_EnsembleForecast(GSSK_Instance *inst, size_t runs,
  * @brief Free ensemble results.
  */
 void GSSK_FreeEnsembleResult(GSSK_EnsembleResult *res);
+
+/* -------------------------------------------------------------------------
+ * Flat accessors for GSSK_EnsembleResult
+ *
+ * GSSK_EnsembleForecast returns a heap pointer.  Decoding it field by field
+ * from JS means assuming field offsets and `size_t` width, neither of which is
+ * an ABI contract: under wasm32 the fields sit at 0/4/8/12/16, under a native
+ * 64-bit build at 0/8/16/24/32.  Code that bakes in one set is silently wrong
+ * on the other target and breaks again under -sMEMORY64.
+ *
+ * These getters are the supported route, and follow the GSSK_GetCarrierID /
+ * GSSK_GetCarrierUnit precedent: no struct crosses the boundary, and the
+ * step-major stride lives here rather than in every caller.
+ * ------------------------------------------------------------------------- */
+
+/**
+ * @brief Number of nodes per step in the ensemble result.
+ * @return 0 if res is NULL.  Equals GSSK_GetStateSize for the instance the
+ *         forecast was run on.
+ */
+size_t GSSK_GetEnsembleNodeCount(const GSSK_EnsembleResult *res);
+
+/**
+ * @brief Number of time steps in the ensemble result.
+ * @return 0 if res is NULL.  Equals round((t_end - t_start) / dt) + 1, i.e.
+ *         both endpoints are included.
+ */
+size_t GSSK_GetEnsembleStepCount(const GSSK_EnsembleResult *res);
+
+/**
+ * @brief Lowest value any run produced at (step, node).
+ *
+ * Applies the step-major stride internally, so callers never repeat
+ * `s * node_count + n`.
+ *
+ * @return 0.0 if res is NULL, or if step >= step_count or node >= node_count.
+ *         That is INDISTINGUISHABLE from a genuine 0.0 in the envelope — same
+ *         caveat as GSSK_GetCarrierConserved.  Bound-check against
+ *         GSSK_GetEnsembleStepCount / GSSK_GetEnsembleNodeCount if the
+ *         difference matters.
+ */
+double GSSK_GetEnsembleMin(const GSSK_EnsembleResult *res, size_t step,
+                           size_t node);
+
+/**
+ * @brief Highest value any run produced at (step, node).
+ * @return 0.0 out of range or for NULL res, with the GSSK_GetEnsembleMin
+ *         caveat.  Never below GSSK_GetEnsembleMean for the same (step, node).
+ */
+double GSSK_GetEnsembleMax(const GSSK_EnsembleResult *res, size_t step,
+                           size_t node);
+
+/**
+ * @brief Mean across runs at (step, node).
+ * @return 0.0 out of range or for NULL res, with the GSSK_GetEnsembleMin
+ *         caveat.  Lies within [min, max] for the same (step, node).
+ */
+double GSSK_GetEnsembleMean(const GSSK_EnsembleResult *res, size_t step,
+                            size_t node);
 
 /**
  * @brief Run parameter calibration against observed data (Monte-Carlo DE path).

@@ -1,5 +1,6 @@
 #include "gssk.h"
 #include <math.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -115,6 +116,51 @@ GSSK_EnsembleResult *GSSK_EnsembleForecast(GSSK_Instance *inst, size_t runs,
   free(original_ks);
 
   return res;
+}
+
+/* Flat accessors — see include/gssk.h for why the struct must not be decoded
+ * across the WASM boundary.  The step-major stride lives here, once, so no
+ * caller has to rediscover it by reading this file. */
+
+size_t GSSK_GetEnsembleNodeCount(const GSSK_EnsembleResult *res) {
+  return res ? res->node_count : 0;
+}
+
+size_t GSSK_GetEnsembleStepCount(const GSSK_EnsembleResult *res) {
+  return res ? res->step_count : 0;
+}
+
+/* Shared bound check.  Returns the step-major index, or -1 when the request is
+ * out of range so each getter can hand back its 0.0 sentinel. */
+static ptrdiff_t ensemble_index(const GSSK_EnsembleResult *res, size_t step,
+                                size_t node) {
+  if (!res || step >= res->step_count || node >= res->node_count)
+    return -1;
+  return (ptrdiff_t)(step * res->node_count + node);
+}
+
+double GSSK_GetEnsembleMin(const GSSK_EnsembleResult *res, size_t step,
+                           size_t node) {
+  ptrdiff_t idx = ensemble_index(res, step, node);
+  if (idx < 0 || !res->min_envelope)
+    return 0.0;
+  return res->min_envelope[idx];
+}
+
+double GSSK_GetEnsembleMax(const GSSK_EnsembleResult *res, size_t step,
+                           size_t node) {
+  ptrdiff_t idx = ensemble_index(res, step, node);
+  if (idx < 0 || !res->max_envelope)
+    return 0.0;
+  return res->max_envelope[idx];
+}
+
+double GSSK_GetEnsembleMean(const GSSK_EnsembleResult *res, size_t step,
+                            size_t node) {
+  ptrdiff_t idx = ensemble_index(res, step, node);
+  if (idx < 0 || !res->mean_envelope)
+    return 0.0;
+  return res->mean_envelope[idx];
 }
 
 // --- Parameter Calibration ---
