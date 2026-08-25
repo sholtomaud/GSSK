@@ -8,6 +8,14 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ### Added
 
+- **Phase E.1 — the countercurrent is a first-class example, with an annotated twin.** C.4 shipped `examples/odum_countercurrent.json` carrying its own commentary inside `_`-prefixed fields. That is the wrong file for it: every other reference model here is a plain model beside a separate annotated twin (`household_model.json` / `household_model_annotated.json`), and someone reading for the topology should not have to read four essays to find thirteen nodes. The prose now lives in `examples/odum_countercurrent_annotated.json`, and the plain file is the model alone.
+
+  **The golden CSV did not change by a single byte.** That is the evidence that this was a re-shelving and not an edit — `tests/expected/odum_countercurrent.csv` is bit-for-bit what C.4 generated, and `make test-net-energy` still asserts the same claim against the stripped file.
+
+  `make test` now also checks **annotated twins against the models they document**. Each `X_annotated.json` gets its own golden CSV, byte-identical to `X.csv`, and the harness compares the two trajectories directly. Golden CSVs alone cannot catch this class of drift: edit the annotated model, run `make test-update`, and its golden is regenerated to match the model that has just diverged, so everything passes while the documented model and the running model are different systems. Verified by negative control — perturbing the exchange `k` in the annotated file to `0.0031` and regenerating its golden passes every per-model comparison and fails the twin check.
+
+  The fuzz corpus gains `tests/fuzz_corpus/seed_closed_money_loop.json`: money circulates `buyer → exchange → till → buyer` with no money source and no money sink, so the parser is seeded with the closed-loop topology `d1` will build on, and money is conserved over the run. `seed_exchange_node.json` stays, as the open-loop counterpart.
+
 - **Phase C.4 — inflation emerges from net-energy decline.** `examples/odum_countercurrent.json` builds Odum's Figure-2 structure: the fuel reserve is a depleting **storage**, extraction is a work gate needing both the reserve and the machinery, and the energy spent *getting* energy is fed back as a cost inversely proportional to what is left. As the reserve depletes the feedback fraction rises, the net energy reaching the economy collapses faster than the gross, and price — money over real throughput — rises.
 
   Measured over the run: fuel `1000 → 20`, structure booms `1 → 391` by `t≈29` then busts to `22`, net-energy-per-gross falls `0.85 → 0.27`, and the price index rises **`25 → 18,708`, a 739× inflation**, monotonically across the whole depletion phase.

@@ -158,9 +158,9 @@ to a sink.
 
 Promote the countercurrent from fuzz seed to a supported, regression-tested feature.
 
-- [ ] `examples/odum_countercurrent.json` — the Phase C.4 model (carriers `energy`+`money`, exchange node/diamond, closed money loop, depletion feedback, endogenous price). Include an annotated variant like `household_model_annotated.json`.
-- [ ] `tests/expected/odum_countercurrent.csv` — golden output; wire into the `make test` CSV-compare harness (`tests/csv_compare.c`).
-- [ ] Keep `seed_exchange_node.json` in the fuzz corpus; add a closed-loop seed too.
+- [x] `examples/odum_countercurrent.json` — the Phase C.4 model (carriers `energy`+`money`, exchange node/diamond, closed money loop, depletion feedback, endogenous price). Include an annotated variant like `household_model_annotated.json`.
+- [x] `tests/expected/odum_countercurrent.csv` — golden output; wire into the `make test` CSV-compare harness (`tests/csv_compare.c`).
+- [x] Keep `seed_exchange_node.json` in the fuzz corpus; add a closed-loop seed too.
 - [ ] `docs/emergy_synthesis.md` or new `docs/countercurrent.md` — narrative tying the model to Odum (1973) points 1–3, with the Fig. 2 / Fig. 3 correspondence and the price-index plot.
 - [ ] `docs/cookbook.md` — "Modelling money as a countercurrent" recipe.
 - **Acceptance**: `make test` includes the countercurrent golden test; docs build under VitePress with the new page linked.
