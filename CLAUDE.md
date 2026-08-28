@@ -29,10 +29,21 @@ containerised toolchains:
 make ci-local          # real GCC + Linux clang + WASM
 make test-linux        # real GCC only (Ubuntu 24.04, matches CI)
 make wasm-container    # Emscripten without a local emcc
+make demo              # the demo + plot, without a local matplotlib
 ```
 
 These need the Apple `container` CLI. `make wasm-container` in particular
 removes any excuse for an unverified export list.
+
+`make demo` is containerised for a different reason than the other three: it is
+not about compiler parity but about matplotlib. `python/plot_demo.py` needs it,
+the system `python3` here does not have it, and the target used to die with
+`ERROR: matplotlib is required for plot-demo`. `Containerfile.demo` pins the
+interpreter and the deps through `uv`, so the plot is reproducible instead of
+depending on what happens to be pip-installed. Like the other container
+targets it leaves Linux objects in `lib/` — it says so when it finishes, and
+`make clean && make all` restores a native tree. `make demo-native` skips the
+container if you do have matplotlib on the host.
 
 **Task tracking is `crux`.** One global binary and one shared database, scoped
 to this project by `.crux/project.json`. There is no project-local `crux`

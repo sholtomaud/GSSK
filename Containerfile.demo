@@ -1,0 +1,61 @@
+# Demo toolchain — makes `make demo` runnable with nothing installed on the
+# host but the Apple `container` CLI.
+#
+# Why this exists: `make demo` builds the CLI, writes two CSVs, then plots them
+# with python/plot_demo.py, which needs matplotlib. On a machine whose system
+# python3 has no matplotlib the target dies with
+#   ERROR: matplotlib is required for plot-demo
+# and make exits 1 — so the demo was only ever green by accident of whatever
+# happened to be pip-installed on the developer's machine. Nothing in the repo
+# pinned a Python environment.
+#
+# uv is the environment controller here: it installs the interpreter itself
+# (`uv python install`), creates the venv, and resolves the deps from a pinned
+# requirements file, so the plot is reproducible rather than dependent on the
+# host.
+#
+# The venv deliberately lives in /opt, NOT in the working tree. The repo is
+# bind-mounted at /work and already contains a macOS-built .venv/ — a venv
+# inside the mount would either be that broken one or would scribble Linux
+# wheels into the developer's checkout.
+#
+# Base tracks Containerfile.linux (GitHub's ubuntu-latest) so the C build here
+# is the same one CI runs; bump the two together.
+ARG UBUNTU_VERSION=24.04
+FROM ubuntu:${UBUNTU_VERSION}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# build-essential + make build the kernel and CLI; ca-certificates lets uv
+# fetch the interpreter and wheels over TLS.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        make \
+        ca-certificates \
+        curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# uv, pinned. An unpinned installer would silently change resolver behaviour.
+ARG UV_VERSION=0.5.11
+RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | \
+        env UV_INSTALL_DIR=/usr/local/bin INSTALLER_NO_MODIFY_PATH=1 sh
+
+# uv supplies the interpreter too, so the image does not depend on whatever
+# python3 Ubuntu happens to ship.
+ARG PYTHON_VERSION=3.12
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
+RUN uv python install ${PYTHON_VERSION}
+
+ENV VIRTUAL_ENV=/opt/gssk-demo-venv
+RUN uv venv --python ${PYTHON_VERSION} ${VIRTUAL_ENV}
+
+COPY python/requirements-demo.txt /tmp/requirements-demo.txt
+RUN uv pip install --python ${VIRTUAL_ENV}/bin/python -r /tmp/requirements-demo.txt
+
+# First on PATH so plot_demo.py's `python3` is the venv's, not /usr/bin's.
+ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
+
+WORKDIR /work
+
+CMD ["bash"]
