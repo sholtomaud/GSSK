@@ -1,0 +1,7 @@
+# Python dependencies for `make demo` / python/plot_demo.py.
+#
+# Installed by Containerfile.demo into a uv-managed venv at
+# /opt/gssk-demo-venv. Pinned exactly: an unpinned matplotlib would make the
+# demo plot change under us on a rebuild, which is precisely the kind of drift
+# the containerised targets exist to remove.
+matplotlib==3.10.0

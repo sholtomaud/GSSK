@@ -49,6 +49,15 @@ Before submitting any changes, you MUST ensure:
 
 `make ci-local` runs 4 and 5 together.
 
+`make demo` is also containerised, for a different reason: it plots with
+matplotlib, which a bare system `python3` does not have. `Containerfile.demo`
+carries a uv-managed interpreter and a pinned matplotlib
+(`python/requirements-demo.txt`) alongside the C toolchain, so `make demo`
+needs nothing installed on the host but the `container` CLI. It cleans first
+and leaves Linux artefacts in `lib/`, so run `make clean && make all`
+afterwards. `make demo-native` is the same demo without the container, for a
+host that does have matplotlib.
+
 ## 🔀 Contribution Workflow
 
 **Never commit directly to `main`.** Branch, push, and open a PR.

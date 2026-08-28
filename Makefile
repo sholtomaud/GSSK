@@ -60,6 +60,7 @@ CONTAINER_BIN    := container
 CONTAINER_PLATFORM := linux/amd64
 IMAGE_WASM       := gssk-wasm
 IMAGE_LINUX      := gssk-linux
+IMAGE_DEMO       := gssk-demo
 EMSDK_VERSION    := 3.1.64
 UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
@@ -69,6 +70,7 @@ CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
+        container-image-demo demo-native \
         wasm-container test-linux test-linux-clang shell-wasm shell-linux ci-local
 
 all: directories $(TARGET_LIB) $(TARGET_CLI) $(TARGET_COMPARE)
@@ -135,8 +137,26 @@ demo-python: shared
 	@echo "=== Python binding demo ==="
 	@python3 python/demo.py
 
-# Quick demo — run two models, print CSV output, and generate PNG plot
-demo: all
+# Quick demo — run two models, print CSV output, and generate PNG plot.
+#
+# This runs in a container (see Containerfile.demo) because the plotting step
+# needs matplotlib, and a bare macOS python3 does not have it — the target used
+# to fail with "ERROR: matplotlib is required for plot-demo". The image carries
+# a uv-managed interpreter and a pinned matplotlib, so `make demo` works with
+# nothing installed on the host but the `container` CLI.
+#
+# `make clean` first because the bind mount is shared with the host: without it
+# the Linux build inside would link against macOS objects left in lib/.
+demo: container-image-demo
+	@$(MAKE) clean
+	$(CRUN) $(IMAGE_DEMO) make demo-native
+	@echo ""
+	@echo "──────────────────────────────────────────────"
+	@echo "Tree now holds Linux artefacts; run 'make clean && make all' to restore native."
+
+# The demo proper. Run directly if you have matplotlib on the host; otherwise
+# `make demo` runs exactly this inside the container.
+demo-native: all
 	@echo "=== Decay model (exponential decay, RK4) ==="
 	@$(TARGET_CLI) examples/decay_model.json /tmp/gssk_demo_decay.csv
 	@head -6 /tmp/gssk_demo_decay.csv
@@ -578,7 +598,15 @@ container-image-linux: container-start
 		--platform $(CONTAINER_PLATFORM) \
 		--build-arg UBUNTU_VERSION=$(UBUNTU_VERSION) .
 
-# Build both images
+# Build the demo image (uv-managed Python + pinned matplotlib, plus the C
+# toolchain, so `make demo` needs nothing on the host)
+container-image-demo: container-start
+	$(CONTAINER_BIN) build -f Containerfile.demo -t $(IMAGE_DEMO) \
+		--platform $(CONTAINER_PLATFORM) \
+		--build-arg UBUNTU_VERSION=$(UBUNTU_VERSION) .
+
+# Build both build-toolchain images (the demo image is built on demand by
+# `make demo`, which is not part of the CI-parity set)
 container-image: container-image-wasm container-image-linux
 
 # Build the WASM artefacts into dist/. This is the check that CI does NOT
