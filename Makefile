@@ -339,6 +339,21 @@ test-unknown-keys: all $(TARGET_TEST_UNKNOWNKEY)
 # outright, having no k to hide behind.
 TARGET_TEST_DEACT = $(BIN_DIR)/test_deactivation_round_trip
 
+# GSSK_NodeType (GIP-0001 G7). The enum and GSSK_GetNodeTypeString read the
+# same field, so they cannot disagree by accident — what these catch is the
+# set changing under one and not the other, an ordinal being renumbered (a
+# silent break for every WASM consumer), and a composite leaking its own name
+# where a primitive belongs.
+TARGET_TEST_NODEENUM = $(BIN_DIR)/test_node_type_enum
+
+$(TARGET_TEST_NODEENUM): $(TEST_DIR)/test_node_type_enum.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-node-type-enum
+test-node-type-enum: all $(TARGET_TEST_NODEENUM)
+	@echo "Running node type enum tests..."
+	@./$(TARGET_TEST_NODEENUM)
+
 $(TARGET_TEST_DEACT): $(TEST_DIR)/test_deactivation_round_trip.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
 
@@ -357,21 +372,6 @@ $(TARGET_TEST_CARRIER): $(TEST_DIR)/test_carrier_api.c $(TARGET_LIB)
 test-carrier-api: all $(TARGET_TEST_CARRIER)
 	@echo "Running carrier accessor tests..."
 	@./$(TARGET_TEST_CARRIER)
-
-# GSSK_NodeType (GIP-0001 G7). The enum and GSSK_GetNodeTypeString read the
-# same field, so they cannot disagree by accident — what these catch is the
-# set changing under one and not the other, an ordinal being renumbered (a
-# silent break for every WASM consumer), and a composite leaking its own name
-# where a primitive belongs.
-TARGET_TEST_NODEENUM = $(BIN_DIR)/test_node_type_enum
-
-$(TARGET_TEST_NODEENUM): $(TEST_DIR)/test_node_type_enum.c $(TARGET_LIB)
-	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
-
-.PHONY: test-node-type-enum
-test-node-type-enum: all $(TARGET_TEST_NODEENUM)
-	@echo "Running node type enum tests..."
-	@./$(TARGET_TEST_NODEENUM)
 
 # Schema conformance — examples/ must match gssk.schema.json.
 #

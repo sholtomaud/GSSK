@@ -101,12 +101,6 @@ jobs:
       - name: Deactivation round-trip tests
         run: make test-deactivation
 
-      # The flat carrier getters exist to keep GSSK_Carrier's struct layout off
-      # the WASM boundary. This suite also asserts they agree with
-      # GSSK_GetCarrier at every index, so the two paths cannot drift.
-      - name: Carrier accessor tests
-        run: make test-carrier-api
-
       # GIP-0001 G7. The enum and GSSK_GetNodeTypeString read the same field,
       # so they cannot disagree by accident — what this catches is the
       # primitive set changing under one and not the other, an ordinal being
@@ -115,6 +109,12 @@ jobs:
       # a primitive belongs.
       - name: Node type enum tests (GIP-0001 G7)
         run: make test-node-type-enum
+
+      # The flat carrier getters exist to keep GSSK_Carrier's struct layout off
+      # the WASM boundary. This suite also asserts they agree with
+      # GSSK_GetCarrier at every index, so the two paths cannot drift.
+      - name: Carrier accessor tests
+        run: make test-carrier-api
 
       # Phase C asserts things a CSV regression cannot see. The C.3 suite in
       # particular runs the same relaxation under RK4 and under IDC against an
