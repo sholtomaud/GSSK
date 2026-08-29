@@ -241,6 +241,20 @@ test-price-dynamics: all $(TARGET_TEST_PRICEDYN)
 # which has full archetype dispatch, and GSSK_AddNode, which has none.
 TARGET_TEST_NODETYPE = $(BIN_DIR)/test_node_type_validation
 
+# Limit / threshold logic constants (GIP-0001 G6). The formula was always
+# implemented; where C comes from was never written down. These pin the four
+# facts the schema now states, including the invisible one: a control-supplied
+# C that decays past GSSK_LIMIT_C_EPSILON closes the pathway without an error.
+TARGET_TEST_LIMIT = $(BIN_DIR)/test_limit_logic
+
+$(TARGET_TEST_LIMIT): $(TEST_DIR)/test_limit_logic.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-limit-logic
+test-limit-logic: all $(TARGET_TEST_LIMIT)
+	@echo "Running limit/threshold logic tests..."
+	@./$(TARGET_TEST_LIMIT)
+
 $(TARGET_TEST_NODETYPE): $(TEST_DIR)/test_node_type_validation.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
 
@@ -357,20 +371,6 @@ $(TARGET_TEST_CARRIER): $(TEST_DIR)/test_carrier_api.c $(TARGET_LIB)
 test-carrier-api: all $(TARGET_TEST_CARRIER)
 	@echo "Running carrier accessor tests..."
 	@./$(TARGET_TEST_CARRIER)
-
-# Limit / threshold logic constants (GIP-0001 G6). The formula was always
-# implemented; where C comes from was never written down. These pin the four
-# facts the schema now states, including the invisible one: a control-supplied
-# C that decays past GSSK_LIMIT_C_EPSILON closes the pathway without an error.
-TARGET_TEST_LIMIT = $(BIN_DIR)/test_limit_logic
-
-$(TARGET_TEST_LIMIT): $(TEST_DIR)/test_limit_logic.c $(TARGET_LIB)
-	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
-
-.PHONY: test-limit-logic
-test-limit-logic: all $(TARGET_TEST_LIMIT)
-	@echo "Running limit/threshold logic tests..."
-	@./$(TARGET_TEST_LIMIT)
 
 # Schema conformance — examples/ must match gssk.schema.json.
 #
