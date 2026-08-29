@@ -6,6 +6,16 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### Fixed
+
+- **The npm package version was five majors behind the kernel.** `package.json` still said `1.0.0` while `include/gssk.h` said `GSK_VERSION_STRING "5.0.0"`; `scripts/release.sh` had only ever bumped the header. That is not cosmetic — the package ships `include/`, so a consumer who pinned `gssk@1.0.0` from npm was reading a header out of `node_modules` and getting the current one, or pinning a version that never described the kernel it was served. GIP-0001 was written this way: it quotes `INTERACTION /**< Multiplier flow (k * Q1 * Q2) */` and `GetStateSize /* Number of storage nodes */`, neither of which has been the comment for several majors.
+
+  `package.json` is now `5.0.0`, `scripts/release.sh` bumps it alongside the header (and re-reads the file to confirm it is still valid JSON before committing), and `scripts/check_version_sync.py` fails the build when the two disagree — or when `GSK_VERSION_STRING` disagrees with the `GSK_VERSION_MAJOR`/`MINOR`/`PATCH` macros beside it. It is stdlib-only, runs as `make check-version`, and is a prerequisite of `make test`, so a skew cannot survive a local test run.
+
+### Added
+
+- **`gssk.schema.json` now ships in the npm package.** `package.json` `"files"` listed `dist/`, `include/` and `README.md`, so the only machine-readable statement of the model vocabulary was not published. Downstream consumers hand-maintained their own copy of the node-type enum instead, with nothing to detect drift against the real one. The schema is now in `"files"`, `make check-version` asserts it stays there, and CI asserts `npm pack` actually puts it in the tarball.
+
 ### Added
 
 - **`GSSK_NodeType` is public, with `GSSK_GetNodeType` beside the existing string getter.** Most of GIP-0001 G7 was already closed on `main`: `GSSK_GetNodeTypeString` returns the type, the primitive set is a closed enum in `gssk.schema.json`, and `GSSK_Init` rejects an unrecognised type naming the node — G7's acceptance criterion verbatim. What remained is that a C consumer had only string comparison for a decision the kernel makes with an integer. That is slower, and worse, typo-able in a way the compiler cannot see: `strcmp(t, "loop_limted")` is a valid program that quietly never matches.
