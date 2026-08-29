@@ -29,6 +29,11 @@
  *      clamped the flow at zero would pass 1-3 on a forward-only model.
  *
  * Plus the ABI: the existing GSSK_LogicType values must not have moved.
+ *
+ * Property 4 is asserted on the RATE via GSSK_GetFlows (GIP-0001 G4, merged
+ * while this branch was open) as well as on the stores. A negative flow is
+ * the thing no other logic in this kernel can produce, so it is worth naming
+ * rather than inferring from which tank grew.
  */
 
 #include "gssk.h"
@@ -225,7 +230,21 @@ static void test_flows_backwards(void) {
     const double *Q = GSSK_GetState(inst);
 
     double a0 = Q[0], b0 = Q[1];
-    for (int i = 0; i < 100; i++) GSSK_Step(inst, 0.1);
+    GSSK_Step(inst, 0.1);
+
+    /* GSSK_GetFlows (G4) landed while this branch was open, so the central
+     * claim can be asserted on the RATE rather than inferred from the stores:
+     * the flow is NEGATIVE, which is what "may flow in either direction"
+     * means and what no other logic in the kernel can produce. */
+    double f = GSSK_GetFlows(inst)[0];
+    CHECK(f < 0.0,
+          "flow reads %.15g; it must be NEGATIVE, because the declared target "
+          "is richer than the declared origin", f);
+    CHECK(fabs(f - 0.2 * (Q[0] - Q[1])) < 1e-9,
+          "flow reads %.15g, expected k*(Q_origin - Q_target) = %.15g",
+          f, 0.2 * (Q[0] - Q[1]));
+
+    for (int i = 0; i < 99; i++) GSSK_Step(inst, 0.1);
 
     CHECK(Q[0] > a0 + 1.0,
           "the declared ORIGIN went from %.9g to %.9g — it should have GAINED, "

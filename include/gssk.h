@@ -198,6 +198,40 @@ const double *GSSK_GetState(GSSK_Instance *inst);
  */
 size_t GSSK_GetStateSize(GSSK_Instance *inst);
 
+/**
+ * @brief Read the current per-edge flow rate vector (Odum J).
+ *        Index i corresponds to the edge at position i in the original JSON
+ *        array, matching GSSK_GetEdgeID() and GSSK_GetEdgeK().
+ *
+ *        The counterpart of GSSK_GetState(): that reports the storages, this
+ *        reports the rates between them. Refreshed by every GSSK_Step() and
+ *        GSSK_StepAdaptive() regardless of whether quality accounting is
+ *        enabled, and evaluated at the post-step state and time — so it is
+ *        the rate the step just integrated, not a prediction of the next one.
+ *
+ *        Before the first step every entry is 0.0, and GSSK_Reset() returns
+ *        them to 0.0: no flow has been computed yet, and saying so is more
+ *        useful than reporting a rate no solver has taken.
+ *
+ *        An inactive edge (see GSSK_DeactivateEdge) reads 0.0 rather than the
+ *        rate it would carry if it were live.
+ *
+ *        Signed. A negative entry means the pathway ran against its declared
+ *        direction; GSSK_GetEdgeQualityFlow clamps such a flow to zero
+ *        following Odum's convention, this does not.
+ *
+ * @return const double*  Read-only array of length GSSK_GetFlowCount(),
+ *                        or NULL if inst is NULL.
+ */
+const double *GSSK_GetFlows(GSSK_Instance *inst);
+
+/**
+ * @brief Number of edges (= length of GSSK_GetFlows()).
+ *        Always equal to GSSK_GetEdgeCount(); provided so the flow pair reads
+ *        like the GSSK_GetState() / GSSK_GetStateSize() pair it mirrors.
+ */
+size_t GSSK_GetFlowCount(GSSK_Instance *inst);
+
 /* =========================================================================
  * Quality accounting accessors
  * ========================================================================= */
