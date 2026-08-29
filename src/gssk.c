@@ -1121,6 +1121,7 @@ static int parse_logic_type(const char *s) {
   if (strcmp(s, "limit")       == 0) return GSSK_LOGIC_LIMIT;
   if (strcmp(s, "threshold")   == 0) return GSSK_LOGIC_THRESHOLD;
   if (strcmp(s, "ratio")       == 0) return GSSK_LOGIC_RATIO;
+  if (strcmp(s, "reversible")  == 0) return GSSK_LOGIC_REVERSIBLE;
   return -1;
 }
 
@@ -1477,6 +1478,13 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
         flow = k * ratio_numer(e, state) /
                ratio_denom(state[e->control_idx], e->threshold);
       break;
+    case GSSK_LOGIC_REVERSIBLE:
+      /* ADR 0007 — Odum's barb-less pathway.  The ONLY logic that reads the
+       * target: flow follows the gradient, so it is signed and the two
+       * statements below transport it backwards when it is negative.  No
+       * special case is needed for that, which is the point. */
+      flow = k * (Q_orig - state[e->target_idx]);
+      break;
     }
 
     deriv[e->origin_idx] -= flow;
@@ -1583,6 +1591,21 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
         A[e->target_idx * (int)n + num] += conductance;
         A[e->origin_idx * (int)n + num] -= conductance;
       }
+      break;
+    case GSSK_LOGIC_REVERSIBLE:
+      /* ADR 0007 — EXACT, not a linearisation.  k(Q_orig - Q_tgt) is linear in
+       * the state, so IDC integrates this edge exactly and `reversible` stays
+       * incipient-eligible, unlike limit (linearised Michaelis-Menten) and
+       * ratio (exact only for a frozen denominator).
+       *
+       * It is also the first logic touching FOUR matrix entries rather than
+       * two, because the flow depends on both ends.  Dropping the second pair
+       * leaves a pathway that drains its origin and never equilibrates. */
+      conductance = k;
+      A[e->target_idx * (int)n + e->origin_idx] += conductance;
+      A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
+      A[e->target_idx * (int)n + e->target_idx] -= conductance;
+      A[e->origin_idx * (int)n + e->target_idx] += conductance;
       break;
     default:
       break; /* threshold: handled as constant forcing in build_forcing_vector */
@@ -1970,6 +1993,10 @@ static double compute_edge_flow(const GSSK_EdgeInternal *e,
       return e->k * ratio_numer(e, state) /
              ratio_denom(state[e->control_idx], e->threshold);
     return 0.0;
+  case GSSK_LOGIC_REVERSIBLE:
+    /* Signed: a negative return means the pathway is running backwards along
+     * its declared direction, which for a barb-less line is not an error. */
+    return e->k * (Q - state[e->target_idx]);
   }
   return 0.0;
 }
@@ -2573,7 +2600,15 @@ static void compute_quality_pass(GSSK_Instance *inst, double t, const double *st
         f = e->k * ratio_numer(e, state) /
             ratio_denom(state[e->control_idx], e->threshold);
       break;
+    case GSSK_LOGIC_REVERSIBLE:
+      f = e->k * (Q - state[e->target_idx]);
+      break;
     }
+    /* ADR 0007 — the clamp below is load-bearing now, not incidental: a
+     * reversible pathway running BACKWARDS carries no transformity into the
+     * node it arrives at, because a flow running back up a gradient is not
+     * producing that node.  Its contribution switches off while it reverses
+     * and resumes when the gradient does. */
     flow[i] = (f > 0.0) ? f : 0.0;
     outsum[e->origin_idx] += flow[i];
   }
@@ -2704,6 +2739,12 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
      * implicit/stiff and forward-sensitivity paths, never in plain RK4. */
     int dvar = orig;
 
+    /* Second state variable the flow depends on.  Until ADR 0007 that was
+     * always the control node, so the variable was named for it; `reversible`
+     * depends on its TARGET instead, which is not a control and must not be
+     * resolved as one. */
+    int dvar2 = ctrl;
+
     switch (e->logic) {
     case GSSK_LOGIC_CONSTANT:
       break;
@@ -2741,13 +2782,19 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     case GSSK_LOGIC_THRESHOLD:
       break; /* step function → 0 derivative almost everywhere */
+    case GSSK_LOGIC_REVERSIBLE:
+      /* F = k(Q_orig - Q_tgt):  ∂F/∂Q_orig = k,  ∂F/∂Q_tgt = -k. */
+      dF_dQ_orig = e->k;
+      dvar2      = tgt;
+      dF_dQ_ctrl = -e->k;
+      break;
     }
 
     J[(size_t)orig * n + (size_t)dvar] -= dF_dQ_orig;
     J[(size_t)tgt  * n + (size_t)dvar] += dF_dQ_orig;
-    if (ctrl >= 0 && (dF_dQ_ctrl != 0.0)) {
-      J[(size_t)orig * n + (size_t)ctrl] -= dF_dQ_ctrl;
-      J[(size_t)tgt  * n + (size_t)ctrl] += dF_dQ_ctrl;
+    if (dvar2 >= 0 && (dF_dQ_ctrl != 0.0)) {
+      J[(size_t)orig * n + (size_t)dvar2] -= dF_dQ_ctrl;
+      J[(size_t)tgt  * n + (size_t)dvar2] += dF_dQ_ctrl;
     }
   }
 
@@ -2945,6 +2992,10 @@ static void compute_param_deriv(GSSK_Instance *inst, double t, const double *sta
     if (ctrl >= 0)
       dF_dk = ratio_numer(e, state) / ratio_denom(state[ctrl], e->threshold);
     break;
+  case GSSK_LOGIC_REVERSIBLE:
+    /* ∂F/∂k = Q_orig - Q_tgt, and it is signed like the flow itself. */
+    dF_dk = Q - state[tgt];
+    break;
   }
 
   b[(size_t)orig] -= dF_dk;
@@ -3042,7 +3093,11 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
         f = e->k * ratio_numer(e, inst->state) /
             ratio_denom(inst->state[e->control_idx], e->threshold);
       break;
+    case GSSK_LOGIC_REVERSIBLE:
+      f = e->k * (Q - inst->state[e->target_idx]);
+      break;
     }
+    /* Same clamp, same reason as compute_quality_pass (ADR 0007). */
     flow[ei] = f > 0.0 ? f : 0.0;
     outsum[e->origin_idx] += flow[ei];
   }
@@ -3097,6 +3152,9 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
     if (ej->control_idx >= 0)
       dflow_dk = ratio_numer(ej, inst->state) /
                  ratio_denom(inst->state[ej->control_idx], ej->threshold);
+    break;
+  case GSSK_LOGIC_REVERSIBLE:
+    dflow_dk = Q - inst->state[ej_tgt];
     break;
   }
 
@@ -5745,6 +5803,7 @@ static const char *logic_type_str(GSSK_LogicType lt) {
      * into a proportional flow.  Snapshots and the Phase G archival dumps go
      * through this function, so the loss was permanent, not cosmetic. */
     case GSSK_LOGIC_RATIO:       return "ratio";
+    case GSSK_LOGIC_REVERSIBLE:  return "reversible";
     default:                     return "linear";
   }
 }

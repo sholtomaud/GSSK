@@ -66,7 +66,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-reversible test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -357,6 +357,19 @@ $(TARGET_TEST_CARRIER): $(TEST_DIR)/test_carrier_api.c $(TARGET_LIB)
 test-carrier-api: all $(TARGET_TEST_CARRIER)
 	@echo "Running carrier accessor tests..."
 	@./$(TARGET_TEST_CARRIER)
+
+# Reversible (barb-less) pathway, GIP-0001 G3 / ADR 0007. Conservation and
+# origin/target symmetry are the sharp assertions: any sign or index error in
+# build_flow_matrix's four entries breaks them, and neither is visible in a
+# golden CSV of node quantities that was regenerated from the same bug.
+TARGET_TEST_REVERSIBLE = $(BIN_DIR)/test_reversible
+
+$(TARGET_TEST_REVERSIBLE): $(TEST_DIR)/test_reversible.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-reversible: all $(TARGET_TEST_REVERSIBLE)
+	@echo "Running reversible pathway tests..."
+	@./$(TARGET_TEST_REVERSIBLE)
 
 # Schema conformance — examples/ must match gssk.schema.json.
 #

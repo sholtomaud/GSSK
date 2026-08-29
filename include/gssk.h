@@ -37,9 +37,20 @@ typedef enum {
   GSSK_LOGIC_INTERACTION, /**< Work gate / Riccati: F = k × Q_origin × Q_control */
   GSSK_LOGIC_LIMIT,       /**< Saturation (Michaelis-Menten): F = kQ/(1+Q/C) */
   GSSK_LOGIC_THRESHOLD,   /**< Boolean switch: F = k if Q > threshold, else 0 */
-  GSSK_LOGIC_RATIO        /**< Division: F = k × Q_num / max(Q_control, ε).
+  GSSK_LOGIC_RATIO,       /**< Division: F = k × Q_num / max(Q_control, ε).
                                Q_num is params.numerator_node when given (read,
                                not consumed — ADR 0005), else Q_origin. */
+  GSSK_LOGIC_REVERSIBLE   /**< Odum's barb-less pathway (ADR 0007):
+                               F = k × (Q_origin − Q_target), SIGNED.
+                               The only logic that reads the target, and the
+                               only one that can transport backwards along its
+                               declared direction — for a barb-less line,
+                               `origin` and `target` name the two ends, not a
+                               from and a to. Use for diffusion, exchange
+                               across a gradient, any equilibrating process.
+                               Exactly integrable, so it stays IDC-eligible.
+                               Appended, not inserted: the values above cross
+                               the WASM boundary as bare integers. */
 } GSSK_LogicType;
 
 /**
