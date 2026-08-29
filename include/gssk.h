@@ -35,8 +35,17 @@ typedef enum {
   GSSK_LOGIC_CONSTANT,    /**< Fixed flow rate: F = k */
   GSSK_LOGIC_LINEAR,      /**< Proportional to source: F = k × Q_origin */
   GSSK_LOGIC_INTERACTION, /**< Work gate / Riccati: F = k × Q_origin × Q_control */
-  GSSK_LOGIC_LIMIT,       /**< Saturation (Michaelis-Menten): F = kQ/(1+Q/C) */
-  GSSK_LOGIC_THRESHOLD,   /**< Boolean switch: F = k if Q > threshold, else 0 */
+  GSSK_LOGIC_LIMIT,       /**< Saturation (Michaelis-Menten):
+                               F = k × Q_origin / (1 + Q_origin/C), approaching
+                               k × C as Q_origin grows.  C is the half-saturation
+                               constant — see GSSK_LIMIT_C_EPSILON for where it
+                               comes from and how it can silently reach zero. */
+  GSSK_LOGIC_THRESHOLD,   /**< Boolean switch: F = k if Q_origin > threshold,
+                               else 0.  The comparand is the ORIGIN's Q, never
+                               the control node — threshold logic ignores
+                               params.control_node entirely.  Strict, so a
+                               Q_origin exactly equal to threshold does not
+                               flow. */
   GSSK_LOGIC_RATIO        /**< Division: F = k × Q_num / max(Q_control, ε).
                                Q_num is params.numerator_node when given (read,
                                not consumed — ADR 0005), else Q_origin. */
@@ -88,6 +97,34 @@ typedef enum {
  * edge with `params.threshold`, which is the epsilon when set above zero.
  */
 #define GSSK_RATIO_EPSILON 1e-9
+
+/**
+ * @brief Floor below which GSSK_LOGIC_LIMIT stops flowing.
+ *
+ * The saturation constant C in F = k × Q_origin / (1 + Q_origin/C) comes from
+ * ONE of two places, in this order:
+ *
+ *   1. `params.control_node`'s current Q, if that node is named.
+ *   2. `params.threshold`, when it is above zero and no control node exists.
+ *
+ * control_node WINS when both are given; threshold is not a runtime fallback,
+ * only the source used when no control node was named.  An edge with neither
+ * is rejected by GSSK_Init ("requires control_node or threshold > 0"), so the
+ * absent-C case cannot reach the solver.
+ *
+ * What CAN reach the solver is a C that was valid at load and is not any more.
+ * A C taken from control_node is a state variable, not a constant: if that
+ * node is itself a store, the half-saturation point moves as the run proceeds,
+ * and if it decays to this epsilon or below the flow becomes 0.0 rather than
+ * raising an error.  The pathway closes mid-run, in a model that loaded
+ * without complaint and whose file says nothing about it.
+ *
+ * That is deliberate — a saturation constant of zero means the pathway
+ * saturates at zero throughput, which is a physical statement rather than a
+ * malformed one — but it is invisible, so check a decaying control's magnitude
+ * before concluding a limit edge is behaving.
+ */
+#define GSSK_LIMIT_C_EPSILON 1e-9
 
 /**
  * @brief Integration methods.
