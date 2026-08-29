@@ -107,6 +107,14 @@ jobs:
       - name: Carrier accessor tests
         run: make test-carrier-api
 
+      # GIP-0001 G6. F = kQ/(1+Q/C) was implemented and documented; where C
+      # comes from was not, so the schema is now the statement of record and
+      # these are what keep it true. Includes the invisible case: a
+      # control-supplied C that decays past GSSK_LIMIT_C_EPSILON closes the
+      # pathway to exactly 0.0, silently, in a model that loaded fine.
+      - name: Limit/threshold logic constant tests (GIP-0001 G6)
+        run: make test-limit-logic
+
       # Phase C asserts things a CSV regression cannot see. The C.3 suite in
       # particular runs the same relaxation under RK4 and under IDC against an
       # analytic solution: a flow that reads a node other than its origin has

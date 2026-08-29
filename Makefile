@@ -66,7 +66,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-limit-logic test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -357,6 +357,19 @@ $(TARGET_TEST_CARRIER): $(TEST_DIR)/test_carrier_api.c $(TARGET_LIB)
 test-carrier-api: all $(TARGET_TEST_CARRIER)
 	@echo "Running carrier accessor tests..."
 	@./$(TARGET_TEST_CARRIER)
+
+# Limit / threshold logic constants (GIP-0001 G6). The formula was always
+# implemented; where C comes from was never written down. These pin the four
+# facts the schema now states, including the invisible one: a control-supplied
+# C that decays past GSSK_LIMIT_C_EPSILON closes the pathway without an error.
+TARGET_TEST_LIMIT = $(BIN_DIR)/test_limit_logic
+
+$(TARGET_TEST_LIMIT): $(TEST_DIR)/test_limit_logic.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-limit-logic: all $(TARGET_TEST_LIMIT)
+	@echo "Running limit/threshold logic tests..."
+	@./$(TARGET_TEST_LIMIT)
 
 # Schema conformance — examples/ must match gssk.schema.json.
 #

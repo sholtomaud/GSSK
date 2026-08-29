@@ -6,6 +6,25 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### Documentation
+
+- **The schema now says where limit logic's saturation constant C comes from.** `F = k × Q_origin / (1 + Q_origin/C)` has been implemented since the primitive was added and the formula is stated in `include/gssk.h`, but nothing told a consumer how to *supply* C. `gssk.schema.json` described `control_node` as a node that "modulates the flow" without saying it **is** the denominator constant, and described `threshold` for threshold and ratio logic only, never mentioning that it doubles as C when no control node exists. Raised as GIP-0001 G6.
+
+  Both `EdgeParams` descriptions and the `EdgeLogic` enum now state the rule: `control_node`'s current Q supplies C if that node is named, otherwise `params.threshold` when it is above zero, and **`control_node` wins when both are given** — `threshold` is the source used in its absence, not a runtime fallback.
+
+  Two behaviours that were not written down anywhere are now stated, in the schema and in the header:
+
+  - A C taken from `control_node` is a **state variable, not a constant.** If that node is itself a store, the edge has a moving half-saturation point.
+  - When C falls to `1e-9` or below the flow becomes **exactly 0.0 rather than an error.** A control node that decays toward zero therefore closes the pathway mid-run, in a model that loaded without complaint and whose file says nothing about it. That is deliberate — a saturation constant of zero means the pathway saturates at zero throughput — but it was invisible.
+
+  The GIP filed the second point as "flow is silently 0.0 rather than an error". That is only half true, and the half matters: a limit edge with **neither** source of C is rejected at load with `Logic Error: Edge N (limit) requires control_node or threshold > 0`. Only a C that was valid at load and decayed afterwards reaches the solver.
+
+  `threshold` logic's comparand is documented too: always `Q_origin`, never the control node, and the comparison is strict.
+
+- **`GSSK_LIMIT_C_EPSILON`** is now a named public constant carrying that explanation, following the `GSSK_RATIO_EPSILON` precedent. The eight bare `1e-9` literals in the limit paths use it, so the documentation cannot drift from the threshold it documents. (The loop-limited node's `node_C` guard is a different constant with a different fallback and is untouched.)
+
+- **`tests/test_limit_logic.c`** pins all four facts, so the documentation stays true. The precedence assertion is mutation-tested: swapping `control_node` and `threshold` priority in the kernel makes it fail. The decaying-control test asserts `Q_origin` is *exactly* frozen afterwards, and separately that the origin still holds most of its contents — otherwise a fully-drained store would sit still and pass.
+
 ## [5.0.0] - 2026-08-26
 
 ### Breaking
