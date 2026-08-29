@@ -8,6 +8,10 @@ export interface GSSKModule {
   _GSSK_GetTEnd(kernelPtr: number): number;
   _GSSK_GetDt(kernelPtr: number): number;
   _GSSK_GetNodeID(kernelPtr: number, index: number): number;
+  /** Node type as a GSSK_NodeType ordinal: 0 storage, 1 source, 2 sink,
+   *  3 constant, 4 interaction, 5 gain, 6 loop_limited, 7 exchange, 8 switch,
+   *  9 invalid (null instance or out-of-range index). */
+  _GSSK_GetNodeType(kernelPtr: number, index: number): number;
   _GSSK_FindNodeIdx(kernelPtr: number, idPtr: number): number;
   _GSSK_GetEdgeID(kernelPtr: number, index: number): number;
   _GSSK_FindEdgeIdx(kernelPtr: number, idPtr: number): number;

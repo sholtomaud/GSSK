@@ -66,7 +66,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-node-type-enum test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -358,6 +358,20 @@ test-carrier-api: all $(TARGET_TEST_CARRIER)
 	@echo "Running carrier accessor tests..."
 	@./$(TARGET_TEST_CARRIER)
 
+# GSSK_NodeType (GIP-0001 G7). The enum and GSSK_GetNodeTypeString read the
+# same field, so they cannot disagree by accident — what these catch is the
+# set changing under one and not the other, an ordinal being renumbered (a
+# silent break for every WASM consumer), and a composite leaking its own name
+# where a primitive belongs.
+TARGET_TEST_NODEENUM = $(BIN_DIR)/test_node_type_enum
+
+$(TARGET_TEST_NODEENUM): $(TEST_DIR)/test_node_type_enum.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-node-type-enum: all $(TARGET_TEST_NODEENUM)
+	@echo "Running node type enum tests..."
+	@./$(TARGET_TEST_NODEENUM)
+
 # Schema conformance — examples/ must match gssk.schema.json.
 #
 # The kernel does not validate against the schema at load time (ADR 0004), so
@@ -541,7 +555,7 @@ WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_
 "_GSSK_GetCarrierID","_GSSK_GetCarrierUnit","_GSSK_GetCarrierConserved",\
 "_GSSK_FindCarrierIdx",\
 "_GSSK_GetEdgeCarrier","_GSSK_GetCarrierConservationError",\
-"_GSSK_GetNodeTypeString",\
+"_GSSK_GetNodeTypeString","_GSSK_GetNodeType",\
 "_GSSK_GetArchetypeCount","_GSSK_GetArchetypeName",\
 "_GSSK_GetCompositeCount","_GSSK_GetCompositeID",\
 "_GSSK_GetCompositeArchetype","_GSSK_GetNodeComposite","_GSSK_GetNodeRole",\

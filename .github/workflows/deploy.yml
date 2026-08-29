@@ -107,6 +107,15 @@ jobs:
       - name: Carrier accessor tests
         run: make test-carrier-api
 
+      # GIP-0001 G7. The enum and GSSK_GetNodeTypeString read the same field,
+      # so they cannot disagree by accident — what this catches is the
+      # primitive set changing under one and not the other, an ordinal being
+      # renumbered (silently breaking every WASM consumer, since the value
+      # crosses as a bare integer), and a composite leaking its own name where
+      # a primitive belongs.
+      - name: Node type enum tests (GIP-0001 G7)
+        run: make test-node-type-enum
+
       # Phase C asserts things a CSV regression cannot see. The C.3 suite in
       # particular runs the same relaxation under RK4 and under IDC against an
       # analytic solution: a flow that reads a node other than its origin has

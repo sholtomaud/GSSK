@@ -43,6 +43,40 @@ typedef enum {
 } GSSK_LogicType;
 
 /**
+ * @brief The nine ESL primitives a node can be.
+ *
+ * This is the complete set the kernel ever sees, and it is the same closed set
+ * `gssk.schema.json` declares. Composites and archetypes are deliberately
+ * absent: they are authoring conveniences that expand during GSSK_Init, so by
+ * the time a consumer can call GSSK_GetNodeType every node is a primitive.
+ * A node that was authored as a member of a composite reports the primitive it
+ * expanded to, not the composite's name — use GSSK_GetNodeComposite and
+ * GSSK_GetNodeRole to recover where it came from.
+ *
+ * Values are explicit and MUST NOT be renumbered: they cross the WASM boundary
+ * as bare integers. Append new primitives at the end, before GSSK_NODE_INVALID.
+ *
+ * The string form is GSSK_GetNodeTypeString, which predates this enum and
+ * remains the right call for display and serialisation. This one is for
+ * branching, where string comparison is both slower and easy to typo silently.
+ */
+typedef enum {
+  GSSK_NODE_STORAGE      = 0, /**< Tank: accumulates, dQ/dt = inflow - outflow */
+  GSSK_NODE_SOURCE       = 1, /**< Forcing function; Q is held, never integrated */
+  GSSK_NODE_SINK         = 2, /**< Heat sink; absorbs, dQ/dt = 0 */
+  GSSK_NODE_CONSTANT     = 3, /**< Fixed value; read, never consumed */
+  GSSK_NODE_INTERACTION  = 4, /**< Phase 7: multi-input production/work gate */
+  GSSK_NODE_GAIN         = 5, /**< Phase 7: constant gain amplifier */
+  GSSK_NODE_LOOP_LIMITED = 6, /**< Phase 7: Michaelis-Menten loop-limited converter */
+  GSSK_NODE_EXCHANGE     = 7, /**< Phase 7: transaction exchange diamond */
+  GSSK_NODE_SWITCH       = 8, /**< Phase 7: digital switching box */
+  GSSK_NODE_INVALID      = 9  /**< Not a primitive: a NULL instance or an index
+                                   out of bounds. Appended rather than given -1
+                                   so the enum stays non-negative across the
+                                   WASM boundary. */
+} GSSK_NodeType;
+
+/**
  * @brief Denominator floor for GSSK_LOGIC_RATIO.
  *
  * The denominator is clamped to at least this value, so the flow saturates at
@@ -280,11 +314,30 @@ const char *GSSK_GetNodeID(GSSK_Instance *inst, size_t index);
 int GSSK_FindNodeIdx(GSSK_Instance *inst, const char *id);
 
 /**
- * @brief Get node type as a string ("source", "storage", "sink",
+ * @brief Get node type as a string ("storage", "source", "sink", "constant",
  *        "interaction", "gain", "loop_limited", "exchange", "switch").
  * @return const char* — valid for lifetime of inst. Never NULL.
+ *
+ * @warning Returns "storage" for a NULL instance or an out-of-range index,
+ *          which is indistinguishable from a genuine storage node. Use
+ *          GSSK_GetNodeType, whose GSSK_NODE_INVALID says so, when the index
+ *          might not be valid.
  */
 const char *GSSK_GetNodeTypeString(GSSK_Instance *inst, size_t node_idx);
+
+/**
+ * @brief Get node type as a GSSK_NodeType, for branching rather than display.
+ *
+ * Agrees with GSSK_GetNodeTypeString for every primitive, by construction:
+ * both read the same field, and the string function is a switch over this
+ * enum.
+ *
+ * @return GSSK_NODE_INVALID if inst is NULL or node_idx is out of range —
+ *         following GSSK_GetNodeID's contract, which returns NULL for the
+ *         same conditions, rather than GSSK_GetNodeTypeString's, which cannot
+ *         report the error and returns "storage".
+ */
+GSSK_NodeType GSSK_GetNodeType(GSSK_Instance *inst, size_t node_idx);
 
 /**
  * @brief Get edge ID by index. Returns NULL if edge has no id or index is OOB.

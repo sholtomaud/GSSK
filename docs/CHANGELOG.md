@@ -6,6 +6,22 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
+### Added
+
+- **`GSSK_NodeType` is public, with `GSSK_GetNodeType` beside the existing string getter.** Most of GIP-0001 G7 was already closed on `main`: `GSSK_GetNodeTypeString` returns the type, the primitive set is a closed enum in `gssk.schema.json`, and `GSSK_Init` rejects an unrecognised type naming the node — G7's acceptance criterion verbatim. What remained is that a C consumer had only string comparison for a decision the kernel makes with an integer. That is slower, and worse, typo-able in a way the compiler cannot see: `strcmp(t, "loop_limted")` is a valid program that quietly never matches.
+
+  The enum already existed privately in `src/gssk.c`, and was already called `GSSK_NodeType`. It has been **moved** to `include/gssk.h` rather than copied, so there is no pair to drift; its internal constants are now `GSSK_`-prefixed, which a public header requires and which `-Werror` verified at all 68 use sites.
+
+  The GIP's proposed enum was incomplete against `main`: the primitive set is nine, not four — `storage`, `source`, `sink`, `constant`, `interaction`, `gain`, `loop_limited`, `exchange`, `switch`. The Phase 7 processing nodes are in it. Composites and archetypes are deliberately **not**: they expand during `GSSK_Init`, so by the time a consumer can ask, every node is a primitive. A node authored as part of a `producer` reports `storage`, `interaction` or `sink` — use `GSSK_GetNodeComposite` / `GSSK_GetNodeRole` to recover where it came from.
+
+  Ordinal values are explicit and pinned by test: they cross the WASM boundary as bare integers, so renumbering them is a silent breaking change for every JS consumer. Append new primitives before `GSSK_NODE_INVALID`.
+
+### Fixed
+
+- **Out of bounds is now reportable.** `GSSK_GetNodeTypeString` returns `"storage"` for a NULL instance or an out-of-range index, which is indistinguishable from a genuine storage node and cannot be checked for. `GSSK_GetNodeType` returns `GSSK_NODE_INVALID` instead, following `GSSK_GetNodeID`'s contract. The string function's behaviour is unchanged — it is load-bearing elsewhere — but it now carries an `@warning` saying so, and a test asserts the warning is still true.
+
+- **`GSSK_GetNodeTypeString`'s header comment listed eight of the nine primitives**, omitting `constant`.
+
 ## [5.0.0] - 2026-08-26
 
 ### Breaking
