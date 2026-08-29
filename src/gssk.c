@@ -226,6 +226,11 @@ struct GSSK_Instance {
   double *edge_error;  /* |flow_idc - flow_rk4| / max(|flow_rk4|, eps) per edge */
   double  step_error;  /* max over all edges */
 
+  /* GIP-0001 G4 — per-edge flow rate (Odum J), refreshed on every step.
+   * Allocated unconditionally, unlike edge_qflow: a consumer must be able to
+   * read pathway rates from a model that does no quality accounting. */
+  double *edge_flow;
+
   /* Phase 1.3 — threshold event log */
   GSSK_EventInternal *events;
   size_t event_count;
@@ -2524,6 +2529,93 @@ static GSSK_Status adaptive_step_ex(GSSK_Instance *inst,
  * Called after every GSSK_Step() if quality_enabled.
  * ========================================================================= */
 
+/**
+ * Flow rate (Odum J) on ONE edge at a given state, for a given k.
+ *
+ * The switch used to be written out twice — once in compute_quality_pass and
+ * once, in a slightly different dialect, in compute_derivatives. GIP-0001 G4
+ * needs it a third time for the public flow accessors, and three copies of a
+ * dispatch table is two too many, so it lives here.
+ *
+ * `k` is a parameter rather than being read off `e` because the two callers
+ * genuinely disagree about which k they mean, and the disagreement is load
+ * bearing rather than accidental:
+ *
+ *   update_flow_cache passes forced_edge_k(inst, e, t) — the edge's rate at
+ *   THIS instant, which is what the derivative integrated and therefore what
+ *   a consumer annotating a pathway must be shown.
+ *
+ *   compute_quality_pass passes e->k, the declared rate, which is what it has
+ *   always used. That is very probably a defect of the same class the Phase H
+ *   comment in build_flow_matrix warns about — a forced edge makes emergy
+ *   accounting disagree with the trajectory it is accounting for — but it is
+ *   a change to published emergy numbers and does not belong in a task about
+ *   adding an accessor. Tracked as quality-pass-ignores-edge-forcing.
+ *
+ * Returns the signed rate. Callers that need Odum's non-negative convention
+ * clamp on read; the public accessor does not, because the sign of a flow is
+ * information a diagram consumer wants rather than noise.
+ */
+static double edge_flow_rate(const GSSK_EdgeInternal *e, const double *state,
+                             double k) {
+  double Q = state[e->origin_idx];
+  double f = 0.0;
+
+  switch (e->logic) {
+  case GSSK_LOGIC_CONSTANT:
+    f = k;
+    break;
+  case GSSK_LOGIC_LINEAR:
+    f = k * Q;
+    break;
+  case GSSK_LOGIC_INTERACTION:
+    if (e->control_idx != -1)
+      f = k * Q * state[e->control_idx];
+    break;
+  case GSSK_LOGIC_LIMIT: {
+    double C = -1.0;
+    if (e->control_idx != -1) C = state[e->control_idx];
+    else if (e->threshold > 0.0) C = e->threshold;
+    if (C > 1e-9) f = (k * Q) / (1.0 + (Q / C));
+    break;
+  }
+  case GSSK_LOGIC_THRESHOLD:
+    f = (Q > e->threshold) ? k : 0.0;
+    break;
+  case GSSK_LOGIC_RATIO:
+    if (e->control_idx != -1)
+      f = k * ratio_numer(e, state) /
+          ratio_denom(state[e->control_idx], e->threshold);
+    break;
+  }
+  return f;
+}
+
+/**
+ * GIP-0001 G4 — refresh the per-edge flow cache.
+ *
+ * Flow was step-local: computed inside compute_derivatives, used to build
+ * deriv[], and discarded. A consumer could read every node quantity and not
+ * one rate, which makes a diagram whose entire subject is flow impossible to
+ * annotate. This writes the rates down once per step so they survive the call.
+ *
+ * Called on EVERY step, not only when quality accounting is on — the whole
+ * point is that a model with no quality_input anywhere still reports flows.
+ *
+ * An inactive edge reports 0.0 rather than its would-be rate: nothing is
+ * moving along it, and reporting the counterfactual would put a number on a
+ * pathway a diagram should be drawing as dead.
+ */
+static void update_flow_cache(GSSK_Instance *inst, double t,
+                              const double *state) {
+  if (!inst->edge_flow) return;
+  for (size_t i = 0; i < inst->edge_count; i++) {
+    GSSK_EdgeInternal *e = &inst->edges[i];
+    if (!e->active) { inst->edge_flow[i] = 0.0; continue; }
+    inst->edge_flow[i] = edge_flow_rate(e, state, forced_edge_k(inst, e, t));
+  }
+}
+
 static void compute_quality_pass(GSSK_Instance *inst, double t, const double *state) {
   /* Node forcing reaches this helper through the `state` it is handed, which
    * the caller has already substituted, and a processing node's rate is
@@ -2548,32 +2640,9 @@ static void compute_quality_pass(GSSK_Instance *inst, double t, const double *st
   for (size_t i = 0; i < inst->edge_count; i++) {
     GSSK_EdgeInternal *e = &inst->edges[i];
     if (!e->active) continue;
-    double Q = state[e->origin_idx];
-    double f = 0.0;
-    switch (e->logic) {
-    case GSSK_LOGIC_CONSTANT:    f = e->k; break;
-    case GSSK_LOGIC_LINEAR:      f = e->k * Q; break;
-    case GSSK_LOGIC_INTERACTION:
-      if (e->control_idx != -1) {
-        f = e->k * Q * state[e->control_idx];
-      }
-      break;
-    case GSSK_LOGIC_LIMIT: {
-      double C = -1.0;
-      if (e->control_idx != -1) C = state[e->control_idx];
-      else if (e->threshold > 0.0) C = e->threshold;
-      if (C > 1e-9) f = (e->k * Q) / (1.0 + Q / C);
-      break;
-    }
-    case GSSK_LOGIC_THRESHOLD:
-      f = (Q > e->threshold) ? e->k : 0.0;
-      break;
-    case GSSK_LOGIC_RATIO:
-      if (e->control_idx != -1)
-        f = e->k * ratio_numer(e, state) /
-            ratio_denom(state[e->control_idx], e->threshold);
-      break;
-    }
+    /* e->k, not forced_edge_k: preserving the behaviour this pass has always
+     * had. See the note on edge_flow_rate. */
+    double f = edge_flow_rate(e, state, e->k);
     flow[i] = (f > 0.0) ? f : 0.0;
     outsum[e->origin_idx] += flow[i];
   }
@@ -4160,6 +4229,13 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
                              sizeof(double));
   if (!inst->edge_error) { status = GSSK_ERR_MALLOC_FAILED; goto cleanup; }
 
+  /* GIP-0001 G4 — per-edge flow cache. Unconditional, like edge_error and
+   * unlike edge_qflow: flows are readable from any model, not only one that
+   * does quality accounting. */
+  inst->edge_flow = calloc(inst->edge_count ? inst->edge_count : 1,
+                           sizeof(double));
+  if (!inst->edge_flow) { status = GSSK_ERR_MALLOC_FAILED; goto cleanup; }
+
   /* Phase H — seed the state with the forced values at t_start, so the very
    * first row a consumer reads already shows the waveform rather than the
    * declared placeholder. */
@@ -4385,6 +4461,12 @@ post_step:
   /* ---- Phase 5: per-carrier conservation errors (Q_before saved in idc_state) ---- */
   if (inst->carrier_count > 0 && inst->config.method != GSSK_METHOD_ADAPTIVE)
     update_carrier_conservation_errors(inst, inst->idc_state, inst->state);
+
+  /* ---- GIP-0001 G4: per-edge flow cache ----
+   * Before the quality pass and outside its `if`, so a model with no quality
+   * accounting still reports flows, and so both read the same post-step
+   * state at the same time. */
+  update_flow_cache(inst, inst->current_t + dt, inst->state);
 
   /* ---- Quality accounting pass ---- */
   if (inst->quality_enabled)
@@ -5041,6 +5123,13 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
   inst->edge_error = new_err;
   inst->edge_error[new_ec - 1] = 0.0;
 
+  /* Grow per-edge flow cache. The new edge reads 0.0 until the next step,
+   * which is honest: no flow has been computed along it yet. */
+  double *new_flow = realloc(inst->edge_flow, new_ec * sizeof(double));
+  if (!new_flow) { cJSON_Delete(edge); return GSSK_ERR_MALLOC_FAILED; }
+  inst->edge_flow = new_flow;
+  inst->edge_flow[new_ec - 1] = 0.0;
+
   size_t ei = inst->edge_count;
   memset(&inst->edges[ei], 0, sizeof(GSSK_EdgeInternal));
 
@@ -5150,6 +5239,8 @@ void GSSK_Reset(GSSK_Instance *inst) {
     memset(inst->quality_flow, 0, inst->node_count * sizeof(double));
   if (inst->edge_error)
     memset(inst->edge_error, 0, inst->edge_count * sizeof(double));
+  if (inst->edge_flow)
+    memset(inst->edge_flow, 0, inst->edge_count * sizeof(double));
   inst->step_error         = 0.0;
   inst->event_count        = 0; /* retain capacity, just reset count */
   inst->confidence         = GSSK_CONFIDENCE_HIGH;
@@ -5170,6 +5261,14 @@ const char *GSSK_GetErrorDescription(GSSK_Instance *inst) {
 
 const double *GSSK_GetState(GSSK_Instance *inst) {
   return inst ? inst->state : NULL;
+}
+
+const double *GSSK_GetFlows(GSSK_Instance *inst) {
+  return inst ? inst->edge_flow : NULL;
+}
+
+size_t GSSK_GetFlowCount(GSSK_Instance *inst) {
+  return inst ? inst->edge_count : 0;
 }
 
 size_t GSSK_GetStateSize(GSSK_Instance *inst) {
@@ -5339,6 +5438,8 @@ GSSK_Status GSSK_StepAdaptive(GSSK_Instance *inst) {
   /* h_last exposed as the externally visible step size for this call */
   inst->h_last = h;
   /* h_next was updated by adaptive_step_ex (PI suggestion from last sub-step) */
+
+  update_flow_cache(inst, inst->current_t, inst->state);
 
   if (inst->quality_enabled)
     compute_quality_pass(inst, inst->current_t, inst->state);
@@ -6230,6 +6331,7 @@ void GSSK_Free(GSSK_Instance *inst) {
   free(inst->tmp_state);
   free(inst->idc_state);
   free(inst->edge_error);
+  free(inst->edge_flow);
   free(inst->events);
   free(inst->nodes);
   free(inst->edges);

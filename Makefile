@@ -66,7 +66,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-edge-flows test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -358,6 +358,20 @@ test-carrier-api: all $(TARGET_TEST_CARRIER)
 	@echo "Running carrier accessor tests..."
 	@./$(TARGET_TEST_CARRIER)
 
+# Per-edge flow accessors (GIP-0001 G4). Flow used to be step-local, so a
+# consumer could read every node quantity and not one rate. Asserts the cache
+# is written at the post-step state, on both step paths, with and without
+# quality accounting, and that it agrees with the quality pass it now shares a
+# flow expression with.
+TARGET_TEST_FLOWS = $(BIN_DIR)/test_edge_flows
+
+$(TARGET_TEST_FLOWS): $(TEST_DIR)/test_edge_flows.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-edge-flows: all $(TARGET_TEST_FLOWS)
+	@echo "Running per-edge flow accessor tests..."
+	@./$(TARGET_TEST_FLOWS)
+
 # Schema conformance — examples/ must match gssk.schema.json.
 #
 # The kernel does not validate against the schema at load time (ADR 0004), so
@@ -512,7 +526,7 @@ dist: directories
 	cp gssk.schema.json $(DIST_DIR)/gssk.schema.json
 
 # WASM Build (Requires emscripten)
-WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_GetStateSize",\
+WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_GetStateSize","_GSSK_GetFlows","_GSSK_GetFlowCount",\
 "_GSSK_GetTStart","_GSSK_GetTEnd","_GSSK_GetDt","_GSSK_GetCurrentTime","_GSSK_GetStepCount",\
 "_GSSK_GetNodeID","_GSSK_FindNodeIdx","_GSSK_GetEdgeID","_GSSK_FindEdgeIdx",\
 "_GSSK_GetEdgeCount","_GSSK_GetEdgeK","_GSSK_SetEdgeK",\
