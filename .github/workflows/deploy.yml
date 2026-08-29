@@ -107,6 +107,14 @@ jobs:
       - name: Carrier accessor tests
         run: make test-carrier-api
 
+      # GIP-0001 G4. Flow was step-local, so nothing outside the kernel could
+      # read a pathway rate. The cache that fixes it is written once per step
+      # on two separate step paths and shares its flow expression with the
+      # quality pass — three places a change can silently desynchronise, none
+      # of which a CSV regression over node quantities would notice.
+      - name: Per-edge flow accessor tests (GIP-0001 G4)
+        run: make test-edge-flows
+
       # Phase C asserts things a CSV regression cannot see. The C.3 suite in
       # particular runs the same relaxation under RK4 and under IDC against an
       # analytic solution: a flow that reads a node other than its origin has
