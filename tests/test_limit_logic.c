@@ -23,10 +23,11 @@
  * but it is invisible in the model file, and it is the difference between a
  * limit edge that has stopped and a limit edge that was never flowing.
  *
- * Flow is asserted through the state rather than directly: this branch is cut
- * from main, where per-edge flow is not readable. GSSK_GetFlows (GIP-0001 G4)
- * would let these assertions name the rate instead of inferring it from
- * whether the origin's Q still moves. Worth tightening once G4 lands.
+ * Flow is asserted DIRECTLY through GSSK_GetFlows (GIP-0001 G4), which landed
+ * while this branch was open. The state-based checks are kept alongside it
+ * rather than replaced: the rate and its effect on the store are two separate
+ * claims, and a cache reporting a plausible rate that the integrator never
+ * applied would satisfy either one alone.
  */
 
 #include "gssk.h"
@@ -148,6 +149,16 @@ static void test_c_from_threshold(void) {
 
     CHECK(moved > 1e-9, "Q_origin did not move — C was not taken from threshold");
 
+    /* Now that per-edge flow is readable, name the rate rather than inferring
+     * it. F = k*Q/(1 + Q/C) at the post-step state, with C = 10 from
+     * params.threshold — a build that ignored threshold computes C = -1, takes
+     * the `C > eps` branch as false, and reports exactly 0.0 here. */
+    double q_now = GSSK_GetState(inst)[0];
+    double rate_expected = 0.5 * q_now / (1.0 + q_now / 10.0);
+    CHECK(fabs(GSSK_GetFlows(inst)[0] - rate_expected) < 1e-9,
+          "flow reads %.15g, expected k*Q/(1+Q/C) = %.15g for C=10",
+          GSSK_GetFlows(inst)[0], rate_expected);
+
     /* One RK4 step of length dt starting at F0 = k*Q/(1+Q/C). The step is not
      * exactly F0*dt because the rate falls as Q does, so compare to a few
      * percent rather than to TOL, and against the two rival hypotheses. */
@@ -242,7 +253,14 @@ static void test_decaying_control_closes_the_path(void) {
           "the control is %.6g, still above the epsilon — the run is too short",
           Q[2]);
 
-    /* With C below the epsilon the flow is exactly 0.0: Q_origin is frozen. */
+    /* With C below the epsilon the flow is exactly 0.0. Asserted on the rate
+     * itself — this is the sentence the schema and the header now make, and
+     * until G4 landed it could only be inferred from a frozen store. */
+    CHECK(GSSK_GetFlows(inst)[0] == 0.0,
+          "the limit edge reports flow %.20g after the control collapsed; the "
+          "documented behaviour is exactly 0.0", GSSK_GetFlows(inst)[0]);
+    /* And the store agrees: a rate of zero the integrator did not apply would
+     * satisfy the assertion above on its own. */
     double a_before = Q[0];
     for (int i = 0; i < 20; i++) GSSK_Step(inst, 0.1);
     CHECK(fabs(Q[0] - a_before) == 0.0,
