@@ -66,7 +66,7 @@ UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-reversible test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema check-version test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
@@ -104,7 +104,7 @@ RESULTS = $(patsubst examples/%.json,tests/results/%.csv,$(MODELS))
 # the annotated twin describe a model that is no longer running.
 ANNOTATED = $(wildcard examples/*_annotated.json)
 
-test: all test-schema
+test: all check-version test-schema
 	@echo "Running Regression Tests..."
 	@mkdir -p tests/results
 	@for model in $(MODELS); do \
@@ -367,6 +367,7 @@ TARGET_TEST_REVERSIBLE = $(BIN_DIR)/test_reversible
 $(TARGET_TEST_REVERSIBLE): $(TEST_DIR)/test_reversible.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
 
+.PHONY: test-reversible
 test-reversible: all $(TARGET_TEST_REVERSIBLE)
 	@echo "Running reversible pathway tests..."
 	@./$(TARGET_TEST_REVERSIBLE)
@@ -385,6 +386,12 @@ TARGET_DUMP_SER = $(BIN_DIR)/dump_serialized
 
 $(TARGET_DUMP_SER): $(TEST_DIR)/dump_serialized.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+# The npm package version and GSK_VERSION_STRING drifted five majors apart
+# before anything noticed, because nothing compared them. Stdlib-only, so it
+# runs in any checkout without pip.
+check-version:
+	@python3 scripts/check_version_sync.py
 
 test-schema: directories $(TARGET_DUMP_SER)
 	@rm -rf $(SER_DIR) && mkdir -p $(SER_DIR)

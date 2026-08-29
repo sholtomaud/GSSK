@@ -149,6 +149,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential clang valgrind lcov python3
 
+      # package.json sat at 1.0.0 while GSK_VERSION_STRING reached 5.0.0,
+      # because scripts/release.sh only ever bumped the header. Consumers pin
+      # the npm version and then read include/gssk.h out of node_modules, so
+      # the skew served a header from a kernel four majors dead. `make test`
+      # runs this too; the named step is here so the failure says what broke.
+      - name: Version sync — package.json vs include/gssk.h
+        run: make check-version
+
+      # The version check asserts the "files" list names the schema. This
+      # asserts npm actually puts it in the tarball, which is the property
+      # downstream consumers depend on.
+      - name: Package contents — gssk.schema.json must ship
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > /tmp/pack.json
+          python3 - <<'PY'
+          import json
+          files = {f["path"] for f in json.load(open("/tmp/pack.json"))[0]["files"]}
+          if "gssk.schema.json" not in files:
+              raise SystemExit(
+                  "::error::gssk.schema.json is not in the npm tarball; "
+                  f"packed: {sorted(files)}"
+              )
+          print("gssk.schema.json is in the npm tarball.")
+          PY
+
       # The schema ships in dist/ and consumers pin it, so a drift between it
       # and the parser is a defect that reaches users. make test-schema skips
       # silently without jsonschema, so install it here to make the gate real.
