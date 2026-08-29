@@ -80,6 +80,14 @@ jobs:
       - name: Forcing function tests
         run: make test-forcing
 
+      # GIP-0001 G3 / ADR 0007. A new logic is a ten-site change, and the two
+      # sites that matter most are invisible in a golden CSV regenerated from
+      # the same bug: conservation across the pair, and origin/target symmetry.
+      # Both were mutation-tested — dropping build_flow_matrix's second entry
+      # pair, or reading only the origin in compute_derivatives, fails here.
+      - name: Reversible pathway tests (GIP-0001 G3)
+        run: make test-reversible
+
       # The Butcher c-nodes were written down in the DOPRI5 stage comments and
       # thrown away for years because there was no `t` for them to offset.
       # A forcing function sampled once per STEP instead of once per STAGE is
@@ -106,14 +114,6 @@ jobs:
       # GSSK_GetCarrier at every index, so the two paths cannot drift.
       - name: Carrier accessor tests
         run: make test-carrier-api
-
-      # GIP-0001 G3 / ADR 0007. A new logic is a ten-site change, and the two
-      # sites that matter most are invisible in a golden CSV regenerated from
-      # the same bug: conservation across the pair, and origin/target symmetry.
-      # Both were mutation-tested — dropping build_flow_matrix's second entry
-      # pair, or reading only the origin in compute_derivatives, fails here.
-      - name: Reversible pathway tests (GIP-0001 G3)
-        run: make test-reversible
 
       # Phase C asserts things a CSV regression cannot see. The C.3 suite in
       # particular runs the same relaxation under RK4 and under IDC against an

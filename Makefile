@@ -266,6 +266,20 @@ test-net-energy: all $(TARGET_TEST_NETENERGY)
 # instead of once per STAGE; every other test here passes either way.
 TARGET_TEST_FORCING = $(BIN_DIR)/test_forcing
 
+# Reversible (barb-less) pathway, GIP-0001 G3 / ADR 0007. Conservation and
+# origin/target symmetry are the sharp assertions: any sign or index error in
+# build_flow_matrix's four entries breaks them, and neither is visible in a
+# golden CSV of node quantities that was regenerated from the same bug.
+TARGET_TEST_REVERSIBLE = $(BIN_DIR)/test_reversible
+
+$(TARGET_TEST_REVERSIBLE): $(TEST_DIR)/test_reversible.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-reversible
+test-reversible: all $(TARGET_TEST_REVERSIBLE)
+	@echo "Running reversible pathway tests..."
+	@./$(TARGET_TEST_REVERSIBLE)
+
 $(TARGET_TEST_FORCING): $(TEST_DIR)/test_forcing.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
 
@@ -357,20 +371,6 @@ $(TARGET_TEST_CARRIER): $(TEST_DIR)/test_carrier_api.c $(TARGET_LIB)
 test-carrier-api: all $(TARGET_TEST_CARRIER)
 	@echo "Running carrier accessor tests..."
 	@./$(TARGET_TEST_CARRIER)
-
-# Reversible (barb-less) pathway, GIP-0001 G3 / ADR 0007. Conservation and
-# origin/target symmetry are the sharp assertions: any sign or index error in
-# build_flow_matrix's four entries breaks them, and neither is visible in a
-# golden CSV of node quantities that was regenerated from the same bug.
-TARGET_TEST_REVERSIBLE = $(BIN_DIR)/test_reversible
-
-$(TARGET_TEST_REVERSIBLE): $(TEST_DIR)/test_reversible.c $(TARGET_LIB)
-	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
-
-.PHONY: test-reversible
-test-reversible: all $(TARGET_TEST_REVERSIBLE)
-	@echo "Running reversible pathway tests..."
-	@./$(TARGET_TEST_REVERSIBLE)
 
 # Schema conformance — examples/ must match gssk.schema.json.
 #
