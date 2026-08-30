@@ -8,6 +8,12 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ### Added
 
+---
+
+## [5.1.0] — 2026-08-30
+
+### Added
+
 - **`gssk.schema.json` now ships in the npm package.** `package.json` `"files"` listed `dist/`, `include/` and `README.md`, so the only machine-readable statement of the model vocabulary was not published. Downstream consumers hand-maintained their own copy of the node-type enum instead, with nothing to detect drift against the real one. The schema is now in `"files"`, `make check-version` asserts it stays there, and CI asserts `npm pack` actually puts it in the tarball.
 
 - **`GSSK_NodeType` is public, with `GSSK_GetNodeType` beside the existing string getter.** Most of GIP-0001 G7 was already closed on `main`: `GSSK_GetNodeTypeString` returns the type, the primitive set is a closed enum in `gssk.schema.json`, and `GSSK_Init` rejects an unrecognised type naming the node — G7's acceptance criterion verbatim. What remained is that a C consumer had only string comparison for a decision the kernel makes with an integer. That is slower, and worse, typo-able in a way the compiler cannot see: `strcmp(t, "loop_limted")` is a valid program that quietly never matches.
