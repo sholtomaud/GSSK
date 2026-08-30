@@ -6,17 +6,9 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ## [Unreleased]
 
-### Fixed
-
-- **The npm package version was five majors behind the kernel.** `package.json` still said `1.0.0` while `include/gssk.h` said `GSK_VERSION_STRING "5.0.0"`; `scripts/release.sh` had only ever bumped the header. That is not cosmetic — the package ships `include/`, so a consumer who pinned `gssk@1.0.0` from npm was reading a header out of `node_modules` and getting the current one, or pinning a version that never described the kernel it was served. GIP-0001 was written this way: it quotes `INTERACTION /**< Multiplier flow (k * Q1 * Q2) */` and `GetStateSize /* Number of storage nodes */`, neither of which has been the comment for several majors.
-
-  `package.json` is now `5.0.0`, `scripts/release.sh` bumps it alongside the header (and re-reads the file to confirm it is still valid JSON before committing), and `scripts/check_version_sync.py` fails the build when the two disagree — or when `GSK_VERSION_STRING` disagrees with the `GSK_VERSION_MAJOR`/`MINOR`/`PATCH` macros beside it. It is stdlib-only, runs as `make check-version`, and is a prerequisite of `make test`, so a skew cannot survive a local test run.
-
 ### Added
 
 - **`gssk.schema.json` now ships in the npm package.** `package.json` `"files"` listed `dist/`, `include/` and `README.md`, so the only machine-readable statement of the model vocabulary was not published. Downstream consumers hand-maintained their own copy of the node-type enum instead, with nothing to detect drift against the real one. The schema is now in `"files"`, `make check-version` asserts it stays there, and CI asserts `npm pack` actually puts it in the tarball.
-
-### Added
 
 - **`reversible` edge logic — Odum's barb-less pathway.** `F = k × (Q_origin − Q_target)`, signed. Raised as GIP-0001 G3; the decision is [ADR 0007](adr/0007-reversible-pathway.md).
 
@@ -34,6 +26,31 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
   `GSSK_LOGIC_REVERSIBLE` is **appended** at 6; every existing `GSSK_LogicType` value is unchanged and pinned by test, because the value crosses the WASM boundary as a bare integer where nothing recompiles.
 
 - **`examples/diffusion_model.json`** — three tanks in a line, two reversible edges, equilibrating from a step gradient. Both edges are declared *against* the physical gradient on purpose, so the example exercises backward transport rather than merely describing it: a build that clamped the flow at zero produces a visibly different CSV. No existing golden moved.
+
+### Fixed
+
+- **The npm package version was five majors behind the kernel.** `package.json` still said `1.0.0` while `include/gssk.h` said `GSK_VERSION_STRING "5.0.0"`; `scripts/release.sh` had only ever bumped the header. That is not cosmetic — the package ships `include/`, so a consumer who pinned `gssk@1.0.0` from npm was reading a header out of `node_modules` and getting the current one, or pinning a version that never described the kernel it was served. GIP-0001 was written this way: it quotes `INTERACTION /**< Multiplier flow (k * Q1 * Q2) */` and `GetStateSize /* Number of storage nodes */`, neither of which has been the comment for several majors.
+
+  `package.json` is now `5.0.0`, `scripts/release.sh` bumps it alongside the header (and re-reads the file to confirm it is still valid JSON before committing), and `scripts/check_version_sync.py` fails the build when the two disagree — or when `GSK_VERSION_STRING` disagrees with the `GSK_VERSION_MAJOR`/`MINOR`/`PATCH` macros beside it. It is stdlib-only, runs as `make check-version`, and is a prerequisite of `make test`, so a skew cannot survive a local test run.
+
+### Documentation
+
+- **The schema now says where limit logic's saturation constant C comes from.** `F = k × Q_origin / (1 + Q_origin/C)` has been implemented since the primitive was added and the formula is stated in `include/gssk.h`, but nothing told a consumer how to *supply* C. `gssk.schema.json` described `control_node` as a node that "modulates the flow" without saying it **is** the denominator constant, and described `threshold` for threshold and ratio logic only, never mentioning that it doubles as C when no control node exists. Raised as GIP-0001 G6.
+
+  Both `EdgeParams` descriptions and the `EdgeLogic` enum now state the rule: `control_node`'s current Q supplies C if that node is named, otherwise `params.threshold` when it is above zero, and **`control_node` wins when both are given** — `threshold` is the source used in its absence, not a runtime fallback.
+
+  Two behaviours that were not written down anywhere are now stated, in the schema and in the header:
+
+  - A C taken from `control_node` is a **state variable, not a constant.** If that node is itself a store, the edge has a moving half-saturation point.
+  - When C falls to `1e-9` or below the flow becomes **exactly 0.0 rather than an error.** A control node that decays toward zero therefore closes the pathway mid-run, in a model that loaded without complaint and whose file says nothing about it. That is deliberate — a saturation constant of zero means the pathway saturates at zero throughput — but it was invisible.
+
+  The GIP filed the second point as "flow is silently 0.0 rather than an error". That is only half true, and the half matters: a limit edge with **neither** source of C is rejected at load with `Logic Error: Edge N (limit) requires control_node or threshold > 0`. Only a C that was valid at load and decayed afterwards reaches the solver.
+
+  `threshold` logic's comparand is documented too: always `Q_origin`, never the control node, and the comparison is strict.
+
+- **`GSSK_LIMIT_C_EPSILON`** is now a named public constant carrying that explanation, following the `GSSK_RATIO_EPSILON` precedent. The eight bare `1e-9` literals in the limit paths use it, so the documentation cannot drift from the threshold it documents. (The loop-limited node's `node_C` guard is a different constant with a different fallback and is untouched.)
+
+- **`tests/test_limit_logic.c`** pins all four facts, so the documentation stays true. The precedence assertion is mutation-tested: swapping `control_node` and `threshold` priority in the kernel makes it fail. The decaying-control test asserts `Q_origin` is *exactly* frozen afterwards, and separately that the origin still holds most of its contents — otherwise a fully-drained store would sit still and pass.
 
 ## [5.0.0] - 2026-08-26
 

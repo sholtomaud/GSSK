@@ -1471,7 +1471,7 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
       double C = -1.0;
       if (e->control_idx != -1) C = state[e->control_idx];
       else if (e->threshold > 0.0) C = e->threshold;
-      if (C > 1e-9)
+      if (C > GSSK_LIMIT_C_EPSILON)
         flow = (k * Q_orig) / (1.0 + (Q_orig / C));
       break;
     }
@@ -1579,7 +1579,7 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
       if (e->control_idx != -1) C = state[e->control_idx];
       else if (e->threshold > 0.0) C = e->threshold;
       double Q = state[e->origin_idx];
-      if (C > 1e-9) {
+      if (C > GSSK_LIMIT_C_EPSILON) {
         conductance = k * C / (C + Q); /* → k as Q→0, → k/2 at Q=C */
         A[e->target_idx * (int)n + e->origin_idx] += conductance;
         A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
@@ -1988,7 +1988,7 @@ static double compute_edge_flow(const GSSK_EdgeInternal *e,
     double C = -1.0;
     if (e->control_idx != -1) C = state[e->control_idx];
     else if (e->threshold > 0.0) C = e->threshold;
-    if (C > 1e-9) return (e->k * Q) / (1.0 + Q / C);
+    if (C > GSSK_LIMIT_C_EPSILON) return (e->k * Q) / (1.0 + Q / C);
     return 0.0;
   }
   case GSSK_LOGIC_THRESHOLD:
@@ -2603,7 +2603,7 @@ static double edge_flow_rate(const GSSK_EdgeInternal *e, const double *state,
     double C = -1.0;
     if (e->control_idx != -1) C = state[e->control_idx];
     else if (e->threshold > 0.0) C = e->threshold;
-    if (C > 1e-9) f = (k * Q) / (1.0 + (Q / C));
+    if (C > GSSK_LIMIT_C_EPSILON) f = (k * Q) / (1.0 + (Q / C));
     break;
   }
   case GSSK_LOGIC_THRESHOLD:
@@ -2833,7 +2833,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       double C = -1.0;
       if (ctrl >= 0) C = state[ctrl];
       else if (e->threshold > 0.0) C = e->threshold;
-      if (C > 1e-9) {
+      if (C > GSSK_LIMIT_C_EPSILON) {
         double d = C + Q;
         dF_dQ_orig = e->k * C * C / (d * d);
         if (ctrl >= 0)
@@ -3054,7 +3054,7 @@ static void compute_param_deriv(GSSK_Instance *inst, double t, const double *sta
     double C = -1.0;
     if (ctrl >= 0) C = state[ctrl];
     else if (e->threshold > 0.0) C = e->threshold;
-    if (C > 1e-9) dF_dk = Q * C / (C + Q);
+    if (C > GSSK_LIMIT_C_EPSILON) dF_dk = Q * C / (C + Q);
     break;
   }
   case GSSK_LOGIC_THRESHOLD:
@@ -3154,7 +3154,7 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
       double C = -1.0;
       if (e->control_idx != -1) C = inst->state[e->control_idx];
       else if (e->threshold > 0.0) C = e->threshold;
-      if (C > 1e-9) f = (e->k * Q) / (1.0 + Q / C);
+      if (C > GSSK_LIMIT_C_EPSILON) f = (e->k * Q) / (1.0 + Q / C);
       break;
     }
     case GSSK_LOGIC_THRESHOLD:
@@ -3214,7 +3214,7 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
     double C = -1.0;
     if (ej->control_idx >= 0) C = inst->state[ej->control_idx];
     else if (ej->threshold > 0.0) C = ej->threshold;
-    if (C > 1e-9) dflow_dk = Q * C / (C + Q);
+    if (C > GSSK_LIMIT_C_EPSILON) dflow_dk = Q * C / (C + Q);
     break;
   }
   case GSSK_LOGIC_THRESHOLD:
