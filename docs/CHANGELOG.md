@@ -18,6 +18,22 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
   Ordinal values are explicit and pinned by test: they cross the WASM boundary as bare integers, so renumbering them is a silent breaking change for every JS consumer. Append new primitives before `GSSK_NODE_INVALID`.
 
+- **Per-edge flow rates are readable (`GSSK_GetFlows` / `GSSK_GetFlowCount`).** A consumer could read every node quantity and not one rate: `GSSK_GetState` reports the storages, and nothing reported the flows between them. Flow was step-local — computed inside `compute_derivatives` to build `deriv[]`, then discarded. That makes a diagram whose entire subject is flow impossible to annotate, and leaves the heat-sink budget and any pathway-level emergy display with nothing to read. Raised as GIP-0001 G4.
+
+  The new pair mirrors `GSSK_GetState` / `GSSK_GetStateSize` exactly, so it introduces no new idiom: index `i` is the edge at position `i` in the input JSON, matching `GSSK_GetEdgeID` and `GSSK_GetEdgeK`. Both are exported to WASM and declared in `src/gssk.d.ts`.
+
+  Semantics worth knowing before you read them:
+
+  - Refreshed by **every** `GSSK_Step` and `GSSK_StepAdaptive`, whether or not quality accounting is enabled. The pre-existing per-edge flow array only existed inside the quality pass, was freed at the end of it, and what it exposed through `GSSK_GetEdgeQualityFlow` is `Tr × flow`, not flow.
+  - Evaluated at the **post-step** state and time, so it is the rate the step just integrated rather than a prediction of the next one.
+  - `0.0` before the first step and after `GSSK_Reset` — no flow has been computed yet, which is more useful than reporting a rate no solver has taken.
+  - An **inactive** edge reads `0.0`, not the rate it would carry if it were live.
+  - **Signed.** `GSSK_GetEdgeQualityFlow` clamps a negative flow to zero following Odum's convention; this does not, because the sign of a flow is information a diagram consumer wants.
+
+### Changed
+
+- **The per-edge flow expression is written once.** The `switch` over edge logic existed twice — in `compute_derivatives` and, in a slightly different dialect, in `compute_quality_pass`. G4 needed it a third time, so it is now one static `edge_flow_rate(e, state, k)`. `k` is a parameter because the callers genuinely disagree about which `k` they mean: the flow cache passes `forced_edge_k`, the rate the derivative integrated; the quality pass passes `e->k`, which is what it has always used. That disagreement is very probably a defect — a forced edge makes emergy accounting disagree with the trajectory it is accounting for — but it moves published emergy numbers, so it is tracked separately as `quality-pass-ignores-edge-forcing` rather than fixed in passing. Behaviour is unchanged: every golden CSV and every focused suite passes untouched.
+
 ### Fixed
 
 - **The npm package version was five majors behind the kernel.** `package.json` still said `1.0.0` while `include/gssk.h` said `GSK_VERSION_STRING "5.0.0"`; `scripts/release.sh` had only ever bumped the header. That is not cosmetic — the package ships `include/`, so a consumer who pinned `gssk@1.0.0` from npm was reading a header out of `node_modules` and getting the current one, or pinning a version that never described the kernel it was served. GIP-0001 was written this way: it quotes `INTERACTION /**< Multiplier flow (k * Q1 * Q2) */` and `GetStateSize /* Number of storage nodes */`, neither of which has been the comment for several majors.
