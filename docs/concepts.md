@@ -178,6 +178,27 @@ While GSSK's node type taxonomy is being corrected in Phase 7, the current `logi
 | `"limit"` | `type: "loop_limited"` node | Loop-Limited Converter |
 | `"threshold"` | `type: "switch"` node | Switch / Digital Box |
 | `"ratio"` | — (no Odum symbol; see below) | division |
+| `"reversible"` | — (an edge property, not a node) | barb-less pathway |
+
+### `reversible` — the barb-less pathway (GIP-0001 G3)
+
+`F = k × (Q_origin − Q_target)`, **signed**.
+
+Odum draws two pathway kinds, and the distinction is the notation itself:
+
+> Where the flow depends only on the force behind it, an arrowhead (barb) is used… Where the flow depends on the difference between the force at one end and the back force from the other end, a line is used without a barb, and this pathway may flow in either direction.
+>
+> — *Modeling for All Scales*, p.23
+
+Every other logic computes forward from origin quantities and never reads the target. `reversible` is the only one that reads both ends, which makes it the only one that can transport **backwards along its declared direction** — and for a barb-less line that is not an error. `origin` and `target` stop meaning "from" and "to" and start meaning only "the first end" and "the second end". Swapping them produces an identical trajectory.
+
+Use it for diffusion, exchange across a gradient, and any equilibrating process. Two stores joined by one reversible edge converge to equal quantity from any initial condition, and their total is conserved exactly, because `F` is subtracted at one end and added at the other in the same statement.
+
+**It is not two opposed `linear` edges.** `A→B` with `k₁` plus `B→A` with `k₂` gives `k₁·Q_A − k₂·Q_B`, which equals the gradient form only when the two conductances happen to be equal — nothing enforces that, and a model whose conductances have drifted equilibrates to `Q_A/Q_B = k₂/k₁` instead of to equality, silently. It also *draws* as two barbed pathways, which in Odum's notation means a different thing (the counter-current; see the `exchange` node). Nor is it `linear` with a negative `k`, which still never reads the target.
+
+**It is exactly integrable.** Being linear in the state, the incipient/IDC solver integrates it exactly rather than linearising about the current operating point — unlike `limit` (linearised Michaelis-Menten) and `ratio` (exact only in the numerator, for a frozen denominator). It is the first logic whose flow-matrix contribution touches four entries rather than two, because the flow depends on both ends.
+
+**Quality accounting attributes nothing to a backward flow.** A flow running back up a gradient is not producing the node it arrives at, so `GSSK_GetEdgeQualityFlow` reads `0.0` while the pathway reverses and resumes when the gradient does. `GSSK_GetFlows` reports the signed rate and is the right call for the physics. See [ADR 0007](adr/0007-reversible-pathway.md).
 
 ### `ratio` — division (Phase C.1, extended in C.3)
 
