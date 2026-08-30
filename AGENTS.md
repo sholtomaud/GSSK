@@ -74,6 +74,54 @@ host that does have matplotlib.
 5. **Do not merge your own PR.** Merging is the maintainer's decision. Hand over
    a green PR, not a branch.
 
+### Concurrent branches must not edit the same line
+
+**Git cannot merge two different insertions at the same point.** Not "merges them badly" —
+cannot. Two branches cut from one commit that both append to the same list, heading, or
+one-line collection will conflict pairwise, and the conflict is textual rather than
+semantic: every resolution is "keep both", by hand, once per branch, after every merge.
+
+This has happened here. Five branches were opened from one commit and each inserted at the
+same three anchors — the `.PHONY` line in `Makefile`, a step after the same step in
+`.github/workflows/deploy.yml`, and a section under `## [Unreleased]` in `docs/CHANGELOG.md`.
+Merging the first broke the other four at once, and the last branch in the queue absorbed a
+conflict from every merge ahead of it: five hand-resolutions to land work that never
+disagreed about anything.
+
+Before opening a PR, ask what *else* in flight touches the same line. The shared anchors here:
+
+| Anchor | Do this instead |
+| --- | --- |
+| the `.PHONY:` list in `Makefile` | declare `.PHONY: <your-target>` on its own line beside your own rule — GNU make accumulates `.PHONY` prerequisites across declarations, and the file already does this for the `doco` targets |
+| a target block above `# Schema conformance` | put it beside the suite it relates to, not at a shared landmark |
+| a step after the same step in `deploy.yml` | anchor it after the step your work actually relates to |
+| `## [Unreleased]` in `docs/CHANGELOG.md` | unavoidable — see below |
+
+**The changelog cannot be anchored away**, because every entry legitimately belongs under the
+same heading. So either land one PR before opening the next when both add entries, or accept
+one re-resolve per merge and plan for it. Do not open five and hope.
+
+**Resolving these is where content gets silently lost.** It happened in #55: the per-edge-flow
+entries were in the feature commit and absent from the merge commit, so `main` shipped a
+documented feature with no changelog record. Nothing failed; it took a bullet-level diff of the
+merge parents to notice, and a follow-up PR to restore. So check the result against both inputs
+rather than eyeballing it:
+
+```sh
+git show :2:docs/CHANGELOG.md   # ours
+git show :3:docs/CHANGELOG.md   # theirs
+# then diff the entry titles in each against the resolved file:
+# anything missing was dropped, anything new was invented.
+```
+
+Fold entries into one heading per type while you are there — keeping both sides verbatim leaves
+two `### Added` blocks under one version, which reads as though the release happened twice.
+
+Once several branches are in flight and have each been consolidated differently, patching
+individual hunks stops working: git reports interleaved hunks whose boundaries cut through
+sections. Rebuild the whole block from the two stage entries instead. It is order-independent
+and checkable.
+
 ### Reporting
 State what you verified and what you did not. If a check was skipped or a test
 failed, say so plainly with the output. "Should work" is not a result. Where you
