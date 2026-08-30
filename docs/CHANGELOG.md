@@ -18,6 +18,23 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
   Ordinal values are explicit and pinned by test: they cross the WASM boundary as bare integers, so renumbering them is a silent breaking change for every JS consumer. Append new primitives before `GSSK_NODE_INVALID`.
 
+- **`reversible` edge logic — Odum's barb-less pathway.** `F = k × (Q_origin − Q_target)`, signed. Raised as GIP-0001 G3; the decision is [ADR 0007](adr/0007-reversible-pathway.md).
+
+  Odum draws two pathway kinds and the distinction lives in the notation: a barb where the flow depends only on the force behind it, no barb where it depends on the difference between the force at one end and the back force from the other, *"and this pathway may flow in either direction"* (*Modeling for All Scales*, p.23). Every GSSK logic computed forward from origin quantities and **none of them read the target**, so the entire second class — diffusion, exchange across a gradient, any equilibrating process — was inexpressible.
+
+  `reversible` is the only logic that reads both ends, and therefore the only one that can transport backwards along its declared direction. For a barb-less line `origin` and `target` name the two ends rather than a from and a to: **swapping them produces an identical trajectory**, asserted step-by-step rather than at equilibrium.
+
+  This is not the `exchange` node, which is the transaction diamond — two barbed pathways carrying a money/goods counter-flow. A barb-less pathway is one pathway whose sign is a gradient.
+
+  Two properties worth knowing:
+
+  - **It is exactly integrable.** Being linear in the state, the incipient/IDC solver integrates it exactly rather than linearising about the operating point, unlike `limit` and `ratio`. It stays IDC-eligible. It is also the first logic whose flow-matrix contribution touches **four** entries rather than two, which is why `build_jacobian`'s second-variable slot is no longer named for the control node — `reversible` depends on its *target*, which is not a control.
+  - **A backward flow carries no transformity.** The quality pass's `flow ≤ 0` clamp stops being incidental and becomes a decision: a flow running back up a gradient is not producing the node it arrives at, so `GSSK_GetEdgeQualityFlow` reads `0.0` while the pathway reverses. `GSSK_GetFlows` reports the signed rate.
+
+  `GSSK_LOGIC_REVERSIBLE` is **appended** at 6; every existing `GSSK_LogicType` value is unchanged and pinned by test, because the value crosses the WASM boundary as a bare integer where nothing recompiles.
+
+- **`examples/diffusion_model.json`** — three tanks in a line, two reversible edges, equilibrating from a step gradient. Both edges are declared *against* the physical gradient on purpose, so the example exercises backward transport rather than merely describing it: a build that clamped the flow at zero produces a visibly different CSV. No existing golden moved.
+
 ### Fixed
 
 - **The npm package version was five majors behind the kernel.** `package.json` still said `1.0.0` while `include/gssk.h` said `GSK_VERSION_STRING "5.0.0"`; `scripts/release.sh` had only ever bumped the header. That is not cosmetic — the package ships `include/`, so a consumer who pinned `gssk@1.0.0` from npm was reading a header out of `node_modules` and getting the current one, or pinning a version that never described the kernel it was served. GIP-0001 was written this way: it quotes `INTERACTION /**< Multiplier flow (k * Q1 * Q2) */` and `GetStateSize /* Number of storage nodes */`, neither of which has been the comment for several majors.

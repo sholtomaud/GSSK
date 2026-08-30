@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "diffusion",
+    "description": "GIP-0001 G3 / ADR 0007 — Odum's barb-less pathway. Three tanks in a line, joined by two reversible edges, equilibrating from a step gradient. The declared directions deliberately DISAGREE with the physical one so the example exercises backward transport rather than describing it."
+  },
+  "_why_barb_less": "Odum draws two pathway kinds and the distinction lives in the notation: a barb where the flow depends only on the force behind it, no barb where it depends on the difference between the force at one end and the back force from the other, 'and this pathway may flow in either direction' (Modeling for All Scales, p.23). Every other GSSK logic computes forward from origin quantities and never reads the target, so this whole class was inexpressible.",
+  "_why_the_directions_are_backwards": "left_mid is declared mid -> left, and mid_right is declared right -> mid, while the gradient runs left -> right. Both edges therefore run BACKWARDS along their declared direction for the whole of the early trajectory. A build that clamped the flow at zero, or that read only the origin, produces a visibly different CSV rather than a subtly wrong one.",
+  "_what_to_look_for": "Conservation: left + mid + right stays at 150.0 in every row (the CSV prints six decimals, so it reads as 150.000000 +/- rounding; the invariant is exact in the kernel, since the flow is subtracted at one end and added at the other in the same statement). Equilibrium: all three approach 50.0, and at t=20 the run is close but not yet settled -- left 50.19, mid 50.00, right 49.81 -- because the chain relaxes more slowly than a single pair. All three trajectories are monotonic: `mid` does NOT overshoot, because it drains to `right` as fast as it fills from `left` throughout.",
+  "carriers": [
+    { "id": "substance", "unit": "mol", "conserved": true }
+  ],
+  "nodes": [
+    { "id": "left",  "type": "storage", "value": 150.0, "carrier": "substance" },
+    { "id": "mid",   "type": "storage", "value": 0.0,   "carrier": "substance" },
+    { "id": "right", "type": "storage", "value": 0.0,   "carrier": "substance" }
+  ],
+  "edges": [
+    { "id": "left_mid",  "origin": "mid",   "target": "left", "carrier": "substance",
+      "logic": "reversible", "params": { "k": 0.3 } },
+    { "id": "mid_right", "origin": "right", "target": "mid",  "carrier": "substance",
+      "logic": "reversible", "params": { "k": 0.3 } }
+  ],
+  "config": { "t_start": 0, "t_end": 20, "dt": 0.1, "method": "rk4" }
+}
