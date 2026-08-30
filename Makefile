@@ -367,6 +367,21 @@ test-unknown-keys: all $(TARGET_TEST_UNKNOWNKEY)
 # outright, having no k to hide behind.
 TARGET_TEST_DEACT = $(BIN_DIR)/test_deactivation_round_trip
 
+# GSSK_NodeType (GIP-0001 G7). The enum and GSSK_GetNodeTypeString read the
+# same field, so they cannot disagree by accident — what these catch is the
+# set changing under one and not the other, an ordinal being renumbered (a
+# silent break for every WASM consumer), and a composite leaking its own name
+# where a primitive belongs.
+TARGET_TEST_NODEENUM = $(BIN_DIR)/test_node_type_enum
+
+$(TARGET_TEST_NODEENUM): $(TEST_DIR)/test_node_type_enum.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-node-type-enum
+test-node-type-enum: all $(TARGET_TEST_NODEENUM)
+	@echo "Running node type enum tests..."
+	@./$(TARGET_TEST_NODEENUM)
+
 $(TARGET_TEST_DEACT): $(TEST_DIR)/test_deactivation_round_trip.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
 
@@ -589,7 +604,7 @@ WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_
 "_GSSK_GetCarrierID","_GSSK_GetCarrierUnit","_GSSK_GetCarrierConserved",\
 "_GSSK_FindCarrierIdx",\
 "_GSSK_GetEdgeCarrier","_GSSK_GetCarrierConservationError",\
-"_GSSK_GetNodeTypeString",\
+"_GSSK_GetNodeTypeString","_GSSK_GetNodeType",\
 "_GSSK_GetArchetypeCount","_GSSK_GetArchetypeName",\
 "_GSSK_GetCompositeCount","_GSSK_GetCompositeID",\
 "_GSSK_GetCompositeArchetype","_GSSK_GetNodeComposite","_GSSK_GetNodeRole",\

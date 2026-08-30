@@ -43,14 +43,9 @@
  * Internal types
  * ========================================================================= */
 
-typedef enum {
-  NODE_STORAGE, NODE_SOURCE, NODE_SINK, NODE_CONSTANT,
-  NODE_INTERACTION,  /* Phase 7: multi-input production/work gate */
-  NODE_GAIN,         /* Phase 7: constant gain amplifier */
-  NODE_LOOP_LIMITED, /* Phase 7: Michaelis-Menten loop-limited converter */
-  NODE_EXCHANGE,     /* Phase 7: transaction exchange diamond */
-  NODE_SWITCH        /* Phase 7: digital switching box */
-} GSSK_NodeType;
+/* GSSK_NodeType moved to include/gssk.h (GIP-0001 G7) — it is now part of
+ * the public API, so there is deliberately no private copy here to drift
+ * from it. The value order is unchanged. */
 typedef enum { OUTPUT_PARTITION, OUTPUT_REPLICATE } GSSK_OutputMode;
 
 /* Phase H — forcing.  One parameter block serves the whole vocabulary; each
@@ -339,7 +334,7 @@ static void scan_motifs_internal(GSSK_Instance *inst);                    /* Pha
 static void safe_str_copy(char *dst, const char *src, size_t cap);        /* bounded, always NUL-terminates */
 
 /* The nine ESL primitives, and the only strings parse_node_type can actually
- * decode.  parse_node_type returns NODE_STORAGE for anything else, which is a
+ * decode.  parse_node_type returns GSSK_NODE_STORAGE for anything else, which is a
  * usable default only once the string is known to be a primitive — so every
  * caller that takes a type from a model must gate on this first.  A composite
  * or archetype name is NOT a primitive; it is resolved by find_archetype. */
@@ -1064,25 +1059,25 @@ void (*gssk_probe_on_adjoint)(double t)    = NULL;
 #  define GSSK_PROBE(fn, t) ((void)0)
 #endif
 
-/* Decodes a primitive type string.  The NODE_STORAGE tail is a decode default,
+/* Decodes a primitive type string.  The GSSK_NODE_STORAGE tail is a decode default,
  * not a fallback for unknown input: callers validate with
  * is_primitive_node_type (or find_archetype) before getting here. */
 static GSSK_NodeType parse_node_type(const char *s) {
-  if (strcmp(s, "source")       == 0) return NODE_SOURCE;
-  if (strcmp(s, "sink")         == 0) return NODE_SINK;
-  if (strcmp(s, "constant")     == 0) return NODE_CONSTANT;
-  if (strcmp(s, "interaction")  == 0) return NODE_INTERACTION;
-  if (strcmp(s, "gain")         == 0) return NODE_GAIN;
-  if (strcmp(s, "loop_limited") == 0) return NODE_LOOP_LIMITED;
-  if (strcmp(s, "exchange")     == 0) return NODE_EXCHANGE;
-  if (strcmp(s, "switch")       == 0) return NODE_SWITCH;
-  return NODE_STORAGE;
+  if (strcmp(s, "source")       == 0) return GSSK_NODE_SOURCE;
+  if (strcmp(s, "sink")         == 0) return GSSK_NODE_SINK;
+  if (strcmp(s, "constant")     == 0) return GSSK_NODE_CONSTANT;
+  if (strcmp(s, "interaction")  == 0) return GSSK_NODE_INTERACTION;
+  if (strcmp(s, "gain")         == 0) return GSSK_NODE_GAIN;
+  if (strcmp(s, "loop_limited") == 0) return GSSK_NODE_LOOP_LIMITED;
+  if (strcmp(s, "exchange")     == 0) return GSSK_NODE_EXCHANGE;
+  if (strcmp(s, "switch")       == 0) return GSSK_NODE_SWITCH;
+  return GSSK_NODE_STORAGE;
 }
 
 static bool is_processing_node(GSSK_NodeType t) {
-  return t == NODE_INTERACTION || t == NODE_GAIN ||
-         t == NODE_LOOP_LIMITED || t == NODE_EXCHANGE ||
-         t == NODE_SWITCH;
+  return t == GSSK_NODE_INTERACTION || t == GSSK_NODE_GAIN ||
+         t == GSSK_NODE_LOOP_LIMITED || t == GSSK_NODE_EXCHANGE ||
+         t == GSSK_NODE_SWITCH;
 }
 
 static GSSK_OutputMode parse_output_mode(const char *s) {
@@ -1223,7 +1218,7 @@ static void compute_gain_node(GSSK_Instance *inst, double t, size_t ni,
 
   double F = inst->nodes[ni].node_k * state[control_orig];
 
-  if (energy_orig >= 0 && inst->nodes[energy_orig].type == NODE_STORAGE)
+  if (energy_orig >= 0 && inst->nodes[energy_orig].type == GSSK_NODE_STORAGE)
     deriv[energy_orig] -= F;
 
   size_t out_count = 0;
@@ -1334,7 +1329,7 @@ static void compute_switch_node(GSSK_Instance *inst, double t, size_t ni,
 /* ---- Transaction diamond: shared physics primitive (ADR 0001) -------------
  *
  * Odum's small diamond is both a junction and a coupling ratio.  It has two
- * authoring forms — the NODE_EXCHANGE hub and the inline `coupled_edge` — and
+ * authoring forms — the GSSK_NODE_EXCHANGE hub and the inline `coupled_edge` — and
  * per ADR 0001 both are backed by the helpers below so their behaviour cannot
  * diverge.  Three seams are shared, not one:
  *
@@ -1342,7 +1337,7 @@ static void compute_switch_node(GSSK_Instance *inst, double t, size_t ni,
  *   exchange_primary_flow()      the forward flow, including its money gate
  *   apply_transaction_coupling() the counter-flow F_money = price x F_primary
  *
- * The leg-discovery seam matters because the hand-written NODE_EXCHANGE
+ * The leg-discovery seam matters because the hand-written GSSK_NODE_EXCHANGE
  * Jacobian block re-derived it independently; sharing it is what keeps the RK4
  * and incipient paths from drifting apart.
  */
@@ -1499,11 +1494,11 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
   /* v4 processing nodes — call per-type helper */
   for (size_t i = 0; i < inst->node_count; i++) {
     switch (inst->nodes[i].type) {
-    case NODE_INTERACTION:  compute_interaction_node(inst, t, i, state, deriv); break;
-    case NODE_GAIN:         compute_gain_node(inst, t, i, state, deriv); break;
-    case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, state, deriv); break;
-    case NODE_SWITCH:       compute_switch_node(inst, t, i, state, deriv); break;
-    case NODE_EXCHANGE:     compute_exchange_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_INTERACTION:  compute_interaction_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_GAIN:         compute_gain_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_SWITCH:       compute_switch_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_EXCHANGE:     compute_exchange_node(inst, t, i, state, deriv); break;
     default: break;
     }
   }
@@ -1511,8 +1506,8 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
   /* Boundary: non-storage nodes have dQ/dt = 0 (sources, constants, and all
    * processing nodes — they do not accumulate Q). */
   for (size_t i = 0; i < inst->node_count; i++) {
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT ||
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT ||
         is_processing_node(inst->nodes[i].type))
       deriv[i] = 0.0;
   }
@@ -1619,8 +1614,8 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
 
   /* Zero rows for source/constant/processing nodes */
   for (size_t i = 0; i < n; i++) {
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT ||
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT ||
         is_processing_node(inst->nodes[i].type)) {
       for (size_t j = 0; j < n; j++)
         A[i * n + j] = 0.0;
@@ -1661,8 +1656,8 @@ static void build_forcing_vector(GSSK_Instance *inst, double t, const double *st
   }
 
   for (size_t i = 0; i < n; i++) {
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT ||
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT ||
         is_processing_node(inst->nodes[i].type))
       f[i] = 0.0;
   }
@@ -1864,8 +1859,8 @@ static bool network_is_isolated_duet(GSSK_Instance *inst, size_t *out_edge,
   GSSK_EdgeInternal *e = &inst->edges[di];
   if (e->logic != GSSK_LOGIC_INTERACTION) return false;
   if (e->target_idx != e->control_idx)   return false;
-  if (inst->nodes[e->origin_idx].type != NODE_STORAGE) return false;
-  if (inst->nodes[e->target_idx].type  != NODE_STORAGE) return false;
+  if (inst->nodes[e->origin_idx].type != GSSK_NODE_STORAGE) return false;
+  if (inst->nodes[e->target_idx].type  != GSSK_NODE_STORAGE) return false;
   if (out_edge) *out_edge = di;
   if (out_A)    *out_A    = e->origin_idx;
   if (out_B)    *out_B    = e->target_idx;
@@ -1945,18 +1940,18 @@ static void idc_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
       const double *Q_f = apply_node_forcing(inst, t, Q_in);
       for (size_t i = 0; i < inst->node_count; i++) {
         switch (inst->nodes[i].type) {
-        case NODE_INTERACTION:  compute_interaction_node(inst, t, i, Q_f, pf); break;
-        case NODE_GAIN:         compute_gain_node(inst, t, i, Q_f, pf); break;
-        case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, Q_f, pf); break;
-        case NODE_SWITCH:       compute_switch_node(inst, t, i, Q_f, pf); break;
-        case NODE_EXCHANGE:     compute_exchange_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_INTERACTION:  compute_interaction_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_GAIN:         compute_gain_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_SWITCH:       compute_switch_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_EXCHANGE:     compute_exchange_node(inst, t, i, Q_f, pf); break;
         default: break;
         }
       }
       /* Don't accumulate into source/constant/processing rows */
       for (size_t i = 0; i < n; i++) {
-        if (inst->nodes[i].type == NODE_SOURCE ||
-            inst->nodes[i].type == NODE_CONSTANT ||
+        if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+            inst->nodes[i].type == GSSK_NODE_CONSTANT ||
             is_processing_node(inst->nodes[i].type))
           pf[i] = 0.0;
         f[i] += pf[i];
@@ -2390,7 +2385,7 @@ static double closed_system_conservation_error(GSSK_Instance *inst,
                                                 const double *Q_before,
                                                 const double *Q_after) {
   for (size_t i = 0; i < inst->node_count; i++) {
-    if (inst->nodes[i].active && inst->nodes[i].type != NODE_STORAGE)
+    if (inst->nodes[i].active && inst->nodes[i].type != GSSK_NODE_STORAGE)
       return 0.0; /* open system — skip */
   }
   double sum_b = 0.0, sum_a = 0.0;
@@ -2416,7 +2411,7 @@ static void update_carrier_conservation_errors(GSSK_Instance *inst,
     }
     double sum_b = 0.0, sum_a = 0.0;
     for (size_t ni = 0; ni < inst->node_count; ni++) {
-      if (!inst->nodes[ni].active || inst->nodes[ni].type != NODE_STORAGE) continue;
+      if (!inst->nodes[ni].active || inst->nodes[ni].type != GSSK_NODE_STORAGE) continue;
       if (strcmp(inst->nodes[ni].carrier, inst->carriers[ci].id) != 0) continue;
       sum_b += Q_before[ni];
       sum_a += Q_after[ni];
@@ -2689,8 +2684,8 @@ static void compute_quality_pass(GSSK_Instance *inst, double t, const double *st
   /* (−Aᵀ)·Tr = b → diagonal = 1, off-diag = −flow_frac, b = quality_input */
   for (size_t i = 0; i < n; i++) {
     M[i * n + i] = 1.0; /* diagonal */
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT) {
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT) {
       b[i] = inst->nodes[i].quality_input;
     }
   }
@@ -2886,7 +2881,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
 
     switch (inst->nodes[ni].type) {
 
-    case NODE_INTERACTION: {
+    case GSSK_NODE_INTERACTION: {
       /* F = node_k × ∏ Q_j over all inputs; energy_orig = first input */
       int in_orig[GSSK_MAX_ARCH_NODES]; size_t in_n = 0;
       int energy_orig = -1;
@@ -2913,7 +2908,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     }
 
-    case NODE_GAIN: {
+    case GSSK_NODE_GAIN: {
       /* F = node_k × Q_control; optionally draws from energy source */
       int ctrl = -1, esrc = -1; size_t seen = 0;
       for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -2925,7 +2920,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       }
       if (ctrl < 0) break;
       double dF = inst->nodes[ni].node_k;
-      if (esrc >= 0 && inst->nodes[esrc].type == NODE_STORAGE)
+      if (esrc >= 0 && inst->nodes[esrc].type == GSSK_NODE_STORAGE)
         J[(size_t)esrc * n + (size_t)ctrl] -= dF;
       for (size_t ei = 0; ei < inst->edge_count; ei++) {
         GSSK_EdgeInternal *e = &inst->edges[ei];
@@ -2935,7 +2930,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     }
 
-    case NODE_LOOP_LIMITED: {
+    case GSSK_NODE_LOOP_LIMITED: {
       /* F = node_k × Q_in × C / (C + Q_in) */
       int in_orig = -1;
       for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -2957,7 +2952,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     }
 
-    case NODE_SWITCH: {
+    case GSSK_NODE_SWITCH: {
       /* F = node_k × Q_flow when Q_sensor > threshold */
       int flow_o = -1, sens_o = -1; size_t seen = 0;
       for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -2980,7 +2975,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     }
 
-    case NODE_EXCHANGE: {
+    case GSSK_NODE_EXCHANGE: {
       /* F_goods = node_k × Q_goods_in (× Q_money_in if present).
        * Legs and price come from the shared primitive (ADR 0001) so this
        * Jacobian cannot disagree with compute_exchange_node about which edges
@@ -3014,8 +3009,8 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
   }
 
   for (size_t i = 0; i < n; i++) {
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT)
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT)
       for (size_t j = 0; j < n; j++) J[i * n + j] = 0.0;
   }
 }
@@ -3184,7 +3179,7 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
 
   for (size_t i = 0; i < n; i++) {
     M[i * n + i] = 1.0;
-    if (inst->nodes[i].type == NODE_SOURCE || inst->nodes[i].type == NODE_CONSTANT)
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE || inst->nodes[i].type == GSSK_NODE_CONSTANT)
       b[i] = inst->nodes[i].quality_input;
   }
   for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -3808,11 +3803,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       continue;
     }
 
-    /* ---- system_frame: structural-only — record as NODE_CONSTANT ---- */
+    /* ---- system_frame: structural-only — record as GSSK_NODE_CONSTANT ---- */
     if (def && def->is_structural) {
       safe_str_copy(inst->nodes[node_slot].id, id->valuestring, sizeof(inst->nodes[node_slot].id));
       inst->nodes[node_slot].id[63] = '\0';
-      inst->nodes[node_slot].type = NODE_CONSTANT;
+      inst->nodes[node_slot].type = GSSK_NODE_CONSTANT;
       inst->nodes[node_slot].initial_value = val->valuedouble;
       inst->nodes[node_slot].active = node_active;
       inst->state[node_slot] = val->valuedouble;
@@ -3860,7 +3855,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         /* A storage node's value is the INTEGRAL of its flows. Forcing it is a
          * contradiction, and quietly ignoring the block is the failure mode
          * h8b exists to remove — so it is an error, named as one. */
-        if (inst->nodes[node_slot].type == NODE_STORAGE) {
+        if (inst->nodes[node_slot].type == GSSK_NODE_STORAGE) {
           snprintf(inst->error_msg, sizeof(inst->error_msg),
                    "Schema Error: Node '%s' is a storage node and cannot be forced. "
                    "A storage node's value is the integral of its flows; force the "
@@ -5028,7 +5023,7 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
       return GSSK_ERR_SCHEMA_VIOLATION;
     }
     if (add_forcing.kind != GSSK_FORCING_NONE) {
-      if (parse_node_type(type->valuestring) == NODE_STORAGE) {
+      if (parse_node_type(type->valuestring) == GSSK_NODE_STORAGE) {
         snprintf(inst->error_msg, sizeof(inst->error_msg),
                  "Schema Error: Node '%s' is a storage node and cannot be forced. "
                  "A storage node's value is the integral of its flows; force the "
@@ -5362,6 +5357,14 @@ const char *GSSK_GetNodeID(GSSK_Instance *inst, size_t index) {
 const char *GSSK_GetNodeTypeString(GSSK_Instance *inst, size_t node_idx) {
   if (!inst || node_idx >= inst->node_count) return "storage";
   return node_type_str(inst->nodes[node_idx].type);
+}
+
+GSSK_NodeType GSSK_GetNodeType(GSSK_Instance *inst, size_t node_idx) {
+  /* Unlike GSSK_GetNodeTypeString above, this CAN report the error, so it
+   * does: GIP-0001 G7 asks for GSSK_GetNodeID's out-of-bounds contract, not
+   * the string function's silently-plausible "storage". */
+  if (!inst || node_idx >= inst->node_count) return GSSK_NODE_INVALID;
+  return inst->nodes[node_idx].type;
 }
 
 int GSSK_FindNodeIdx(GSSK_Instance *inst, const char *id) {
@@ -5883,14 +5886,14 @@ size_t GSSK_GetCompositeMemberIndex(GSSK_Instance *inst, size_t composite_idx,
 
 static const char *node_type_str(GSSK_NodeType t) {
   switch (t) {
-    case NODE_SOURCE:       return "source";
-    case NODE_SINK:         return "sink";
-    case NODE_CONSTANT:     return "constant";
-    case NODE_INTERACTION:  return "interaction";
-    case NODE_GAIN:         return "gain";
-    case NODE_LOOP_LIMITED: return "loop_limited";
-    case NODE_EXCHANGE:     return "exchange";
-    case NODE_SWITCH:       return "switch";
+    case GSSK_NODE_SOURCE:       return "source";
+    case GSSK_NODE_SINK:         return "sink";
+    case GSSK_NODE_CONSTANT:     return "constant";
+    case GSSK_NODE_INTERACTION:  return "interaction";
+    case GSSK_NODE_GAIN:         return "gain";
+    case GSSK_NODE_LOOP_LIMITED: return "loop_limited";
+    case GSSK_NODE_EXCHANGE:     return "exchange";
+    case GSSK_NODE_SWITCH:       return "switch";
     default:                return "storage";
   }
 }
@@ -6033,11 +6036,11 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
     if (is_processing_node(nd->type)) {
       cJSON *np = cJSON_CreateObject();
       cJSON_AddNumberToObject(np, "k", nd->node_k);
-      if (nd->type == NODE_LOOP_LIMITED)
+      if (nd->type == GSSK_NODE_LOOP_LIMITED)
         cJSON_AddNumberToObject(np, "C", nd->node_C);
-      else if (nd->type == NODE_SWITCH)
+      else if (nd->type == GSSK_NODE_SWITCH)
         cJSON_AddNumberToObject(np, "threshold", nd->node_threshold);
-      else if (nd->type == NODE_EXCHANGE) {
+      else if (nd->type == GSSK_NODE_EXCHANGE) {
         cJSON_AddNumberToObject(np, "price", nd->node_price);
         /* Emit the reference too, so a price_node survives round-trip rather
          * than silently collapsing to the constant fallback. */
