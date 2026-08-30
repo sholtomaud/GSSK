@@ -7,7 +7,7 @@ programmatic checks, and the contribution workflow. This file deliberately does
 **not** restate those rules — two copies of a standard drift apart, and then
 neither can be trusted. Add new standards to `AGENTS.md`, not here.
 
-## The three that get broken most
+## The four that get broken most
 
 Repeated here only because they have actually been violated in this repo, not
 to duplicate the standard:
@@ -18,6 +18,11 @@ to duplicate the standard:
    decide.
 3. **A task is done when it is merged**, not when it is written. Check that the
    code is on `main` before marking it complete.
+4. **Do not open concurrent PRs that insert at the same anchor.** Five branches
+   cut from one commit, each appending to the `.PHONY` line, the same CI step,
+   and `## [Unreleased]`, produced five hand-resolutions and silently dropped a
+   changelog entry on the way. See *Concurrent branches must not edit the same
+   line* in [AGENTS.md](AGENTS.md) for the anchors and the resolution check.
 
 ## Claude Code specifics
 
