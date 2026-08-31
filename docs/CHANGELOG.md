@@ -116,6 +116,16 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 - **`tests/test_limit_logic.c`** pins all four facts, so the documentation stays true. The precedence assertion is mutation-tested: swapping `control_node` and `threshold` priority in the kernel makes it fail. The decaying-control test asserts `Q_origin` is *exactly* frozen afterwards, and separately that the origin still holds most of its contents — otherwise a fully-drained store would sit still and pass.
 
+- **A per-instance-price regression fixture for the full CLI path (GIP-0002).** The archetype `price_node` fix landed with a unit test; `examples/archetype_price_per_instance.json` is the artefact that stops it coming back through the route that test does not cover — `bin/gssk`, a golden trajectory, and the serialised-model fixture set.
+
+  One `purchase` archetype holds a `constant` price member and an `exchange` naming it through `params.price_node`, instantiated as `a` and `b` and priced independently through `snapshot.state` on the expanded ids `a__price` (5.0) and `b__price` (12.0). The forward flow `k x Q_seller x Q_buyer` does not depend on price, which makes the fixture read as a controlled experiment: **the two inventories are bit-identical at every step while the two money stocks diverge**, ending at `a__spent` 293.79 against `b__spent` 705.10. `spent / inventory` is each instance's own price for the whole run, and `buyer + a__spent + b__spent` holds at 1000.0 because money is conserved across both diamonds.
+
+  **Both regressions it guards against are poisoned so they cannot look plausible.** If the template `price_node` stops resolving, the exchange falls back to a scalar `price` of `999.0`: the buyer is drained to exactly 0.0 and both instances spend an identical 500.0. If instead a `snapshot.state` id stops resolving — which is *silent*, `GSSK_Init` skips an id it cannot find — both prices keep the template's declared `0.0`, no money moves at all, and the inventories run to 400.0 unpriced. Neither can be mistaken for the golden, and neither is a plausible-looking number.
+
+### Fixed
+
+- **`gssk.schema.json` no longer says a template's `price_node` is ignored.** It documented `price_node` as "accepted and ignored on a template", which stopped being true when expansion began rewriting it, and would have described the new fixture as relying on behaviour the schema disclaimed. The description now states what actually happens: a template's `price_node` names a sibling member by its template-local id, expansion rewrites it to `{instance}__{member}` exactly as it does an edge origin or target, and naming no member of the archetype is a schema error rather than a fallback to the scalar price.
+
 ## [5.0.0] - 2026-08-26
 
 ### Breaking

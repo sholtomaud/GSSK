@@ -83,7 +83,7 @@
               "carrier": { "type": "string", "description": "Odum Position 1 carrier label. Falls back to the instance's carrier if omitted." },
               "params":  {
                 "$ref": "#/$defs/NodeParams",
-                "description": "Template node parameters. Declared as the full NodeParams for consistency with a model node, but parse_user_archetypes reads only k, C, threshold and price — price_node, k_production, k_respiration and k_metabolism are accepted and ignored on a template. The wider set is kept because narrowing it would reject models this schema calls valid."
+                "description": "Template node parameters. Declared as the full NodeParams for consistency with a model node, but parse_user_archetypes reads only k, C, threshold, price and price_node — k_production, k_respiration and k_metabolism are accepted and ignored on a template. The wider set is kept because narrowing it would reject models this schema calls valid. A template's price_node names a SIBLING MEMBER by its template-local id, and expansion rewrites it to '{instance}__{member}' exactly as it does an edge origin or target, so two instances of one archetype can trade at two different prices. Naming no member of the archetype is a schema error, not a fallback to the scalar price."
               }
             }
           }
