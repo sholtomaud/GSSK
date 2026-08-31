@@ -179,6 +179,44 @@ While GSSK's node type taxonomy is being corrected in Phase 7, the current `logi
 | `"threshold"` | `type: "switch"` node | Switch / Digital Box |
 | `"ratio"` | — (no Odum symbol; see below) | division |
 | `"reversible"` | — (an edge property, not a node) | barb-less pathway |
+| `"subtract"` | `type: "interaction"` node | Interaction / Work Gate (subtracting action) |
+
+### The interaction glyph computes several ways (GIP-0001 G1)
+
+Odum draws **one** interaction symbol and lets the arithmetic inside it vary. *Modeling for All Scales* Fig. 2.6 shows the same pointed block as (a) a product of two inputs, (c) a product of **three** input forces, (d) a divisor action, and (e) a **subtracting** action. The overloading is deliberate: one shape keeps the diagram legible while the operation changes.
+
+GSSK spells the four as two arity forms and two logic types.
+
+| Fig. 2.6 | GSSK |
+|---|---|
+| (a) product of two inputs | `interaction` with `params.control_node` |
+| (c) product of three input forces | `interaction` with `params.control_nodes` |
+| (d) divisor action | `ratio` (see below) |
+| (e) subtracting action | `subtract` |
+
+#### `control_nodes` — the n-ary work gate
+
+`F = k × Q_origin × ∏ Q_control`
+
+`params.control_node` names one control; `params.control_nodes` names between one and eight (`GSSK_MAX_CONTROL_NODES`). Controls are read, never consumed, exactly as the single one always was. The two fields are **mutually exclusive** — an edge carrying both is rejected rather than having one quietly win, because `limit`'s `control_node`-beats-`threshold` precedence is already one silent-precedence rule too many.
+
+A single-entry `control_nodes` is identical to `control_node`, and every existing one-control model is bit-for-bit unchanged: the extra-control loop runs zero times.
+
+**Only `interaction` is n-ary.** `ratio` and `subtract` are binary, `limit` takes one half-saturation constant, and all three reject a second control node with `GSSK_ERR_SCHEMA_VIOLATION`. A quotient or a difference of three things is not defined by the figure, and the kernel will not invent an associativity for it.
+
+The workaround this replaces — an intermediate storage node holding the partial product — was never the same model. The intermediate *integrates*, so it lags the inputs it multiplies, and it appears in the state vector, in the emergy accounting and in every CSV column list.
+
+#### `subtract` — the subtracting action
+
+`F = max(0, k × (Q_origin − Q_control))`
+
+Requires exactly one control node, read and never consumed.
+
+**The clamp is the semantics, not a guard.** This is a *barbed* pathway. The barb asserts a direction, so a negative flow along it would drain the target and fill the origin down a line whose notation says it cannot. The subtracting gate saturates at zero once the control overtakes the origin — it stops, rather than reversing.
+
+That is what separates it from `reversible`, which also computes a difference. `reversible` reads the **target** and is signed, and draws *without* a barb, which is how the diagram declares the difference. `subtract` reads a **control** it does not consume. Neither substitutes for the other.
+
+**Solver eligibility**: `subtract` contributes four flow-matrix entries, like `reversible`, because its flow depends on two state variables. Where the difference is positive it is integrated **exactly** rather than linearised, since `k(Q_origin − Q_control)` is linear in the state; where it is at or below zero the edge contributes nothing. That makes it **piecewise** exact — an edge whose difference crosses zero *inside* a step is integrated as though it stayed on the side it started, the same seam `threshold` has, bounded by `dt` rather than by the size of the flow. The n-ary `interaction` is linearised at the current operating point exactly as the two-input one always was, with no additional error class. See [ADR 0008](adr/0008-nary-interaction-and-subtracting-action.md).
 
 ### `reversible` — the barb-less pathway (GIP-0001 G3)
 

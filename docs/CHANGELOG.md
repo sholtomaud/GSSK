@@ -8,6 +8,22 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ### Added
 
+- **The rest of Odum's work gate: an n-ary `interaction` and a new `subtract` logic.** GIP-0001 G1; the decision is [ADR 0008](adr/0008-nary-interaction-and-subtracting-action.md).
+
+  *Modeling for All Scales* Fig. 2.6 shows one interaction glyph computing several ways — (a) a product of two inputs, (c) a product of **three** input forces, (d) a divisor action, (e) a **subtracting** action. GSSK shipped (a) as `interaction` and (d) as `ratio` (ADR 0002, extended by ADR 0005). This adds (c) and (e).
+
+  **(c) `params.control_nodes`** — an array of one to eight node ids, giving `F = k × Q_origin × ∏ Q_control`. The singular `params.control_node` is unchanged and remains the one-control spelling; the two are **mutually exclusive**, and an edge carrying both is rejected rather than having one silently win. Only `interaction` accepts more than one control: `ratio` and `subtract` are binary and `limit` takes one half-saturation constant, so a second control on any of them is a `GSSK_ERR_SCHEMA_VIOLATION`. A quotient or a difference of three things is not defined by the figure, and guessing an associativity would be inventing semantics rather than implementing them.
+
+  The workaround this replaces — an intermediate storage node holding the partial product — was never the same model: the intermediate integrates, so it lags the inputs it multiplies, and it shows up in the state vector, in the emergy accounting and in every CSV column.
+
+  **(e) `subtract`** — `F = max(0, k × (Q_origin − Q_control))`, requiring exactly one control node, read and never consumed. Not the GIP's proposed `params.op` string: the divisor action already shipped as its own logic type, so `op` would have made `logic: "ratio"` and `logic: "interaction", op: "div"` two spellings of one thing, in a published schema. `logic` is also the branch key at eight switch sites, where `-Werror` turns a missed case into a build failure — an `op` string is checked by nothing.
+
+  The clamp is the semantics rather than a guard. `subtract` draws a *barbed* pathway, and a negative flow would drain the target along a line whose barb says it cannot; the gate saturates at zero when the control overtakes the origin. Signed flow across a gradient is `reversible` (ADR 0007), which reads the **target** and draws without a barb. The two compute a difference and are not the same statement.
+
+  **Solver eligibility.** The n-ary product is linearised at the current operating point exactly as the two-input one always was — no new error class, whether there are one or seven controls. `subtract` contributes four flow-matrix entries like `reversible`, and is **exact** rather than linearised where the difference is positive, contributing nothing below the clamp. It is therefore *piecewise* exact: an edge whose difference crosses zero inside a step is integrated as though it stayed on the side it started, the same seam `threshold` has, bounded by `dt`.
+
+  Existing single-control models are **bit-identical** — `control_idx` still holds the one control and the product loop runs zero times — and existing `GSSK_LogicType` values are unmoved, with `GSSK_LOGIC_SUBTRACT` appended at 7. Both are pinned by test. `build_topology_json` emits the spelling an edge actually has, so a one-control model does not come back rewritten into the array form. New: `examples/three_input_gate_model.json`, `tests/test_interaction_nary.c`, `make test-interaction-nary`.
+
 ---
 
 ## [5.1.0] — 2026-08-30

@@ -294,6 +294,21 @@ test-reversible: all $(TARGET_TEST_REVERSIBLE)
 	@echo "Running reversible pathway tests..."
 	@./$(TARGET_TEST_REVERSIBLE)
 
+# n-ary interaction and the subtracting action, GIP-0001 G1 / ADR 0008. The
+# sharp assertions are the closed forms and the bit-identity of the n-ary form
+# against a collapsed binary one: a build that multiplied only the first
+# control still decays, and a golden CSV regenerated from that build agrees
+# with itself.
+TARGET_TEST_NARY = $(BIN_DIR)/test_interaction_nary
+
+$(TARGET_TEST_NARY): $(TEST_DIR)/test_interaction_nary.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-interaction-nary
+test-interaction-nary: all $(TARGET_TEST_NARY)
+	@echo "Running n-ary interaction / subtract tests..."
+	@./$(TARGET_TEST_NARY)
+
 $(TARGET_TEST_FORCING): $(TEST_DIR)/test_forcing.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
 
@@ -680,7 +695,7 @@ wasm-container: container-image-wasm
 
 # Full native build + both test suites under real GCC with -Werror.
 test-linux: container-image-linux
-	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-deactivation && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy'
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-deactivation && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy && make CC=gcc test-interaction-nary'
 
 # Same under Linux clang, the other half of CI's build-native matrix.
 test-linux-clang: container-image-linux
