@@ -1,0 +1,273 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "odum-gnp-loop",
+    "description": "Phase D.1 \u2014 money as a closed, conserved GNP loop (Odum Fig. 3). The C.4 countercurrent drained money one way into a sink, so the 'conserved: true' declaration on the money carrier asserted nothing: conservation is measured over STORAGE nodes only, and a source/sink pair contributes none. Here money circulates households -> exchange -> firms -> households with no money source and no money sink, so the total is a real invariant the solver must hold. Energy over the same run is NOT conserved \u2014 it dissipates to heat and to the consumed sink \u2014 which is the asymmetry Odum draws: energy flows through, money goes round."
+  },
+  "carriers": [
+    {
+      "id": "energy",
+      "unit": "kWh",
+      "conserved": true
+    },
+    {
+      "id": "money",
+      "unit": "AUD",
+      "conserved": true
+    },
+    {
+      "id": "signal",
+      "unit": "AUD/kWh",
+      "conserved": false
+    }
+  ],
+  "nodes": [
+    {
+      "id": "fuel",
+      "type": "storage",
+      "value": 1000.0,
+      "carrier": "energy"
+    },
+    {
+      "id": "yield",
+      "type": "storage",
+      "value": 0.0,
+      "carrier": "energy"
+    },
+    {
+      "id": "structure",
+      "type": "storage",
+      "value": 1.0,
+      "carrier": "energy"
+    },
+    {
+      "id": "heat",
+      "type": "sink",
+      "value": 0.0,
+      "carrier": "energy"
+    },
+    {
+      "id": "ex",
+      "type": "exchange",
+      "value": 0.0,
+      "carrier": "energy",
+      "params": {
+        "k": 0.003,
+        "price": 999.0,
+        "price_node": "price"
+      }
+    },
+    {
+      "id": "consumed",
+      "type": "sink",
+      "value": 0.0,
+      "carrier": "energy"
+    },
+    {
+      "id": "households",
+      "type": "storage",
+      "value": 1.0,
+      "carrier": "money"
+    },
+    {
+      "id": "firms",
+      "type": "storage",
+      "value": 0.0,
+      "carrier": "money"
+    },
+    {
+      "id": "unity",
+      "type": "source",
+      "value": 1.0,
+      "carrier": "signal"
+    },
+    {
+      "id": "W",
+      "type": "storage",
+      "value": 0.0,
+      "carrier": "signal"
+    },
+    {
+      "id": "W_gross",
+      "type": "storage",
+      "value": 0.0,
+      "carrier": "signal"
+    },
+    {
+      "id": "price",
+      "type": "storage",
+      "value": 0.02,
+      "carrier": "signal"
+    },
+    {
+      "id": "s_leak",
+      "type": "sink",
+      "value": 0.0,
+      "carrier": "signal"
+    }
+  ],
+  "edges": [
+    {
+      "id": "extraction",
+      "origin": "fuel",
+      "target": "yield",
+      "carrier": "energy",
+      "logic": "interaction",
+      "params": {
+        "k": 0.0004,
+        "control_node": "structure"
+      }
+    },
+    {
+      "id": "feedback",
+      "origin": "yield",
+      "target": "heat",
+      "carrier": "energy",
+      "logic": "ratio",
+      "params": {
+        "k": 263.0,
+        "control_node": "fuel",
+        "threshold": 1.0
+      }
+    },
+    {
+      "id": "delivered",
+      "origin": "yield",
+      "target": "structure",
+      "carrier": "energy",
+      "logic": "linear",
+      "params": {
+        "k": 5.0
+      }
+    },
+    {
+      "id": "depreciation",
+      "origin": "structure",
+      "target": "heat",
+      "carrier": "energy",
+      "logic": "linear",
+      "params": {
+        "k": 0.08
+      }
+    },
+    {
+      "id": "supply",
+      "origin": "structure",
+      "target": "ex",
+      "carrier": "energy"
+    },
+    {
+      "id": "payment",
+      "origin": "households",
+      "target": "ex",
+      "carrier": "money"
+    },
+    {
+      "id": "sold",
+      "origin": "ex",
+      "target": "consumed",
+      "carrier": "energy"
+    },
+    {
+      "id": "revenue",
+      "origin": "ex",
+      "target": "firms",
+      "carrier": "money"
+    },
+    {
+      "id": "wages",
+      "origin": "firms",
+      "target": "households",
+      "carrier": "money",
+      "logic": "linear",
+      "params": {
+        "k": 2.0
+      }
+    },
+    {
+      "id": "w_tap",
+      "origin": "unity",
+      "target": "W",
+      "carrier": "signal",
+      "logic": "interaction",
+      "params": {
+        "k": 5.0,
+        "control_node": "yield"
+      }
+    },
+    {
+      "id": "w_leak",
+      "origin": "W",
+      "target": "s_leak",
+      "carrier": "signal",
+      "logic": "linear",
+      "params": {
+        "k": 1.0
+      }
+    },
+    {
+      "id": "wg_tap_delivered",
+      "origin": "unity",
+      "target": "W_gross",
+      "carrier": "signal",
+      "logic": "interaction",
+      "params": {
+        "k": 5.0,
+        "control_node": "yield"
+      }
+    },
+    {
+      "id": "wg_tap_feedback",
+      "origin": "unity",
+      "target": "W_gross",
+      "carrier": "signal",
+      "logic": "ratio",
+      "params": {
+        "k": 263.0,
+        "numerator_node": "yield",
+        "control_node": "fuel",
+        "threshold": 1.0
+      }
+    },
+    {
+      "id": "wg_leak",
+      "origin": "W_gross",
+      "target": "s_leak",
+      "carrier": "signal",
+      "logic": "linear",
+      "params": {
+        "k": 1.0
+      }
+    },
+    {
+      "id": "p_target",
+      "origin": "unity",
+      "target": "price",
+      "carrier": "signal",
+      "logic": "ratio",
+      "params": {
+        "k": 5.0,
+        "numerator_node": "households",
+        "control_node": "W",
+        "threshold": 0.005
+      }
+    },
+    {
+      "id": "p_relax",
+      "origin": "price",
+      "target": "s_leak",
+      "carrier": "signal",
+      "logic": "linear",
+      "params": {
+        "k": 5.0
+      }
+    }
+  ],
+  "config": {
+    "t_start": 0,
+    "t_end": 70,
+    "dt": 0.02,
+    "method": "rk4",
+    "solver_tolerance": 1e-06
+  }
+}

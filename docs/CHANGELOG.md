@@ -116,6 +116,12 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 - **`tests/test_limit_logic.c`** pins all four facts, so the documentation stays true. The precedence assertion is mutation-tested: swapping `control_node` and `threshold` priority in the kernel makes it fail. The decaying-control test asserts `Q_origin` is *exactly* frozen afterwards, and separately that the origin still holds most of its contents — otherwise a fully-drained store would sit still and pass.
 
+- **Phase D.1 — money is a closed conserved loop, so `conserved: true` finally asserts something.** `examples/odum_gnp_loop.json` circulates money `households → exchange → firms → households` with no money source and no money sink, which is Odum's Fig. 3: energy flows *through* and leaves as heat, money goes *round*, counter-current the whole way. `make test-gnp-loop` pins that asymmetry — money's per-step `GSSK_GetCarrierConservationError` stays under the model's `solver_tolerance` (worst 2.2e-16) while energy's does not over the very same run (worst 1.5e-03, as the reserve depletes from 1001 to 42).
+
+  **The declaration was previously vacuous, and the suite says so with a negative control.** Conservation is summed over *storage* nodes only, and C.4's `examples/odum_countercurrent.json` modelled money as a `source`/`sink` pair — no money storage at all. Its reported error is a flawless `0.0` computed over nothing, and `test_open_loop_conservation_is_vacuous` asserts both halves of that: zero money storages **and** a zero error. A check that cannot fail is worse than no check, so the new suite refuses to be one — it also asserts that the loop actually turns (`firms` peaks at 30% of the money stock, so the exchange really cleared) and that the topology contains no money source or sink by construction.
+
+  Added to the PR quality gate and to `make test-linux`, not just the local chain.
+
 ## [5.0.0] - 2026-08-26
 
 ### Breaking
