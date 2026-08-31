@@ -1,0 +1,298 @@
+\documentclass[11pt,a4paper]{article}
+
+\input{preamble}
+
+\title{Two Accountings, One Model: Reconciling Odum's Energy Systems Method with IFRS/AASB Financial Reporting}
+\author{Sholto Maud}
+\date{\gssk{} kernel v5.1.0 --- companion to ADR 0009}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+A \gssk{} model is a system of ordinary differential equations describing flows of energy, matter and money through a network of storages. A general ledger is a set of discrete, exactly balancing entries recognised under a body of accounting standards. The premise of this document is that one artefact can serve both purposes --- that a model can be simultaneously a faithful Odum simulation and a compliant set of books --- and that this is achievable without deforming either system. We identify seven specific points at which the two genuinely diverge, distinguish them from the larger set of points at which they merely differ in vocabulary, and resolve each against the IFRS/AASB standards. The organising resolution is that the trajectory is \emph{evidence for postings} rather than the book of record itself: a solver balances to tolerance, a ledger balances exactly, and the two remain distinct artefacts joined by an explicit, specified posting step. We show that this preserves the continuity Odum's method requires and the exactness the standards require, at a cost that is stated rather than hidden. Four defects found in the kernel while establishing this are reported with the measurements that revealed them.
+\end{abstract}
+
+\tableofcontents
+
+\section{Scope and audience}
+
+This document is written for two readers who do not usually share a page. The first is a systems modeller who knows Odum's Energy Systems Language and wants to know what financial reporting will demand of a model. The second is an accountant or auditor who knows IFRS/AASB and wants to know whether a differential-equation model can produce anything they are permitted to rely on. Both are assumed to be sceptical, and neither is assumed to have read the kernel's source.
+
+The standards in scope are the recognition and measurement rules: the \emph{Conceptual Framework for Financial Reporting}, AASB 15 / IFRS 15 \emph{Revenue from Contracts with Customers}, AASB 102 / IAS 2 \emph{Inventories}, AASB 9 / IFRS 9 \emph{Financial Instruments} where a model carries financial assets, and AASB 101 / IAS 1 for the accrual basis and materiality. Auditing standards, tax-effect accounting and management accounting are out of scope; they sit on top of a compliant ledger rather than defining one. Paragraph references are to the IFRS text and should be verified against the current compiled AASB standard before being relied upon.
+
+The companion decision record is ADR 0009 in \code{docs/adr/}. The ADR decides; this document argues. Where the two differ in emphasis the ADR governs, because it is the artefact the repository enforces against.
+
+\section{Two accountings}
+
+\subsection{What Odum's method asserts}
+
+Odum's Energy Systems Language describes a system as storages connected by pathways, where every pathway carries a flow and every storage integrates the flows incident on it \citep{odum1994,odum2000}. The state of the system is a vector $Q$ of stocks, and its evolution is
+\begin{equation}
+\frac{dQ_i}{dt} \;=\; \sum_{j} F_{ji}(Q,t) \;-\; \sum_{k} F_{ik}(Q,t),
+\label{eq:state}
+\end{equation}
+where each $F$ is determined by a small vocabulary of pathway logics --- linear, interaction, limit, ratio, subtract, reversible --- evaluated from the current state. Three commitments in this method matter for what follows. Time is \emph{continuous}: the model has a value at every instant, not merely at reporting dates. Quantities are \emph{real-valued}: a stock is a real number of units, not a count of indivisible minor units. And value is not money: Odum's emergy accounting deliberately values flows by their embodied energy precisely because market prices do not measure what he wanted measured \citep{odum1996}.
+
+The transaction is where money enters. Odum draws it as a counter-current: a forward flow of goods met by a backward flow of money, coupled at a diamond, so that a purchase is one construct with two flows rather than two independent events. In \gssk{} this is the \code{exchange} node, and the coupling is
+\begin{equation}
+F_{\text{money}} \;=\; p \cdot F_{\text{goods}},
+\label{eq:coupling}
+\end{equation}
+with $p$ either a constant or, since the endogenous-price work, the current value of a state node so that price can be driven by the system rather than dialled in by the author.
+
+\subsection{What the standards require}
+
+Financial reporting asks a different question of the same events: not how much flowed, but how much is \emph{recognised}, \emph{when}, and \emph{measured on what basis}. The \emph{Conceptual Framework} recognises an item that meets the definition of an asset, liability, equity, income or expense where recognition provides relevant information that is a faithful representation --- complete, neutral, and free from error (CF 2.12--2.19, 5.7). Revenue is recognised when, or as, a performance obligation is satisfied by the transfer of control (IFRS 15 \S31), either over time where the criteria in \S35 are met, with a measure of progress under \S39, or at a point in time under \S38. The amount is the transaction price: the consideration to which the entity expects to be entitled (\S47). Inventories are carried at the lower of cost and net realisable value (IAS 2 \S9). Reporting is on the accrual basis (IAS 1 \S27--28), and the books balance.
+
+Three commitments here mirror and oppose Odum's. Recognition is \emph{event-shaped}, attaching to satisfaction of an obligation rather than to the passage of time. Amounts are \emph{exact} in the presentation currency's minor unit, because a ledger that balances approximately does not balance. And measurement bases are \emph{closed}: historical cost and current value, with no admission for a physical or energetic valuation.
+
+\subsection{The thesis}
+
+The two systems agree far more than the framing suggests, and where they disagree it is in a small number of identifiable places rather than diffusely. Section~\ref{sec:agree} sets out four structural correspondences that already hold. Section~\ref{sec:divergences} sets out the seven genuine divergences and resolves each. The distinction matters because most of the apparent conflict is vocabulary: a \emph{stock} is a \emph{balance}, a \emph{flow} is a \emph{posting rate}, a \emph{carrier} is a \emph{unit of account}, and a counter-current is a double entry. Treating vocabulary differences as substantive is how one ends up building two models that must then be reconciled, which is the outcome this design exists to avoid.
+
+\section{Where the two already agree}
+\label{sec:agree}
+
+\subsection{The counter-current is a double entry}
+
+The most important correspondence is exact rather than analogical. In the transaction diamond, money debited from the buyer and money credited to the seller are the same computed quantity, applied with opposite sign in one operation. In the kernel this is a single function that takes one $F_{\text{money}}$ and applies it twice:
+\begin{lstlisting}[style=c]
+double F_money = price * F_primary;
+if (money_from >= 0) deriv[money_from] -= F_money;
+if (money_to   >= 0) deriv[money_to]   += F_money;
+\end{lstlisting}
+Because the integrator then applies identical stage weights to both entries, the integrated debit equals the integrated credit \emph{identically}, not merely to tolerance. Odum's notation and double-entry bookkeeping are, at this point, the same idea drawn differently: a transaction has two ends and neither exists without the other. This is the foundation the rest of the reconciliation is built on, and it is worth stating that it holds by construction rather than by checking, because a property that is enforced structurally cannot drift.
+
+\subsection{Carrier conservation is the balancing of the books}
+
+\gssk{} models declare carriers --- money, goods, energy --- and may mark a carrier \emph{conserved}. A conserved carrier is one whose total is invariant except at declared boundaries, which is precisely the closure property that makes a ledger a ledger. The accounting equation is a conservation law over the money carrier, and the sources and sinks of a \gssk{} model are the points at which value enters and leaves the reporting entity.
+
+\subsection{Continuous delivery is over-time recognition}
+
+IFRS 15 \S35(a) permits revenue to be recognised over time where the customer simultaneously receives and consumes the benefit, and \S39 requires a single measure of progress toward complete satisfaction of the obligation. An integrated flow is exactly such a measure. Writing $\pi(t)$ for progress at time $t$ on an obligation running over $[t_0, T]$,
+\begin{equation}
+\pi(t) \;=\; \frac{\int_{t_0}^{t} F_{\text{goods}}(s)\, ds}{\int_{t_0}^{T} F_{\text{goods}}(s)\, ds},
+\label{eq:progress}
+\end{equation}
+which is an output method in the language of \S41. A continuously running diamond is therefore not an awkward fit for the standard; it is the standard's own preferred construction for obligations satisfied over time, expressed in the modelling language rather than in a spreadsheet.
+
+\subsection{The topology rule is a chart of accounts}
+
+\esl{} draws a hard line between pathways, which carry flows, and units, which hold state. \gssk{} enforces it: coefficients belong to nodes, never to edges. A chart of accounts draws the same line --- accounts hold balances, transactions move between them --- and the discipline has the same purpose in both systems, which is that the structure of the model can be read off without knowing the numbers in it.
+
+\section{Evidence from the kernel}
+\label{sec:findings}
+
+The divergences below are not hypothetical. Each was reached by looking for a specific failure in a kernel that was already believed correct, and four defects surfaced in the process. They are reported here because they establish the character of the risk: in every case the model loaded, ran to completion and reported success while being wrong. This is the signature that matters, and Section~\ref{sec:silence} argues it is the only failure mode a ledger cannot tolerate.
+
+All four were verified by execution against \code{examples/exchange\_price\_node.json}, a two-carrier model in which a buyer holds an opening money balance of $1000$ and purchases goods at a price of $5$ over ten steps.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{0.30\textwidth}p{0.62\textwidth}@{}}
+\toprule
+\textbf{Finding} & \textbf{What was observed} \\
+\midrule
+Global conservation metric is structurally zero &
+\code{closed\_system\_conservation\_error} returns $0.0$ as soon as any active node is not a storage. Every transaction diamond contains an \code{exchange} node, so the metric is vacuous for every model a ledger is made of. Observed: $0.000\mathrm{e}{+}00$. \\
+\addlinespace
+Per-carrier metric cannot see a terminal account &
+The per-carrier sum ranges over storage nodes only, and the diamond credits a sink. The money carrier reported an error of $4.99\mathrm{e}{-}03$ on a model where money is conserved \emph{to the bit}: $951.22942450096275 + 48.77057549903725 = 1000.0$ with a residual of exactly zero in double precision. \\
+\addlinespace
+Model identity is unverified &
+\code{model\_hash} is read from the document and re-emitted, and computed nowhere. \code{GSSK\_GetModelHash} returns the empty string for any model that does not declare one, while the published schema describes the field as auto-computed. \\
+\addlinespace
+An absent price is an authored zero &
+A node price is zero-initialised and assigned only when the key is present. An \code{exchange} with no price and one with \code{"price": 0.0} are indistinguishable, and both post nothing. \\
+\bottomrule
+\end{tabular}
+\caption{Four defects found while establishing conformance, each verified by execution.}
+\end{table}
+
+The second finding deserves emphasis because it is the most instructive. The metric did not fail to notice an imbalance; it reported an imbalance that did not exist, on a ledger that was perfect. Both directions of that error are serious, but the silent one is worse: a genuine leak into or out of a terminal account would have gone equally unreported. A diagnostic that is blind in both directions is not a weak control, it is the absence of one, and until this was measured it was reasonable to believe the kernel had a money-conservation check.
+
+\section{The seven divergences}
+\label{sec:divergences}
+
+Each subsection states what Odum's method requires, what the standards require, why the two cannot both be satisfied naively, the resolution adopted, and what that resolution costs. No divergence is left described without a resolution, and no resolution is claimed to be free.
+
+\subsection{Arithmetic: tolerance against exactness}
+\label{sec:arith}
+
+\textbf{Odum requires} real-valued stocks advanced by a numerical integrator. Equation~\eqref{eq:state} has no exact solution in general, and \gssk{} advances it by Runge--Kutta with a stated error tolerance. \textbf{The standards require} that the books balance exactly in the minor unit of the presentation currency. A trial balance out by one cent is out.
+
+\textbf{The conflict} is not about accuracy but about the type of the quantity. A ledger entry is an integer number of cents; a trajectory value is a real. No tolerance, however small, makes a real into an integer, and no refinement of the solver closes the gap, because the gap is categorical.
+
+Two naive resolutions fail. Discretising the physics to the minor unit --- integrating in integer cents --- destroys the method: flows become quantised, small rates round to zero, and the model stops being a description of a continuous system. Admitting tolerance into the ledger fails the standards outright and, more practically, destroys the one property that makes double entry useful as a control.
+
+\textbf{The resolution} is to refuse the identification. The trajectory is not the book of record; it is evidence from which postings are derived by an explicit step. The two are different artefacts with different types, joined by a documented procedure (Section~\ref{sec:posting}). The \emph{Conceptual Framework} makes this a legitimate position rather than an evasion: ``free from error'' (CF 2.18) means that there are no errors in the description of the phenomenon and that the process used to produce the information has been selected and applied without error --- it explicitly does not mean perfectly accurate in every respect. A deterministic integration with a stated tolerance, followed by a specified quantisation, is exactly such a process. An undocumented one is not, which is why the posting step must be published rather than left to the consumer's discretion.
+
+\textbf{The cost} is a boundary that must be crossed deliberately, and an artefact --- the postings --- that is downstream of the model rather than inside it. A consumer who wants the ledger must run the step; the kernel will not do it for them.
+
+\subsection{Time: the continuum against the recognition instant}
+
+\textbf{Odum requires} that the model have a value at every instant. \textbf{The standards require} that revenue be recognised when or as an obligation is satisfied, which for point-in-time recognition (IFRS 15 \S38) is an instant at which control transfers.
+
+\textbf{Where there is no conflict at all}, as Section~\ref{sec:agree} showed, is over-time recognition: an integrated flow is a measure of progress under \S39, and Equation~\eqref{eq:progress} is an output method. A continuously delivered obligation is the case the two systems describe identically.
+
+\textbf{The conflict} is confined to point-in-time recognition, and it is real. There is no instant in a continuous trajectory at which control transfers, because nothing in Equation~\eqref{eq:state} distinguishes one instant from another. \gssk{} does maintain an event log, but it records \emph{edge threshold crossings} --- a time, an edge, a direction --- rather than transactions, so it cannot presently supply the record a point-in-time posting needs.
+
+\textbf{The resolution} is that a model must declare, per diamond, which basis it recognises on. Over time is the default and requires nothing new. Point in time requires a declared event, and until the kernel can emit one, such a diamond is not expressible and must not be faked. The failure mode being guarded against is specific: sampling a continuous trajectory at a chosen date and calling the result a control transfer produces a number that looks like a recognised amount but is a measure of progress wearing the wrong label, and nothing downstream can tell the difference.
+
+\textbf{The cost} is that point-in-time recognition is currently unavailable, and a class of ordinary commercial arrangements --- a sale on delivery --- cannot yet be modelled as a ledger event. This is tracked as \code{recognition-basis-declaration}.
+
+\subsection{Valuation: emergy against the measurement bases}
+
+\textbf{Odum requires} that emergy be available as a valuation --- indeed the whole point of transformity is to value flows in a way that price does not \citep{odum1996,bastianoni2011}. \textbf{The standards require} that recognised amounts be measured on one of a closed set of bases: historical cost, or a current value such as fair value, value in use or current cost.
+
+\textbf{The conflict} is that emergy is not on the list and cannot be added to it by any reasoning available to a preparer. It is not a worse measurement basis than fair value; it is a measurement of a different thing, chosen precisely because it is not what the market says.
+
+\textbf{The resolution} is that emergy is supplementary information and never the measurement basis of a recognised amount. This constrains both directions, and the second direction is easy to miss. No recognised amount may be derived from a transformity --- that is the obvious half. But equally, the money leg of a transaction must not contribute emergy inflow, because counting money as an energy input double-counts the transaction in the one accounting that is supposed to be independent of price. Odum's own treatment of the counter-current says the same thing for his own reasons, which is a useful convergence: the standards and the method agree on the exclusion even though they reach it differently.
+
+\textbf{The cost} is that a model carries two valuations that must not be mixed, and the discipline of keeping them apart falls partly on the modeller. A statement that presents emergy alongside monetary amounts must label which is which.
+
+\subsection{Price: the endogenous against the historical}
+\label{sec:price}
+
+This is the divergence where Odum's method must yield, and the one most worth arguing with.
+
+\textbf{Odum requires} --- or at least the endogenous-price programme does --- that price be a state variable, driven by the ratio of circulating money to delivered work, so that inflation emerges from the system rather than being asserted by the author. \textbf{The standards require} that the transaction price be the consideration to which the entity expects to be entitled under the contract (IFRS 15 \S47), and that a satisfied performance obligation is not re-measured because prices later moved.
+
+\textbf{The conflict} is temporal rather than conceptual. An endogenous price is a function of state, and state evolves; run the model again with a longer horizon and the price at every past instant may differ. If recognised amounts are read off that price, then history changes when the forecast changes, which fails the standards at the most basic level --- and would fail an audit at the first re-run.
+
+\textbf{The resolution} is to scope the mechanism by period rather than to remove it. A diamond in a \emph{forecast} period may take its price from a price node, with all the endogenous machinery intact. A diamond in a \emph{reported} period trades at its historical transaction price, which is fixed, and no re-run may alter it. The boundary is the reporting date, and it is the consumer's to enforce, because the kernel has no notion of a reporting period.
+
+\textbf{The cost} is stated plainly: within a reported period, the endogenous-price programme is switched off, and prices there are data rather than dynamics. A model spanning a reporting boundary is therefore heterogeneous --- historical on one side, dynamic on the other --- which is less elegant than a single mechanism throughout. That inelegance is the price of the books being auditable, and it is the correct trade, but it should not be described as though nothing was given up.
+
+\subsection{Epistemics: silence against assertion}
+\label{sec:silence}
+
+\textbf{Odum's method tolerates} defaults. A coefficient left unstated is zero, a pathway not drawn carries nothing, and a model that runs is a model worth looking at; the trajectory is the output and the modeller reads it. \textbf{The standards require} that the statements be complete and free from error (CF 2.12--2.19), and completeness is not a matter of degree --- a set of statements that omits transactions is not a slightly worse set of statements.
+
+\textbf{The conflict} appears wherever the kernel supplies a default for something the author did not state. The fourth finding in Section~\ref{sec:findings} is the sharp case: an \code{exchange} with no price behaves identically to one priced at zero, so a model that forgot to price a transaction posts nothing and reports success. This is precisely the defect that prompted the whole enquiry, where an archetype's price reference silently failed to resolve and every diamond in the model traded at the template's constant.
+
+\textbf{The resolution} is that a defaulted price is a load-time error. Where a value materially determines a recognised amount, the kernel must distinguish \emph{not stated} from \emph{stated as zero} and reject the former. An authored zero remains valid, and the distinction is not pedantry: a zero-consideration transfer is a real economic event --- a donation, a contribution, a related-party transfer at no charge --- which is simply not revenue under IFRS 15 and is recognised, if at all, elsewhere. What must be impossible is for the absence of a decision to look like a decision.
+
+\textbf{The cost} is that some models which load today will stop loading, which is the intended effect. Tracked as \code{exchange-price-authored-vs-defaulted}.
+
+The general principle is worth separating from the instance. Every finding in Section~\ref{sec:findings} shares one signature: the model loaded, ran and reported success while being wrong. For a simulation that is a bug of ordinary severity, discovered when the trajectory looks implausible. For a ledger it is the only bug that matters, because every other kind announces itself --- a crash is noticed, a rejected document is noticed, an imbalance is noticed. Silent wrongness is the failure mode against which the accounting profession has built its entire apparatus of controls, and a kernel that aspires to produce books must adopt the same posture: prefer the loud failure, and treat a default that could stand in for a decision as a defect.
+
+\subsection{Identity: what a hash anchors}
+
+\textbf{Odum's method requires} nothing here; reproducibility is a property of the implementation rather than of the language. \textbf{The standards require}, through the audit trail that reporting presupposes, that it be possible to say which model produced a given figure and to obtain that same figure again from it.
+
+\textbf{The conflict} is that \gssk{}'s content hash does not currently do this. The third finding is that \code{model\_hash} is read and re-emitted but never computed, so it carries whatever the document asserts and is usually empty. The argument used elsewhere in the design --- that a price must live inside the hashed document, so that setting it through an API after load would break the identification of a forecast with its model --- is correct in form and rests on a mechanism that is not yet implemented.
+
+\textbf{The resolution} is that the hash is computed by the kernel over everything that determines the trajectory --- topology \emph{and} the snapshot state that supplies per-instance values --- or the claim is withdrawn and the field documented as consumer-supplied and unverified. Both are defensible; leaving a published claim standing while the kernel ignores it is not, because it invites a consumer to treat an unverified string as an audit anchor. Relatedly, the serialisation that carries state, rather than the one that carries topology alone, is the book-of-record form: a per-instance price delivered through the snapshot mechanism survives only the former, and a consumer who serialises the model, stores it and reloads it would otherwise find every diamond trading at its template default.
+
+\textbf{The cost}, if the hash is computed, is a SHA-256 implementation in a kernel that has kept itself free of dependencies. Tracked as \code{model-hash-compute-or-withdraw}.
+
+\subsection{Observability: diagnostics that cannot see the ledger}
+
+\textbf{Odum's method requires} conservation to hold, and \gssk{} offers two diagnostics that appear to check it. \textbf{The standards require} that the books balance, and an entity relying on a control must know what that control actually tests.
+
+\textbf{The conflict} is that neither diagnostic tests what its name suggests, as findings one and two establish. The global metric excludes any model containing a non-storage node, which is every ledger. The per-carrier metric sums storage nodes only, so a payment into a terminal account registers as a discrepancy while a genuine leak through the same account would not register at all.
+
+\textbf{The resolution} has two parts, of which the first is immediate and the second is work. Immediately: neither metric may be cited, in documentation or to a consumer, as evidence that a model's money conserves. That is a statement about what may be claimed, and it costs nothing to adopt. Subsequently: a conservation figure that ranges over every node capable of holding the carrier, with sources and sinks as explicit boundary terms, so that the number reported is the carrier's actual imbalance. This changes the meaning of a published diagnostic, so it is deliberately not being done silently.
+
+\textbf{The cost} is that a number consumers may already be reading will change, and the change must be announced as a correction rather than an improvement. Tracked as \code{ledger-conservation-diagnostic}.
+
+Note what this divergence is \emph{not}. The double entry itself was never in doubt --- Section~\ref{sec:agree} shows it holds by construction, and the money in the test model balanced to the bit. What failed was the ability to \emph{observe} that it held. The distinction matters because it is the difference between a system that is wrong and a system that is right but unverifiable, and only the second is repairable by adding a measurement.
+
+\section{The posting step}
+\label{sec:posting}
+
+Section~\ref{sec:arith} resolved the arithmetic divergence by separating the trajectory from the book of record. That separation is only honest if the join between them is specified, and this section specifies it. The step is deliberately simple; its virtue is that it is written down.
+
+\subsection{Quantisation}
+
+Let a diamond deliver goods at rate $F_{\text{goods}}$ over a posting interval $[t_0, t_1]$, at price $p$. The continuous consideration over that interval is
+\begin{equation}
+c \;=\; \int_{t_0}^{t_1} p(s)\, F_{\text{goods}}(s)\, ds,
+\end{equation}
+which the kernel computes as the change in the money leg's cumulative flow. Let $\mu$ be the minor unit of the presentation currency --- $0.01$ for a currency with cents. The posted amount is
+\begin{equation}
+a \;=\; \mu \cdot \operatorname{round}\!\left(\frac{c}{\mu}\right),
+\label{eq:quantise}
+\end{equation}
+with a stated rounding convention --- half away from zero unless the entity's policy says otherwise --- because an unstated convention is exactly the kind of unspecified process CF 2.18 excludes.
+
+\subsection{The residual is posted, not dropped}
+
+The quantisation residual
+\begin{equation}
+r \;=\; c - a
+\end{equation}
+is bounded by $\mu/2$ per posting and is not permitted to vanish. Dropping it is the silent-imbalance failure the whole arrangement exists to prevent: over many postings the dropped residuals accumulate into a difference between the model and the books that nothing reconciles, and the difference grows with transaction count rather than with transaction size, so it is largest exactly where it is least visible. Each $r$ is posted to a rounding account, which therefore holds $\sum r$ and is itself a control: if it grows beyond a materiality threshold, either the posting interval is too fine for the currency or something upstream is wrong.
+
+The double entry is preserved under quantisation because both legs of a transaction are quantised from the same $c$ and posted as the same $a$. This is the reason Section~\ref{sec:agree}'s structural exactness matters: had the two legs been computed independently, quantising them independently would have produced imbalances that no rounding account could absorb.
+
+\subsection{Periods and immutability}
+
+A reporting date partitions the trajectory. Postings for intervals wholly before it are \emph{reported}: they are fixed, their prices are historical, and no subsequent run of the model may alter them (Section~\ref{sec:price}). Postings after it are \emph{forecast}: they may be regenerated freely, priced endogenously, and carry no assertion of having occurred. An interval straddling the date must be split at the date rather than assigned wholly to either side, which is the accrual basis (IAS 1 \S27) applied to a continuous flow.
+
+Immutability is the consumer's obligation, not the kernel's. \gssk{} has no notion of a reporting period and should not acquire one --- it is a dynamics engine, and a period is a reporting construct. What the kernel owes is determinism, so that a re-run over an unchanged document reproduces the trajectory the reported postings were derived from; what the consumer owes is to store the reported postings and refuse to re-derive them.
+
+\subsection{What the consumer owes}
+
+Collecting the obligations that this design deliberately does not enforce in the kernel: quantise at posting time and post the residual; hold reported periods at historical transaction prices; keep emergy and monetary valuations separately labelled; store the snapshot-form serialisation as the book of record; and check the model's identity before relying on a figure derived from it. None of these can be enforced by a C99 kernel with no notion of a reporting entity, and pretending otherwise would put a compliance claim in a place that cannot honour it.
+
+\section{A worked example}
+
+Consider a household purchasing two goods, modelled as two instances of one archetype. The archetype declares four members: a constant \code{price}, an \code{exchange} named \code{deal} that prices from it, a \code{storage} for \code{inventory} and a terminal account for \code{spent}.
+
+\begin{lstlisting}[style=js]
+"archetypes": {
+  "purchase": {
+    "nodes": [
+      {"id":"price","type":"constant","value":0.0,"carrier":"money"},
+      {"id":"deal","type":"exchange","carrier":"goods",
+       "params":{"k":0.01,"price_node":"price"}},
+      {"id":"inventory","type":"storage","carrier":"goods"},
+      {"id":"spent","type":"sink","carrier":"money"}
+    ]
+  }
+}
+\end{lstlisting}
+
+Instantiated as \code{groceries} and \code{fuel}, the members become \code{groceries\_\_price}, \code{groceries\_\_deal} and so on, and each instance's price is supplied through the snapshot state on its own price node --- inside the model document, and therefore inside whatever identifies it. Running the model produces continuous trajectories: \code{groceries\_\_spent} rises smoothly, and at any instant its value is a real number with no accounting meaning.
+
+The posting step gives it one. Over a month, suppose the money leg of \code{groceries\_\_deal} accumulates $c = 486.7305\ldots$. Equation~\eqref{eq:quantise} with $\mu = 0.01$ posts $a = 486.73$, debiting the household's cash account and crediting groceries expense by that identical amount, with $r = 0.0005\ldots$ to the rounding account. The performance obligation is satisfied continuously --- the household receives and consumes as it buys --- so recognition is over time under IFRS 15 \S35(a), and Equation~\eqref{eq:progress} is the measure of progress. Inventory is carried at cost under IAS 2 \S9, which the goods leg supplies directly.
+
+Two things did not happen, and their absence is the design working. The price was not re-derived when the model was later re-run with a longer horizon, because the month is a reported period. And the emergy associated with the goods flow, which the model also computes, appeared nowhere in the ledger.
+
+\section{What remains open}
+
+This document resolves each divergence in principle; four of the resolutions require work that is scheduled but not done, and one requires a decision that has not been taken.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{0.34\textwidth}p{0.58\textwidth}@{}}
+\toprule
+\textbf{Task} & \textbf{Closes} \\
+\midrule
+\code{exchange-price-authored-vs-defaulted} & A defaulted price becomes a load-time error (Section~\ref{sec:silence}). \\
+\code{ledger-conservation-diagnostic} & A conservation figure that counts terminal accounts. \\
+\code{model-hash-compute-or-withdraw} & Model identity is computed, or the claim is withdrawn. \\
+\code{recognition-basis-declaration} & Point-in-time recognition becomes expressible. \\
+\bottomrule
+\end{tabular}
+\caption{Scheduled work arising from the resolutions.}
+\end{table}
+
+The undecided question is the treatment of per-instance node parameters generally. Price now reaches an archetype member as a state variable, which works because price is naturally a state; the same route is not available for a rate coefficient or a capacity, which are parameters rather than states. Whether the model document should gain a general channel for those is a schema question deferred rather than settled.
+
+\section{Conclusion}
+
+The two systems in this document were built by people who were not talking to each other, for purposes that only partly overlap, and it would not have been surprising to find them irreconcilable. They are not. Most of the apparent conflict is vocabulary, and where the conflict is real it is confined to seven places, of which one required Odum's method to yield ground and the rest were resolved by being precise about what each system is for.
+
+The organising move is the refusal to treat the trajectory as the ledger. Once the two are distinct artefacts joined by a specified step, the solver may be approximate because it is not the book of record, and the books may be exact because they are not the solver's output. Everything else follows from that: recognition timing becomes a question about which basis a diamond declares, price becomes a question about which side of a reporting date it sits on, and the defaults that a simulation tolerates become load-time errors because a ledger cannot tolerate silence.
+
+What the enquiry cost was four defects, all of the same kind. Each was a model that loaded, ran and reported success while being wrong, and none would have been found by making the simulation better. They were found by asking what an auditor would need, which suggests the discipline is worth keeping past the point where the conformance work is finished.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}

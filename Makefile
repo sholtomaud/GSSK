@@ -735,10 +735,10 @@ LATEXMK    = latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=build
 # beside the source instead. Both locations are gitignored.
 report_pdf = ls -1 $(DOCO_BUILD)/$(1).pdf $(DOCO_DIR)/$(1).pdf 2>/dev/null | head -1 | sed 's/^/→ /'
 
-.PHONY: doco whitepaper article doco-clean
+.PHONY: doco whitepaper article conformance doco-clean
 
-# Build both documents
-doco: whitepaper article
+# Build all documents
+doco: whitepaper article conformance
 
 whitepaper:
 	@command -v latexmk >/dev/null 2>&1 || { echo "latexmk not found — install a TeX distribution (e.g. MacTeX, TeX Live)"; exit 1; }
@@ -749,6 +749,12 @@ article:
 	@command -v latexmk >/dev/null 2>&1 || { echo "latexmk not found — install a TeX distribution (e.g. MacTeX, TeX Live)"; exit 1; }
 	cd $(DOCO_DIR) && $(LATEXMK) article.tex
 	@$(call report_pdf,article)
+
+# Companion to ADR 0009 — where IFRS/AASB recognition and Odum's method diverge.
+conformance:
+	@command -v latexmk >/dev/null 2>&1 || { echo "latexmk not found — install a TeX distribution (e.g. MacTeX, TeX Live)"; exit 1; }
+	cd $(DOCO_DIR) && $(LATEXMK) conformance.tex
+	@$(call report_pdf,conformance)
 
 # Remove LaTeX build output only; leaves sources untouched.
 doco-clean:
