@@ -1,0 +1,141 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "archetype-price-per-instance",
+    "description": "GIP-0002 regression fixture — an `exchange` inside an archetype trades at a price that belongs to its own instance. One `purchase` template holds a `constant` price member and an `exchange` naming it through params.price_node; two instances, `a` and `b`, are priced independently through snapshot.state on the expanded ids `a__price` (5.0) and `b__price` (12.0). Before the price_node rewrite existed, a template's price_node was discarded at parse time and both instances traded at the template's scalar price instead. INVARIANT: the forward flow k * Q_seller * Q_buyer does not depend on price, so the two inventories are identical at every step while the two money stocks diverge — a__spent / a__inventory == 5.0 and b__spent / b__inventory == 12.0 for the whole run, and buyer + a__spent + b__spent == 1000.0 because money is conserved across both diamonds. POISON VALUES: two distinct regressions are made visible rather than plausible. If the template price_node stops resolving, the exchange falls back to the scalar params.price of 999.0, both instances price identically and the buyer is drained almost immediately. If instead a snapshot.state id stops resolving — which is silent, GSSK_Init skips an unknown id — both prices keep the template's declared 0.0, no money moves at all and the two spent columns stay flat zero while the inventories grow unpriced. Neither failure can be mistaken for this trajectory."
+  },
+  "carriers": [
+    {
+      "id": "goods",
+      "unit": "kg",
+      "conserved": true
+    },
+    {
+      "id": "money",
+      "unit": "AUD",
+      "conserved": true
+    }
+  ],
+  "archetypes": {
+    "purchase": {
+      "nodes": [
+        {
+          "id": "price",
+          "type": "constant",
+          "value": 0.0,
+          "carrier": "money"
+        },
+        {
+          "id": "deal",
+          "type": "exchange",
+          "value": 0.0,
+          "carrier": "goods",
+          "params": {
+            "k": 0.01,
+            "price": 999.0,
+            "price_node": "price"
+          }
+        },
+        {
+          "id": "inventory",
+          "type": "storage",
+          "value": 0.0,
+          "carrier": "goods"
+        },
+        {
+          "id": "spent",
+          "type": "storage",
+          "value": 0.0,
+          "carrier": "money"
+        }
+      ],
+      "edges": [
+        {
+          "id": "to_inventory",
+          "origin": "deal",
+          "target": "inventory",
+          "carrier": "goods"
+        },
+        {
+          "id": "to_spent",
+          "origin": "deal",
+          "target": "spent",
+          "carrier": "money"
+        }
+      ],
+      "ports": {
+        "in": "deal",
+        "out": "inventory"
+      }
+    }
+  },
+  "nodes": [
+    {
+      "id": "seller",
+      "type": "source",
+      "value": 1.0,
+      "carrier": "goods"
+    },
+    {
+      "id": "buyer",
+      "type": "storage",
+      "value": 1000.0,
+      "carrier": "money"
+    },
+    {
+      "id": "a",
+      "type": "purchase",
+      "value": 0.0
+    },
+    {
+      "id": "b",
+      "type": "purchase",
+      "value": 0.0
+    }
+  ],
+  "edges": [
+    {
+      "id": "goods_a",
+      "origin": "seller",
+      "target": "a__deal",
+      "carrier": "goods"
+    },
+    {
+      "id": "money_a",
+      "origin": "buyer",
+      "target": "a__deal",
+      "carrier": "money"
+    },
+    {
+      "id": "goods_b",
+      "origin": "seller",
+      "target": "b__deal",
+      "carrier": "goods"
+    },
+    {
+      "id": "money_b",
+      "origin": "buyer",
+      "target": "b__deal",
+      "carrier": "money"
+    }
+  ],
+  "snapshot": {
+    "state": [
+      {
+        "id": "a__price",
+        "Q": 5.0
+      },
+      {
+        "id": "b__price",
+        "Q": 12.0
+      }
+    ]
+  },
+  "config": {
+    "t_start": 0,
+    "t_end": 40,
+    "dt": 0.05,
+    "method": "rk4",
+    "solver_tolerance": 1e-06
+  }
+}
