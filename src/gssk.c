@@ -111,6 +111,12 @@ typedef struct {
   int             origin_idx;
   int             target_idx;
   int             control_idx;    /* -1 if unused */
+  /* ADR 0008 — controls 2..n of an n-ary interaction.  control_idx above is
+   * control 1, so every logic that takes exactly one control is untouched and
+   * a two-input work gate stays bit-identical: the product loop below runs
+   * zero times when extra_control_count is 0. */
+  int             extra_control_idx[GSSK_MAX_CONTROL_NODES - 1];
+  int             extra_control_count;
   int             numerator_idx;  /* ratio: named numerator; -1 = use origin */
   int             coupled_idx;    /* -1 if unused; index into edges[] */
   GSSK_LogicType  logic;
@@ -396,7 +402,7 @@ static const char *const EDGE_KEYS[] = {
 };
 
 static const char *const EDGE_PARAM_KEYS[] = {
-  "k", "control_node", "numerator_node", "threshold"
+  "k", "control_node", "control_nodes", "numerator_node", "threshold"
 };
 
 /* Node params.  Wider than what any single node type reads: the first four
@@ -449,8 +455,8 @@ static const char *const ARCH_NODE_KEYS[]  = { "id", "type", "value", "carrier",
 static const char *const ARCH_EDGE_KEYS[]  = { "id", "origin", "target", "logic",
                                                "carrier", "params" };
 /* Narrower than EDGE_PARAM_KEYS, matching the schema: an archetype edge
- * template has no control_node or numerator_node, because those name model
- * nodes and a template is written before any instance exists. */
+ * template has no control_node, control_nodes or numerator_node, because those
+ * name model nodes and a template is written before any instance exists. */
 static const char *const ARCH_EDGE_PARAM_KEYS[] = { "k", "threshold" };
 
 static const char *const CONFIG_KEYS[] = {
@@ -1114,6 +1120,45 @@ static double ratio_numer(const GSSK_EdgeInternal *e, const double *state) {
   return state[ratio_numer_idx(e)];
 }
 
+/* Product of every control node's Q on an interaction edge (ADR 0008).
+ *
+ * Callers must have established control_idx != -1; an interaction with no
+ * control never reaches here, because GSSK_Init rejects it.  With no extra
+ * controls this is exactly state[e->control_idx], which is why a two-input
+ * work gate is bit-identical to what it computed before the n-ary form
+ * existed — the loop body never runs. */
+static double interaction_control_product(const GSSK_EdgeInternal *e,
+                                          const double *state) {
+  double p = state[e->control_idx];
+  for (int c = 0; c < e->extra_control_count; c++)
+    p *= state[e->extra_control_idx[c]];
+  return p;
+}
+
+/* The same product with control `skip` left out, for differentiating an n-ary
+ * interaction with respect to one of its controls.  `skip` indexes
+ * e->extra_control_idx, or is -1 to mean control_idx itself. */
+static double interaction_control_product_except(const GSSK_EdgeInternal *e,
+                                                 const double *state, int skip) {
+  double p = (skip == -1) ? 1.0 : state[e->control_idx];
+  for (int c = 0; c < e->extra_control_count; c++)
+    if (c != skip) p *= state[e->extra_control_idx[c]];
+  return p;
+}
+
+/* Odum's subtracting action, Fig. 2.6e (ADR 0008).
+ *
+ * Clamped at zero because the pathway carries a barb: a negative flow would
+ * drain the target and fill the origin along a line whose notation says it
+ * cannot.  Signed flow is GSSK_LOGIC_REVERSIBLE's job, and its barb-less line
+ * is how the diagram declares it.  Callers must have established
+ * control_idx != -1. */
+static double subtract_flow(const GSSK_EdgeInternal *e, const double *state,
+                            double k) {
+  double d = state[e->origin_idx] - state[e->control_idx];
+  return (d > 0.0) ? k * d : 0.0;
+}
+
 static int parse_logic_type(const char *s) {
   if (strcmp(s, "constant")    == 0) return GSSK_LOGIC_CONSTANT;
   if (strcmp(s, "linear")      == 0) return GSSK_LOGIC_LINEAR;
@@ -1122,6 +1167,7 @@ static int parse_logic_type(const char *s) {
   if (strcmp(s, "threshold")   == 0) return GSSK_LOGIC_THRESHOLD;
   if (strcmp(s, "ratio")       == 0) return GSSK_LOGIC_RATIO;
   if (strcmp(s, "reversible")  == 0) return GSSK_LOGIC_REVERSIBLE;
+  if (strcmp(s, "subtract")    == 0) return GSSK_LOGIC_SUBTRACT;
   return -1;
 }
 
@@ -1137,6 +1183,130 @@ static int find_edge_idx(GSSK_Instance *inst, const char *id) {
   for (size_t i = 0; i < inst->edge_count; i++)
     if (strcmp(inst->edges[i].id, id) == 0) return (int)i;
   return -1;
+}
+
+/* ADR 0008 — resolve an edge's control nodes from `params`, and enforce the
+ * arity each logic admits.
+ *
+ * Two spellings, deliberately not one.  `control_node` is a single id and
+ * means what it has always meant; `control_nodes` is an array and is the
+ * n-ary form Odum's three-input interaction (Fig. 2.6c) needs.  An edge
+ * carrying BOTH is rejected rather than having one quietly win: `limit`'s
+ * control_node-beats-threshold precedence is already one silent-precedence
+ * rule too many, and this one would sit in a published schema.
+ *
+ * The first control lands in *out_ctrl and the rest in out_extra, so every
+ * logic that takes exactly one reads control_idx exactly as it did before the
+ * array existed, and a two-input work gate computes a bit-identical flow.
+ *
+ * Resolves into caller-owned locals rather than into the edge, so GSSK_AddEdge
+ * can run the whole check BEFORE its realloc and a rejected add stays a true
+ * no-op.
+ *
+ * `where` names the edge for the error message.  Returns false with err set.
+ */
+static bool resolve_control_nodes(GSSK_Instance *inst, const cJSON *params,
+                                  GSSK_LogicType logic, bool touches_proc,
+                                  const char *where,
+                                  int *out_ctrl,
+                                  int out_extra[GSSK_MAX_CONTROL_NODES - 1],
+                                  int *out_extra_count,
+                                  char *err, size_t errlen) {
+  *out_ctrl        = -1;
+  *out_extra_count = 0;
+
+  const cJSON *one  = cJSON_IsObject(params)
+                      ? cJSON_GetObjectItem(params, "control_node")  : NULL;
+  const cJSON *many = cJSON_IsObject(params)
+                      ? cJSON_GetObjectItem(params, "control_nodes") : NULL;
+
+  if (cJSON_IsString(one) && many) {
+    snprintf(err, errlen,
+             "Logic Error: %s names both control_node and control_nodes; "
+             "they are two spellings of one field, so give exactly one.",
+             where);
+    return false;
+  }
+
+  int resolved[GSSK_MAX_CONTROL_NODES];
+  int count = 0;
+
+  if (cJSON_IsString(one)) {
+    int idx = find_node_idx(inst, one->valuestring);
+    if (idx == -1) {
+      snprintf(err, errlen, "Linkage Error: %s unknown control_node '%s'.",
+               where, one->valuestring);
+      return false;
+    }
+    resolved[count++] = idx;
+  } else if (many) {
+    if (!cJSON_IsArray(many)) {
+      snprintf(err, errlen,
+               "Schema Error: %s has control_nodes but it is not an array.",
+               where);
+      return false;
+    }
+    int n = cJSON_GetArraySize(many);
+    if (n == 0) {
+      snprintf(err, errlen,
+               "Schema Error: %s has an empty control_nodes; omit the field "
+               "rather than naming no control.", where);
+      return false;
+    }
+    if (n > GSSK_MAX_CONTROL_NODES) {
+      snprintf(err, errlen,
+               "Schema Error: %s names %d control nodes; the limit is %d.",
+               where, n, GSSK_MAX_CONTROL_NODES);
+      return false;
+    }
+    for (int j = 0; j < n; j++) {
+      const cJSON *item = cJSON_GetArrayItem(many, j);
+      if (!cJSON_IsString(item)) {
+        snprintf(err, errlen,
+                 "Schema Error: %s control_nodes[%d] is not a node id string.",
+                 where, j);
+        return false;
+      }
+      int idx = find_node_idx(inst, item->valuestring);
+      if (idx == -1) {
+        snprintf(err, errlen,
+                 "Linkage Error: %s unknown control_nodes[%d] '%s'.",
+                 where, j, item->valuestring);
+        return false;
+      }
+      resolved[count++] = idx;
+    }
+  }
+
+  /* Only the work gate is n-ary.  A quotient of three things and a difference
+   * of three things are not defined by Fig. 2.6, and choosing an associativity
+   * here would be inventing semantics rather than implementing them; `limit`
+   * takes one half-saturation constant. */
+  if (count > 1 && logic != GSSK_LOGIC_INTERACTION) {
+    snprintf(err, errlen,
+             "Logic Error: %s (%s) was given %d control nodes; only "
+             "'interaction' takes more than one.",
+             where, logic_type_str(logic), count);
+    return false;
+  }
+
+  /* Edges touching a Phase 7 processing node carry topology only — their flow
+   * is computed by the per-type helper — so the required-control checks that
+   * follow do not apply to them, exactly as the pre-existing interaction check
+   * did not. */
+  if (!touches_proc && count == 0 &&
+      (logic == GSSK_LOGIC_INTERACTION || logic == GSSK_LOGIC_SUBTRACT)) {
+    snprintf(err, errlen, "Logic Error: %s (%s) requires control_node.",
+             where, logic_type_str(logic));
+    return false;
+  }
+
+  if (count > 0) {
+    *out_ctrl = resolved[0];
+    for (int j = 1; j < count; j++) out_extra[j - 1] = resolved[j];
+    *out_extra_count = count - 1;
+  }
+  return true;
 }
 
 /* =========================================================================
@@ -1460,7 +1630,7 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
       break;
     case GSSK_LOGIC_INTERACTION:
       if (e->control_idx != -1)
-        flow = k * Q_orig * state[e->control_idx];
+        flow = k * Q_orig * interaction_control_product(e, state);
       break;
     case GSSK_LOGIC_LIMIT: {
       double C = -1.0;
@@ -1484,6 +1654,12 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
        * statements below transport it backwards when it is negative.  No
        * special case is needed for that, which is the point. */
       flow = k * (Q_orig - state[e->target_idx]);
+      break;
+    case GSSK_LOGIC_SUBTRACT:
+      /* ADR 0008 — Odum's subtracting action.  Reads a control it does not
+       * consume, and clamps at zero: this pathway has a barb. */
+      if (e->control_idx != -1)
+        flow = subtract_flow(e, state, k);
       break;
     }
 
@@ -1563,7 +1739,11 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
       break;
     case GSSK_LOGIC_INTERACTION:
       if (e->control_idx != -1) {
-        conductance = k * state[e->control_idx];
+        /* ADR 0008 — the n-ary product is frozen over the step exactly as the
+         * two-input one always was, so the extra controls add no new error
+         * class: one linearisation about the current operating point either
+         * way. */
+        conductance = k * interaction_control_product(e, state);
         A[e->target_idx * (int)n + e->origin_idx] += conductance;
         A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
       }
@@ -1606,6 +1786,23 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
       A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
       A[e->target_idx * (int)n + e->target_idx] -= conductance;
       A[e->origin_idx * (int)n + e->target_idx] += conductance;
+      break;
+    case GSSK_LOGIC_SUBTRACT:
+      /* ADR 0008 — four entries, like `reversible`, because the flow depends
+       * on two state variables.  EXACT rather than linearised while the
+       * difference is positive, since k(Q_orig - Q_ctrl) is linear in the
+       * state; below zero the edge contributes nothing at all, which makes
+       * the treatment PIECEWISE exact.  An edge whose difference crosses zero
+       * inside a step is integrated as though it stayed on the side it
+       * started — the same seam `threshold` has, bounded by dt. */
+      if (e->control_idx != -1 &&
+          state[e->origin_idx] > state[e->control_idx]) {
+        conductance = k;
+        A[e->target_idx * (int)n + e->origin_idx]  += conductance;
+        A[e->origin_idx * (int)n + e->origin_idx]  -= conductance;
+        A[e->target_idx * (int)n + e->control_idx] -= conductance;
+        A[e->origin_idx * (int)n + e->control_idx] += conductance;
+      }
       break;
     default:
       break; /* threshold: handled as constant forcing in build_forcing_vector */
@@ -1977,7 +2174,8 @@ static double compute_edge_flow(const GSSK_EdgeInternal *e,
   case GSSK_LOGIC_CONSTANT:    return e->k;
   case GSSK_LOGIC_LINEAR:      return e->k * Q;
   case GSSK_LOGIC_INTERACTION:
-    if (e->control_idx != -1) return e->k * Q * state[e->control_idx];
+    if (e->control_idx != -1)
+      return e->k * Q * interaction_control_product(e, state);
     return 0.0;
   case GSSK_LOGIC_LIMIT: {
     double C = -1.0;
@@ -1997,6 +2195,9 @@ static double compute_edge_flow(const GSSK_EdgeInternal *e,
     /* Signed: a negative return means the pathway is running backwards along
      * its declared direction, which for a barb-less line is not an error. */
     return e->k * (Q - state[e->target_idx]);
+  case GSSK_LOGIC_SUBTRACT:
+    if (e->control_idx != -1) return subtract_flow(e, state, e->k);
+    return 0.0;
   }
   return 0.0;
 }
@@ -2592,7 +2793,7 @@ static double edge_flow_rate(const GSSK_EdgeInternal *e, const double *state,
     break;
   case GSSK_LOGIC_INTERACTION:
     if (e->control_idx != -1)
-      f = k * Q * state[e->control_idx];
+      f = k * Q * interaction_control_product(e, state);
     break;
   case GSSK_LOGIC_LIMIT: {
     double C = -1.0;
@@ -2615,6 +2816,12 @@ static double edge_flow_rate(const GSSK_EdgeInternal *e, const double *state,
      * along its declared direction, which for a barb-less line is not an
      * error.  Callers wanting Odum's non-negative convention clamp on read. */
     f = k * (Q - state[e->target_idx]);
+    break;
+  case GSSK_LOGIC_SUBTRACT:
+    /* ADR 0008 — already non-negative, so the clamp callers apply for Odum's
+     * convention never has anything to do on this logic. */
+    if (e->control_idx != -1)
+      f = subtract_flow(e, state, k);
     break;
   }
   return f;
@@ -2820,8 +3027,11 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     case GSSK_LOGIC_INTERACTION:
       if (ctrl >= 0) {
-        dF_dQ_orig = e->k * state[ctrl];
-        dF_dQ_ctrl = e->k * Q;
+        /* ADR 0008 — with no extra controls the product is state[ctrl] and
+         * the "except" product is 1.0, so these are the two expressions the
+         * binary work gate has always used. */
+        dF_dQ_orig = e->k * interaction_control_product(e, state);
+        dF_dQ_ctrl = e->k * Q * interaction_control_product_except(e, state, -1);
       }
       break;
     case GSSK_LOGIC_LIMIT: {
@@ -2855,6 +3065,16 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       dvar2      = tgt;
       dF_dQ_ctrl = -e->k;
       break;
+    case GSSK_LOGIC_SUBTRACT:
+      /* ADR 0008 — F = max(0, k(Q_orig - Q_ctrl)).  Above the clamp the two
+       * partials are k and -k; on or below it the flow is identically zero in
+       * a neighbourhood, so both are zero.  The clamp itself is a kink, not a
+       * jump, so the derivative is defined everywhere except the seam. */
+      if (ctrl >= 0 && Q > state[ctrl]) {
+        dF_dQ_orig =  e->k;
+        dF_dQ_ctrl = -e->k;
+      }
+      break;
     }
 
     J[(size_t)orig * n + (size_t)dvar] -= dF_dQ_orig;
@@ -2862,6 +3082,22 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
     if (dvar2 >= 0 && (dF_dQ_ctrl != 0.0)) {
       J[(size_t)orig * n + (size_t)dvar2] -= dF_dQ_ctrl;
       J[(size_t)tgt  * n + (size_t)dvar2] += dF_dQ_ctrl;
+    }
+
+    /* ADR 0008 — controls 2..n of an n-ary interaction.  Control 1 rides the
+     * dvar2 slot above; each further control owns a column of its own, which
+     * the two-variable dvar/dvar2 scheme has no room for.  Omitting these
+     * leaves a Jacobian that is right for the two-input gate and silently
+     * wrong for the three-input one, visible only in the implicit/stiff and
+     * forward-sensitivity paths. */
+    if (e->logic == GSSK_LOGIC_INTERACTION && ctrl >= 0) {
+      for (int c = 0; c < e->extra_control_count; c++) {
+        int cj = e->extra_control_idx[c];
+        double dF = e->k * Q * interaction_control_product_except(e, state, c);
+        if (dF == 0.0) continue;
+        J[(size_t)orig * n + (size_t)cj] -= dF;
+        J[(size_t)tgt  * n + (size_t)cj] += dF;
+      }
     }
   }
 
@@ -3043,7 +3279,7 @@ static void compute_param_deriv(GSSK_Instance *inst, double t, const double *sta
   case GSSK_LOGIC_CONSTANT:    dF_dk = 1.0; break;
   case GSSK_LOGIC_LINEAR:      dF_dk = Q;   break;
   case GSSK_LOGIC_INTERACTION:
-    if (ctrl >= 0) dF_dk = Q * state[ctrl];
+    if (ctrl >= 0) dF_dk = Q * interaction_control_product(e, state);
     break;
   case GSSK_LOGIC_LIMIT: {
     double C = -1.0;
@@ -3062,6 +3298,11 @@ static void compute_param_deriv(GSSK_Instance *inst, double t, const double *sta
   case GSSK_LOGIC_REVERSIBLE:
     /* ∂F/∂k = Q_orig - Q_tgt, and it is signed like the flow itself. */
     dF_dk = Q - state[tgt];
+    break;
+  case GSSK_LOGIC_SUBTRACT:
+    /* ADR 0008 — the flow is k times the clamped difference, so ∂F/∂k is that
+     * difference, and it is zero wherever the clamp is holding. */
+    if (ctrl >= 0) dF_dk = subtract_flow(e, state, 1.0);
     break;
   }
 
@@ -3143,7 +3384,8 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
     case GSSK_LOGIC_CONSTANT:    f = e->k; break;
     case GSSK_LOGIC_LINEAR:      f = e->k * Q; break;
     case GSSK_LOGIC_INTERACTION:
-      if (e->control_idx != -1) f = e->k * Q * inst->state[e->control_idx];
+      if (e->control_idx != -1)
+        f = e->k * Q * interaction_control_product(e, inst->state);
       break;
     case GSSK_LOGIC_LIMIT: {
       double C = -1.0;
@@ -3162,6 +3404,9 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
       break;
     case GSSK_LOGIC_REVERSIBLE:
       f = e->k * (Q - inst->state[e->target_idx]);
+      break;
+    case GSSK_LOGIC_SUBTRACT:
+      if (e->control_idx != -1) f = subtract_flow(e, inst->state, e->k);
       break;
     }
     /* Same clamp, same reason as compute_quality_pass (ADR 0007). */
@@ -3203,7 +3448,8 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
   case GSSK_LOGIC_CONSTANT:    dflow_dk = 1.0; break;
   case GSSK_LOGIC_LINEAR:      dflow_dk = Q;   break;
   case GSSK_LOGIC_INTERACTION:
-    if (ej->control_idx >= 0) dflow_dk = Q * inst->state[ej->control_idx];
+    if (ej->control_idx >= 0)
+      dflow_dk = Q * interaction_control_product(ej, inst->state);
     break;
   case GSSK_LOGIC_LIMIT: {
     double C = -1.0;
@@ -3222,6 +3468,9 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
     break;
   case GSSK_LOGIC_REVERSIBLE:
     dflow_dk = Q - inst->state[ej_tgt];
+    break;
+  case GSSK_LOGIC_SUBTRACT:
+    if (ej->control_idx >= 0) dflow_dk = subtract_flow(ej, inst->state, 1.0);
     break;
   }
 
@@ -4001,15 +4250,21 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
       }
 
-      cJSON *ctrl = cJSON_IsObject(params)
-                     ? cJSON_GetObjectItem(params, "control_node") : NULL;
-      inst->edges[i].control_idx = cJSON_IsString(ctrl)
-          ? find_node_idx(inst, ctrl->valuestring) : -1;
-      if (cJSON_IsString(ctrl) && inst->edges[i].control_idx == -1) {
-        snprintf(inst->error_msg, sizeof(inst->error_msg),
-                 "Linkage Error: Edge %d unknown control_node '%s'.",
-                 i, ctrl->valuestring);
-        status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+      /* ADR 0008 — control_node (one) or control_nodes (n-ary), never both.
+       * The interaction/subtract required-control checks live in here too, so
+       * both entry points enforce one rule rather than two copies of it. */
+      {
+        char where[32];
+        snprintf(where, sizeof(where), "Edge %d", i);
+        if (!resolve_control_nodes(inst, params, inst->edges[i].logic,
+                                   touches_proc, where,
+                                   &inst->edges[i].control_idx,
+                                   inst->edges[i].extra_control_idx,
+                                   &inst->edges[i].extra_control_count,
+                                   inst->error_msg,
+                                   sizeof(inst->error_msg))) {
+          status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+        }
       }
 
       cJSON *numer = cJSON_IsObject(params)
@@ -4036,16 +4291,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
                     ? cJSON_GetObjectItem(params, "threshold") : NULL;
       inst->edges[i].threshold = cJSON_IsNumber(thr) ? thr->valuedouble : 0.0;
 
-      /* INTERACTION requires control_node; LIMIT accepts control_node or
-       * threshold > 0.  These checks only apply to v3 edges (non-processing). */
+      /* LIMIT accepts control_node or threshold > 0.  INTERACTION's and
+       * SUBTRACT's required-control checks ran inside resolve_control_nodes
+       * above; this one stays here because it reads `threshold`, which is
+       * parsed after the controls.  Applies to v3 edges only (non-processing). */
       if (!touches_proc) {
-        if (inst->edges[i].logic == GSSK_LOGIC_INTERACTION &&
-            inst->edges[i].control_idx == -1) {
-          snprintf(inst->error_msg, sizeof(inst->error_msg),
-                   "Logic Error: Edge %d (%s) requires control_node.",
-                   i, logic_str ? logic_str->valuestring : "interaction");
-          status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
-        }
         if (inst->edges[i].logic == GSSK_LOGIC_LIMIT &&
             inst->edges[i].control_idx == -1 &&
             inst->edges[i].threshold <= 0.0) {
@@ -5159,6 +5409,25 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
     }
   }
 
+  /* ADR 0008 — control_node / control_nodes, resolved into locals here with
+   * the other model-content checks so a rejected add leaves the instance
+   * exactly as it was.  Same helper GSSK_Init uses, so the two entry points
+   * cannot drift on what an edge's controls may be. */
+  int add_ctrl = -1;
+  int add_extra[GSSK_MAX_CONTROL_NODES - 1];
+  int add_extra_count = 0;
+  {
+    bool add_touches_proc = is_processing_node(inst->nodes[orig_idx].type) ||
+                            is_processing_node(inst->nodes[tgt_idx].type);
+    if (!resolve_control_nodes(inst, params, (GSSK_LogicType)lt,
+                               add_touches_proc, "GSSK_AddEdge",
+                               &add_ctrl, add_extra, &add_extra_count,
+                               inst->error_msg, sizeof(inst->error_msg))) {
+      cJSON_Delete(edge);
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+  }
+
   /* Grow edge arrays */
   size_t new_ec = inst->edge_count + 1;
   GSSK_EdgeInternal *new_edges = realloc(inst->edges,
@@ -5201,12 +5470,11 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
   inst->edges[ei].k           = k->valuedouble;
   inst->edges[ei].active      = json_active(edge);
   inst->edges[ei].coupled_idx = -1;
-  inst->edges[ei].control_idx = -1;
+  inst->edges[ei].control_idx = add_ctrl;
+  inst->edges[ei].extra_control_count = add_extra_count;
+  for (int c = 0; c < add_extra_count; c++)
+    inst->edges[ei].extra_control_idx[c] = add_extra[c];
   inst->edges[ei].numerator_idx = numer_idx;
-
-  cJSON *ctrl = cJSON_GetObjectItem(params, "control_node");
-  if (cJSON_IsString(ctrl))
-    inst->edges[ei].control_idx = find_node_idx(inst, ctrl->valuestring);
 
   cJSON *thr = cJSON_GetObjectItem(params, "threshold");
   inst->edges[ei].threshold = cJSON_IsNumber(thr) ? thr->valuedouble : 0.0;
@@ -5911,6 +6179,7 @@ static const char *logic_type_str(GSSK_LogicType lt) {
      * through this function, so the loss was permanent, not cosmetic. */
     case GSSK_LOGIC_RATIO:       return "ratio";
     case GSSK_LOGIC_REVERSIBLE:  return "reversible";
+    case GSSK_LOGIC_SUBTRACT:    return "subtract";
     default:                     return "linear";
   }
 }
@@ -6069,9 +6338,21 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
 
     cJSON *params = cJSON_CreateObject();
     cJSON_AddNumberToObject(params, "k", ed->k);
-    if (ed->control_idx >= 0)
+    /* ADR 0008 — emit the spelling the edge actually has: the array form only
+     * when there is more than one control, so a one-control edge round-trips
+     * to the same text it was written as. */
+    if (ed->control_idx >= 0 && ed->extra_control_count == 0) {
       cJSON_AddStringToObject(params, "control_node",
                               inst->nodes[ed->control_idx].id);
+    } else if (ed->control_idx >= 0) {
+      cJSON *ctrls = cJSON_CreateArray();
+      cJSON_AddItemToArray(ctrls,
+          cJSON_CreateString(inst->nodes[ed->control_idx].id));
+      for (int c = 0; c < ed->extra_control_count; c++)
+        cJSON_AddItemToArray(ctrls,
+            cJSON_CreateString(inst->nodes[ed->extra_control_idx[c]].id));
+      cJSON_AddItemToObject(params, "control_nodes", ctrls);
+    }
     if (ed->numerator_idx >= 0)
       cJSON_AddStringToObject(params, "numerator_node",
                               inst->nodes[ed->numerator_idx].id);

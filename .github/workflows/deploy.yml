@@ -96,6 +96,15 @@ jobs:
       - name: Reversible pathway tests (GIP-0001 G3)
         run: make test-reversible
 
+      # GIP-0001 G1 / ADR 0008. The n-ary product and the subtracting action.
+      # Both were mutation-tested: dropping the extra controls from
+      # interaction_control_product, and removing the max(0, .) clamp from
+      # subtract_flow, each fail here. Neither is visible in a golden CSV
+      # regenerated from the same bug — a gate that multiplies only its first
+      # control still decays, just at the wrong rate.
+      - name: n-ary interaction and subtract tests (GIP-0001 G1)
+        run: make test-interaction-nary
+
       # The Butcher c-nodes were written down in the DOPRI5 stage comments and
       # thrown away for years because there was no `t` for them to offset.
       # A forcing function sampled once per STEP instead of once per STAGE is

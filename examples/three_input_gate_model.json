@@ -1,0 +1,30 @@
+{
+  "metadata": {
+    "schema_version": 4,
+    "name": "three_input_gate",
+    "description": "GIP-0001 G1 / ADR 0008 — the rest of Odum's overloaded interaction glyph. One three-input work gate (Modeling for All Scales, Fig. 2.6c) driving production, and one subtracting action (Fig. 2.6e) draining maintenance respiration. Both forms in one model, because both are edge arity/logic changes to the same primitive."
+  },
+  "_why_three_inputs": "Odum draws ONE interaction glyph and lets it compute several ways; Fig. 2.6c is the same pointed block with THREE input forces multiplying. Before ADR 0008 params.control_node was a single id, so a three-input gate had to be faked with an intermediate storage node holding the partial product. That is a different model: the intermediate integrates, so it lags the inputs, and it turns up in the state vector and in every CSV column.",
+  "_why_subtract_is_not_reversible": "Both compute a difference, and they are not the same statement. `reversible` (ADR 0007) reads the TARGET and is signed, because it draws without a barb. `subtract` reads a CONTROL it does not consume, and is clamped at zero, because it draws WITH one — a negative flow would drain the target along a line whose barb says it cannot. Here `maintenance` is a floor the biomass relaxes onto, not a tank it exchanges with.",
+  "_what_to_look_for": "Production is k x sun x water x nutrients = 0.02 x 10 x 2 x 1.5 = 0.6 per unit time, constant, because all three inputs are held. Respiration is 0.25 x (biomass - 8) once biomass is above the maintenance floor of 8, and exactly 0.0 below it. Biomass starts at 5.0, BELOW the floor, so the subtracting gate is shut for the first stretch and the store fills at the full 0.6: it reaches 8.0 at t = 5.0 and not before. After that the two oppose and biomass settles where 0.6 = 0.25 x (Q - 8), i.e. at 10.4. The `heat` sink therefore stays at exactly 0.000000 through t = 5.0 — that flat run is the clamp, and an unclamped build fills it from the first row.",
+  "carriers": [
+    { "id": "energy", "unit": "J", "conserved": false }
+  ],
+  "nodes": [
+    { "id": "sun",         "type": "source",   "value": 10.0, "carrier": "energy" },
+    { "id": "water",       "type": "constant", "value": 2.0 },
+    { "id": "nutrients",   "type": "constant", "value": 1.5 },
+    { "id": "maintenance", "type": "constant", "value": 8.0 },
+    { "id": "biomass",     "type": "storage",  "value": 5.0, "carrier": "energy" },
+    { "id": "heat",        "type": "sink",     "value": 0.0, "carrier": "energy" }
+  ],
+  "edges": [
+    { "id": "production", "origin": "sun", "target": "biomass", "carrier": "energy",
+      "logic": "interaction",
+      "params": { "k": 0.02, "control_nodes": ["water", "nutrients"] } },
+    { "id": "respiration", "origin": "biomass", "target": "heat", "carrier": "energy",
+      "logic": "subtract",
+      "params": { "k": 0.25, "control_node": "maintenance" } }
+  ],
+  "config": { "t_start": 0, "t_end": 40, "dt": 0.1, "method": "rk4" }
+}

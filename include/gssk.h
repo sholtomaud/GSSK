@@ -34,7 +34,12 @@ extern "C" {
 typedef enum {
   GSSK_LOGIC_CONSTANT,    /**< Fixed flow rate: F = k */
   GSSK_LOGIC_LINEAR,      /**< Proportional to source: F = k × Q_origin */
-  GSSK_LOGIC_INTERACTION, /**< Work gate / Riccati: F = k × Q_origin × Q_control */
+  GSSK_LOGIC_INTERACTION, /**< Work gate / Riccati: F = k × Q_origin × Q_control.
+                               n-ary since ADR 0008: with params.control_nodes
+                               the flow is k × Q_origin × ∏ Q_control, which is
+                               Odum's three-input interaction (Modeling for All
+                               Scales, Fig. 2.6c).  Interaction is the ONLY
+                               logic that accepts more than one control. */
   GSSK_LOGIC_LIMIT,       /**< Saturation (Michaelis-Menten):
                                F = k × Q_origin / (1 + Q_origin/C), approaching
                                k × C as Q_origin grows.  C is the half-saturation
@@ -49,7 +54,7 @@ typedef enum {
   GSSK_LOGIC_RATIO,       /**< Division: F = k × Q_num / max(Q_control, ε).
                                Q_num is params.numerator_node when given (read,
                                not consumed — ADR 0005), else Q_origin. */
-  GSSK_LOGIC_REVERSIBLE   /**< Odum's barb-less pathway (ADR 0007):
+  GSSK_LOGIC_REVERSIBLE,  /**< Odum's barb-less pathway (ADR 0007):
                                F = k × (Q_origin − Q_target), SIGNED.
                                The only logic that reads the target, and the
                                only one that can transport backwards along its
@@ -60,7 +65,30 @@ typedef enum {
                                Exactly integrable, so it stays IDC-eligible.
                                Appended, not inserted: the values above cross
                                the WASM boundary as bare integers. */
+  GSSK_LOGIC_SUBTRACT     /**< Odum's subtracting action (Fig. 2.6e, ADR 0008):
+                               F = max(0, k × (Q_origin − Q_control)).
+                               A BARBED pathway whose rate is set by a
+                               difference, so it is clamped at zero: a negative
+                               flow would drain the target along a line whose
+                               barb says it cannot.  Signed flow is what
+                               GSSK_LOGIC_REVERSIBLE is for, and its barb-less
+                               line is how the diagram says so.
+                               The control is read, never consumed — unlike
+                               `reversible`, which reads the TARGET.  Exactly
+                               one control node; a second is rejected.
+                               Appended, for the reason given above. */
 } GSSK_LogicType;
+
+/**
+ * @brief Most control nodes one edge may name (ADR 0008).
+ *
+ * Only GSSK_LOGIC_INTERACTION uses more than one, via `params.control_nodes`.
+ * Beyond this a product of stores is dominated by floating-point range rather
+ * than by the model, and a glyph with nine inputs has stopped being the legible
+ * shorthand that made Odum overload the interaction symbol in the first place.
+ * An edge naming more is rejected with GSSK_ERR_SCHEMA_VIOLATION.
+ */
+#define GSSK_MAX_CONTROL_NODES 8
 
 /**
  * @brief The nine ESL primitives a node can be.
