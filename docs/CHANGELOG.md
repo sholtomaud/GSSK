@@ -125,6 +125,11 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 ### Fixed
 
 - **`gssk.schema.json` no longer says a template's `price_node` is ignored.** It documented `price_node` as "accepted and ignored on a template", which stopped being true when expansion began rewriting it, and would have described the new fixture as relying on behaviour the schema disclaimed. The description now states what actually happens: a template's `price_node` names a sibling member by its template-local id, expansion rewrites it to `{instance}__{member}` exactly as it does an edge origin or target, and naming no member of the archetype is a schema error rather than a fallback to the scalar price.
+- **Phase D.1 — money is a closed conserved loop, so `conserved: true` finally asserts something.** `examples/odum_gnp_loop.json` circulates money `households → exchange → firms → households` with no money source and no money sink, which is Odum's Fig. 3: energy flows *through* and leaves as heat, money goes *round*, counter-current the whole way. `make test-gnp-loop` pins that asymmetry — money's per-step `GSSK_GetCarrierConservationError` stays under the model's `solver_tolerance` (worst 2.2e-16) while energy's does not over the very same run (worst 1.5e-03, as the reserve depletes from 1001 to 42).
+
+  **The declaration was previously vacuous, and the suite says so with a negative control.** Conservation is summed over *storage* nodes only, and C.4's `examples/odum_countercurrent.json` modelled money as a `source`/`sink` pair — no money storage at all. Its reported error is a flawless `0.0` computed over nothing, and `test_open_loop_conservation_is_vacuous` asserts both halves of that: zero money storages **and** a zero error. A check that cannot fail is worse than no check, so the new suite refuses to be one — it also asserts that the loop actually turns (`firms` peaks at 30% of the money stock, so the exchange really cleared) and that the topology contains no money source or sink by construction.
+
+  Added to the PR quality gate and to `make test-linux`, not just the local chain.
 
 ## [5.0.0] - 2026-08-26
 

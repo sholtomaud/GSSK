@@ -369,7 +369,11 @@ general-purpose ODE library. The wedge is:
       `examples/odum_countercurrent.json` makes inflation emerge from
       net-energy decline (Odum 1973 points 1-3) with the money supply pinned,
       and needed no kernel change — C.3's `params.numerator_node` was the
-      missing piece.
+      missing piece. D.1 closes the other half: `examples/odum_gnp_loop.json`
+      makes money a conserved circuit (Odum Fig. 3) rather than a one-way drain,
+      so `GSSK_GetCarrierConservationError("money")` finally measures something —
+      conservation sums storage nodes only, and C.4's money source/sink pair
+      contributed none, scoring a perfect 0.0 over nothing.
 - [x] **Composite macro-expansion timing:** chose **(A) parse-time expansion** —
       composites expand in `GSSK_Init`; mutation log references primitives.
 
