@@ -178,6 +178,65 @@ While GSSK's node type taxonomy is being corrected in Phase 7, the current `logi
 | `"limit"` | `type: "loop_limited"` node | Loop-Limited Converter |
 | `"threshold"` | `type: "switch"` node | Switch / Digital Box |
 | `"ratio"` | — (no Odum symbol; see below) | division |
+| `"reversible"` | — (an edge property, not a node) | barb-less pathway |
+| `"subtract"` | `type: "interaction"` node | Interaction / Work Gate (subtracting action) |
+
+### The interaction glyph computes several ways (GIP-0001 G1)
+
+Odum draws **one** interaction symbol and lets the arithmetic inside it vary. *Modeling for All Scales* Fig. 2.6 shows the same pointed block as (a) a product of two inputs, (c) a product of **three** input forces, (d) a divisor action, and (e) a **subtracting** action. The overloading is deliberate: one shape keeps the diagram legible while the operation changes.
+
+GSSK spells the four as two arity forms and two logic types.
+
+| Fig. 2.6 | GSSK |
+|---|---|
+| (a) product of two inputs | `interaction` with `params.control_node` |
+| (c) product of three input forces | `interaction` with `params.control_nodes` |
+| (d) divisor action | `ratio` (see below) |
+| (e) subtracting action | `subtract` |
+
+#### `control_nodes` — the n-ary work gate
+
+`F = k × Q_origin × ∏ Q_control`
+
+`params.control_node` names one control; `params.control_nodes` names between one and eight (`GSSK_MAX_CONTROL_NODES`). Controls are read, never consumed, exactly as the single one always was. The two fields are **mutually exclusive** — an edge carrying both is rejected rather than having one quietly win, because `limit`'s `control_node`-beats-`threshold` precedence is already one silent-precedence rule too many.
+
+A single-entry `control_nodes` is identical to `control_node`, and every existing one-control model is bit-for-bit unchanged: the extra-control loop runs zero times.
+
+**Only `interaction` is n-ary.** `ratio` and `subtract` are binary, `limit` takes one half-saturation constant, and all three reject a second control node with `GSSK_ERR_SCHEMA_VIOLATION`. A quotient or a difference of three things is not defined by the figure, and the kernel will not invent an associativity for it.
+
+The workaround this replaces — an intermediate storage node holding the partial product — was never the same model. The intermediate *integrates*, so it lags the inputs it multiplies, and it appears in the state vector, in the emergy accounting and in every CSV column list.
+
+#### `subtract` — the subtracting action
+
+`F = max(0, k × (Q_origin − Q_control))`
+
+Requires exactly one control node, read and never consumed.
+
+**The clamp is the semantics, not a guard.** This is a *barbed* pathway. The barb asserts a direction, so a negative flow along it would drain the target and fill the origin down a line whose notation says it cannot. The subtracting gate saturates at zero once the control overtakes the origin — it stops, rather than reversing.
+
+That is what separates it from `reversible`, which also computes a difference. `reversible` reads the **target** and is signed, and draws *without* a barb, which is how the diagram declares the difference. `subtract` reads a **control** it does not consume. Neither substitutes for the other.
+
+**Solver eligibility**: `subtract` contributes four flow-matrix entries, like `reversible`, because its flow depends on two state variables. Where the difference is positive it is integrated **exactly** rather than linearised, since `k(Q_origin − Q_control)` is linear in the state; where it is at or below zero the edge contributes nothing. That makes it **piecewise** exact — an edge whose difference crosses zero *inside* a step is integrated as though it stayed on the side it started, the same seam `threshold` has, bounded by `dt` rather than by the size of the flow. The n-ary `interaction` is linearised at the current operating point exactly as the two-input one always was, with no additional error class. See [ADR 0008](adr/0008-nary-interaction-and-subtracting-action.md).
+
+### `reversible` — the barb-less pathway (GIP-0001 G3)
+
+`F = k × (Q_origin − Q_target)`, **signed**.
+
+Odum draws two pathway kinds, and the distinction is the notation itself:
+
+> Where the flow depends only on the force behind it, an arrowhead (barb) is used… Where the flow depends on the difference between the force at one end and the back force from the other end, a line is used without a barb, and this pathway may flow in either direction.
+>
+> — *Modeling for All Scales*, p.23
+
+Every other logic computes forward from origin quantities and never reads the target. `reversible` is the only one that reads both ends, which makes it the only one that can transport **backwards along its declared direction** — and for a barb-less line that is not an error. `origin` and `target` stop meaning "from" and "to" and start meaning only "the first end" and "the second end". Swapping them produces an identical trajectory.
+
+Use it for diffusion, exchange across a gradient, and any equilibrating process. Two stores joined by one reversible edge converge to equal quantity from any initial condition, and their total is conserved exactly, because `F` is subtracted at one end and added at the other in the same statement.
+
+**It is not two opposed `linear` edges.** `A→B` with `k₁` plus `B→A` with `k₂` gives `k₁·Q_A − k₂·Q_B`, which equals the gradient form only when the two conductances happen to be equal — nothing enforces that, and a model whose conductances have drifted equilibrates to `Q_A/Q_B = k₂/k₁` instead of to equality, silently. It also *draws* as two barbed pathways, which in Odum's notation means a different thing (the counter-current; see the `exchange` node). Nor is it `linear` with a negative `k`, which still never reads the target.
+
+**It is exactly integrable.** Being linear in the state, the incipient/IDC solver integrates it exactly rather than linearising about the current operating point — unlike `limit` (linearised Michaelis-Menten) and `ratio` (exact only in the numerator, for a frozen denominator). It is the first logic whose flow-matrix contribution touches four entries rather than two, because the flow depends on both ends.
+
+**Quality accounting attributes nothing to a backward flow.** A flow running back up a gradient is not producing the node it arrives at, so `GSSK_GetEdgeQualityFlow` reads `0.0` while the pathway reverses and resumes when the gradient does. `GSSK_GetFlows` reports the signed rate and is the right call for the physics. See [ADR 0007](adr/0007-reversible-pathway.md).
 
 ### `ratio` — division (Phase C.1, extended in C.3)
 

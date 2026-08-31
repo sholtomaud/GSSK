@@ -7,7 +7,7 @@ programmatic checks, and the contribution workflow. This file deliberately does
 **not** restate those rules — two copies of a standard drift apart, and then
 neither can be trusted. Add new standards to `AGENTS.md`, not here.
 
-## The three that get broken most
+## The four that get broken most
 
 Repeated here only because they have actually been violated in this repo, not
 to duplicate the standard:
@@ -18,6 +18,11 @@ to duplicate the standard:
    decide.
 3. **A task is done when it is merged**, not when it is written. Check that the
    code is on `main` before marking it complete.
+4. **Do not open concurrent PRs that insert at the same anchor.** Five branches
+   cut from one commit, each appending to the `.PHONY` line, the same CI step,
+   and `## [Unreleased]`, produced five hand-resolutions and silently dropped a
+   changelog entry on the way. See *Concurrent branches must not edit the same
+   line* in [AGENTS.md](AGENTS.md) for the anchors and the resolution check.
 
 ## Claude Code specifics
 
@@ -29,10 +34,21 @@ containerised toolchains:
 make ci-local          # real GCC + Linux clang + WASM
 make test-linux        # real GCC only (Ubuntu 24.04, matches CI)
 make wasm-container    # Emscripten without a local emcc
+make demo              # the demo + plot, without a local matplotlib
 ```
 
 These need the Apple `container` CLI. `make wasm-container` in particular
 removes any excuse for an unverified export list.
+
+`make demo` is containerised for a different reason than the other three: it is
+not about compiler parity but about matplotlib. `python/plot_demo.py` needs it,
+the system `python3` here does not have it, and the target used to die with
+`ERROR: matplotlib is required for plot-demo`. `Containerfile.demo` pins the
+interpreter and the deps through `uv`, so the plot is reproducible instead of
+depending on what happens to be pip-installed. Like the other container
+targets it leaves Linux objects in `lib/` — it says so when it finishes, and
+`make clean && make all` restores a native tree. `make demo-native` skips the
+container if you do have matplotlib on the host.
 
 **Task tracking is `crux`.** One global binary and one shared database, scoped
 to this project by `.crux/project.json`. There is no project-local `crux`

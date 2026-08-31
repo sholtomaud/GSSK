@@ -34,13 +34,95 @@ extern "C" {
 typedef enum {
   GSSK_LOGIC_CONSTANT,    /**< Fixed flow rate: F = k */
   GSSK_LOGIC_LINEAR,      /**< Proportional to source: F = k × Q_origin */
-  GSSK_LOGIC_INTERACTION, /**< Work gate / Riccati: F = k × Q_origin × Q_control */
-  GSSK_LOGIC_LIMIT,       /**< Saturation (Michaelis-Menten): F = kQ/(1+Q/C) */
-  GSSK_LOGIC_THRESHOLD,   /**< Boolean switch: F = k if Q > threshold, else 0 */
-  GSSK_LOGIC_RATIO        /**< Division: F = k × Q_num / max(Q_control, ε).
+  GSSK_LOGIC_INTERACTION, /**< Work gate / Riccati: F = k × Q_origin × Q_control.
+                               n-ary since ADR 0008: with params.control_nodes
+                               the flow is k × Q_origin × ∏ Q_control, which is
+                               Odum's three-input interaction (Modeling for All
+                               Scales, Fig. 2.6c).  Interaction is the ONLY
+                               logic that accepts more than one control. */
+  GSSK_LOGIC_LIMIT,       /**< Saturation (Michaelis-Menten):
+                               F = k × Q_origin / (1 + Q_origin/C), approaching
+                               k × C as Q_origin grows.  C is the half-saturation
+                               constant — see GSSK_LIMIT_C_EPSILON for where it
+                               comes from and how it can silently reach zero. */
+  GSSK_LOGIC_THRESHOLD,   /**< Boolean switch: F = k if Q_origin > threshold,
+                               else 0.  The comparand is the ORIGIN's Q, never
+                               the control node — threshold logic ignores
+                               params.control_node entirely.  Strict, so a
+                               Q_origin exactly equal to threshold does not
+                               flow. */
+  GSSK_LOGIC_RATIO,       /**< Division: F = k × Q_num / max(Q_control, ε).
                                Q_num is params.numerator_node when given (read,
                                not consumed — ADR 0005), else Q_origin. */
+  GSSK_LOGIC_REVERSIBLE,  /**< Odum's barb-less pathway (ADR 0007):
+                               F = k × (Q_origin − Q_target), SIGNED.
+                               The only logic that reads the target, and the
+                               only one that can transport backwards along its
+                               declared direction — for a barb-less line,
+                               `origin` and `target` name the two ends, not a
+                               from and a to. Use for diffusion, exchange
+                               across a gradient, any equilibrating process.
+                               Exactly integrable, so it stays IDC-eligible.
+                               Appended, not inserted: the values above cross
+                               the WASM boundary as bare integers. */
+  GSSK_LOGIC_SUBTRACT     /**< Odum's subtracting action (Fig. 2.6e, ADR 0008):
+                               F = max(0, k × (Q_origin − Q_control)).
+                               A BARBED pathway whose rate is set by a
+                               difference, so it is clamped at zero: a negative
+                               flow would drain the target along a line whose
+                               barb says it cannot.  Signed flow is what
+                               GSSK_LOGIC_REVERSIBLE is for, and its barb-less
+                               line is how the diagram says so.
+                               The control is read, never consumed — unlike
+                               `reversible`, which reads the TARGET.  Exactly
+                               one control node; a second is rejected.
+                               Appended, for the reason given above. */
 } GSSK_LogicType;
+
+/**
+ * @brief Most control nodes one edge may name (ADR 0008).
+ *
+ * Only GSSK_LOGIC_INTERACTION uses more than one, via `params.control_nodes`.
+ * Beyond this a product of stores is dominated by floating-point range rather
+ * than by the model, and a glyph with nine inputs has stopped being the legible
+ * shorthand that made Odum overload the interaction symbol in the first place.
+ * An edge naming more is rejected with GSSK_ERR_SCHEMA_VIOLATION.
+ */
+#define GSSK_MAX_CONTROL_NODES 8
+
+/**
+ * @brief The nine ESL primitives a node can be.
+ *
+ * This is the complete set the kernel ever sees, and it is the same closed set
+ * `gssk.schema.json` declares. Composites and archetypes are deliberately
+ * absent: they are authoring conveniences that expand during GSSK_Init, so by
+ * the time a consumer can call GSSK_GetNodeType every node is a primitive.
+ * A node that was authored as a member of a composite reports the primitive it
+ * expanded to, not the composite's name — use GSSK_GetNodeComposite and
+ * GSSK_GetNodeRole to recover where it came from.
+ *
+ * Values are explicit and MUST NOT be renumbered: they cross the WASM boundary
+ * as bare integers. Append new primitives at the end, before GSSK_NODE_INVALID.
+ *
+ * The string form is GSSK_GetNodeTypeString, which predates this enum and
+ * remains the right call for display and serialisation. This one is for
+ * branching, where string comparison is both slower and easy to typo silently.
+ */
+typedef enum {
+  GSSK_NODE_STORAGE      = 0, /**< Tank: accumulates, dQ/dt = inflow - outflow */
+  GSSK_NODE_SOURCE       = 1, /**< Forcing function; Q is held, never integrated */
+  GSSK_NODE_SINK         = 2, /**< Heat sink; absorbs, dQ/dt = 0 */
+  GSSK_NODE_CONSTANT     = 3, /**< Fixed value; read, never consumed */
+  GSSK_NODE_INTERACTION  = 4, /**< Phase 7: multi-input production/work gate */
+  GSSK_NODE_GAIN         = 5, /**< Phase 7: constant gain amplifier */
+  GSSK_NODE_LOOP_LIMITED = 6, /**< Phase 7: Michaelis-Menten loop-limited converter */
+  GSSK_NODE_EXCHANGE     = 7, /**< Phase 7: transaction exchange diamond */
+  GSSK_NODE_SWITCH       = 8, /**< Phase 7: digital switching box */
+  GSSK_NODE_INVALID      = 9  /**< Not a primitive: a NULL instance or an index
+                                   out of bounds. Appended rather than given -1
+                                   so the enum stays non-negative across the
+                                   WASM boundary. */
+} GSSK_NodeType;
 
 /**
  * @brief Denominator floor for GSSK_LOGIC_RATIO.
@@ -54,6 +136,34 @@ typedef enum {
  * edge with `params.threshold`, which is the epsilon when set above zero.
  */
 #define GSSK_RATIO_EPSILON 1e-9
+
+/**
+ * @brief Floor below which GSSK_LOGIC_LIMIT stops flowing.
+ *
+ * The saturation constant C in F = k × Q_origin / (1 + Q_origin/C) comes from
+ * ONE of two places, in this order:
+ *
+ *   1. `params.control_node`'s current Q, if that node is named.
+ *   2. `params.threshold`, when it is above zero and no control node exists.
+ *
+ * control_node WINS when both are given; threshold is not a runtime fallback,
+ * only the source used when no control node was named.  An edge with neither
+ * is rejected by GSSK_Init ("requires control_node or threshold > 0"), so the
+ * absent-C case cannot reach the solver.
+ *
+ * What CAN reach the solver is a C that was valid at load and is not any more.
+ * A C taken from control_node is a state variable, not a constant: if that
+ * node is itself a store, the half-saturation point moves as the run proceeds,
+ * and if it decays to this epsilon or below the flow becomes 0.0 rather than
+ * raising an error.  The pathway closes mid-run, in a model that loaded
+ * without complaint and whose file says nothing about it.
+ *
+ * That is deliberate — a saturation constant of zero means the pathway
+ * saturates at zero throughput, which is a physical statement rather than a
+ * malformed one — but it is invisible, so check a decaying control's magnitude
+ * before concluding a limit edge is behaving.
+ */
+#define GSSK_LIMIT_C_EPSILON 1e-9
 
 /**
  * @brief Integration methods.
@@ -109,9 +219,9 @@ typedef enum {
  * ========================================================================= */
 
 #define GSK_VERSION_MAJOR 5
-#define GSK_VERSION_MINOR 0
+#define GSK_VERSION_MINOR 1
 #define GSK_VERSION_PATCH 0
-#define GSK_VERSION_STRING "5.0.0"
+#define GSK_VERSION_STRING "5.1.0"
 
 /* Numeric version for comparison: (major << 16) | (minor << 8) | patch */
 #define GSK_VERSION_CODE(major, minor, patch) \
@@ -186,6 +296,40 @@ const double *GSSK_GetState(GSSK_Instance *inst);
  * @brief Number of nodes (= length of GSSK_GetState()).
  */
 size_t GSSK_GetStateSize(GSSK_Instance *inst);
+
+/**
+ * @brief Read the current per-edge flow rate vector (Odum J).
+ *        Index i corresponds to the edge at position i in the original JSON
+ *        array, matching GSSK_GetEdgeID() and GSSK_GetEdgeK().
+ *
+ *        The counterpart of GSSK_GetState(): that reports the storages, this
+ *        reports the rates between them. Refreshed by every GSSK_Step() and
+ *        GSSK_StepAdaptive() regardless of whether quality accounting is
+ *        enabled, and evaluated at the post-step state and time — so it is
+ *        the rate the step just integrated, not a prediction of the next one.
+ *
+ *        Before the first step every entry is 0.0, and GSSK_Reset() returns
+ *        them to 0.0: no flow has been computed yet, and saying so is more
+ *        useful than reporting a rate no solver has taken.
+ *
+ *        An inactive edge (see GSSK_DeactivateEdge) reads 0.0 rather than the
+ *        rate it would carry if it were live.
+ *
+ *        Signed. A negative entry means the pathway ran against its declared
+ *        direction; GSSK_GetEdgeQualityFlow clamps such a flow to zero
+ *        following Odum's convention, this does not.
+ *
+ * @return const double*  Read-only array of length GSSK_GetFlowCount(),
+ *                        or NULL if inst is NULL.
+ */
+const double *GSSK_GetFlows(GSSK_Instance *inst);
+
+/**
+ * @brief Number of edges (= length of GSSK_GetFlows()).
+ *        Always equal to GSSK_GetEdgeCount(); provided so the flow pair reads
+ *        like the GSSK_GetState() / GSSK_GetStateSize() pair it mirrors.
+ */
+size_t GSSK_GetFlowCount(GSSK_Instance *inst);
 
 /* =========================================================================
  * Quality accounting accessors
@@ -280,11 +424,30 @@ const char *GSSK_GetNodeID(GSSK_Instance *inst, size_t index);
 int GSSK_FindNodeIdx(GSSK_Instance *inst, const char *id);
 
 /**
- * @brief Get node type as a string ("source", "storage", "sink",
+ * @brief Get node type as a string ("storage", "source", "sink", "constant",
  *        "interaction", "gain", "loop_limited", "exchange", "switch").
  * @return const char* — valid for lifetime of inst. Never NULL.
+ *
+ * @warning Returns "storage" for a NULL instance or an out-of-range index,
+ *          which is indistinguishable from a genuine storage node. Use
+ *          GSSK_GetNodeType, whose GSSK_NODE_INVALID says so, when the index
+ *          might not be valid.
  */
 const char *GSSK_GetNodeTypeString(GSSK_Instance *inst, size_t node_idx);
+
+/**
+ * @brief Get node type as a GSSK_NodeType, for branching rather than display.
+ *
+ * Agrees with GSSK_GetNodeTypeString for every primitive, by construction:
+ * both read the same field, and the string function is a switch over this
+ * enum.
+ *
+ * @return GSSK_NODE_INVALID if inst is NULL or node_idx is out of range —
+ *         following GSSK_GetNodeID's contract, which returns NULL for the
+ *         same conditions, rather than GSSK_GetNodeTypeString's, which cannot
+ *         report the error and returns "storage".
+ */
+GSSK_NodeType GSSK_GetNodeType(GSSK_Instance *inst, size_t node_idx);
 
 /**
  * @brief Get edge ID by index. Returns NULL if edge has no id or index is OOB.

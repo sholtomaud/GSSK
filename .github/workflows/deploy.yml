@@ -74,11 +74,36 @@ jobs:
       - name: Node type validation tests
         run: make test-node-types
 
+      # GIP-0001 G6. F = kQ/(1+Q/C) was implemented and documented; where C
+      # comes from was not, so the schema is now the statement of record and
+      # these are what keep it true. Includes the invisible case: a
+      # control-supplied C that decays past GSSK_LIMIT_C_EPSILON closes the
+      # pathway to exactly 0.0, silently, in a model that loaded fine.
+      - name: Limit/threshold logic constant tests (GIP-0001 G6)
+        run: make test-limit-logic
+
       # Forcing functions. The convergence check inside is the one that
       # catches a waveform sampled once per STEP instead of once per STAGE —
       # every other assertion in that suite passes either way.
       - name: Forcing function tests
         run: make test-forcing
+
+      # GIP-0001 G3 / ADR 0007. A new logic is a ten-site change, and the two
+      # sites that matter most are invisible in a golden CSV regenerated from
+      # the same bug: conservation across the pair, and origin/target symmetry.
+      # Both were mutation-tested — dropping build_flow_matrix's second entry
+      # pair, or reading only the origin in compute_derivatives, fails here.
+      - name: Reversible pathway tests (GIP-0001 G3)
+        run: make test-reversible
+
+      # GIP-0001 G1 / ADR 0008. The n-ary product and the subtracting action.
+      # Both were mutation-tested: dropping the extra controls from
+      # interaction_control_product, and removing the max(0, .) clamp from
+      # subtract_flow, each fail here. Neither is visible in a golden CSV
+      # regenerated from the same bug — a gate that multiplies only its first
+      # control still decays, just at the wrong rate.
+      - name: n-ary interaction and subtract tests (GIP-0001 G1)
+        run: make test-interaction-nary
 
       # The Butcher c-nodes were written down in the DOPRI5 stage comments and
       # thrown away for years because there was no `t` for them to offset.
@@ -101,11 +126,28 @@ jobs:
       - name: Deactivation round-trip tests
         run: make test-deactivation
 
+      # GIP-0001 G7. The enum and GSSK_GetNodeTypeString read the same field,
+      # so they cannot disagree by accident — what this catches is the
+      # primitive set changing under one and not the other, an ordinal being
+      # renumbered (silently breaking every WASM consumer, since the value
+      # crosses as a bare integer), and a composite leaking its own name where
+      # a primitive belongs.
+      - name: Node type enum tests (GIP-0001 G7)
+        run: make test-node-type-enum
+
       # The flat carrier getters exist to keep GSSK_Carrier's struct layout off
       # the WASM boundary. This suite also asserts they agree with
       # GSSK_GetCarrier at every index, so the two paths cannot drift.
       - name: Carrier accessor tests
         run: make test-carrier-api
+
+      # GIP-0001 G4. Flow was step-local, so nothing outside the kernel could
+      # read a pathway rate. The cache that fixes it is written once per step
+      # on two separate step paths and shares its flow expression with the
+      # quality pass — three places a change can silently desynchronise, none
+      # of which a CSV regression over node quantities would notice.
+      - name: Per-edge flow accessor tests (GIP-0001 G4)
+        run: make test-edge-flows
 
       # Phase C asserts things a CSV regression cannot see. The C.3 suite in
       # particular runs the same relaxation under RK4 and under IDC against an
@@ -149,6 +191,32 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang valgrind lcov python3
+
+      # package.json sat at 1.0.0 while GSK_VERSION_STRING reached 5.0.0,
+      # because scripts/release.sh only ever bumped the header. Consumers pin
+      # the npm version and then read include/gssk.h out of node_modules, so
+      # the skew served a header from a kernel four majors dead. `make test`
+      # runs this too; the named step is here so the failure says what broke.
+      - name: Version sync — package.json vs include/gssk.h
+        run: make check-version
+
+      # The version check asserts the "files" list names the schema. This
+      # asserts npm actually puts it in the tarball, which is the property
+      # downstream consumers depend on.
+      - name: Package contents — gssk.schema.json must ship
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > /tmp/pack.json
+          python3 - <<'PY'
+          import json
+          files = {f["path"] for f in json.load(open("/tmp/pack.json"))[0]["files"]}
+          if "gssk.schema.json" not in files:
+              raise SystemExit(
+                  "::error::gssk.schema.json is not in the npm tarball; "
+                  f"packed: {sorted(files)}"
+              )
+          print("gssk.schema.json is in the npm tarball.")
+          PY
 
       # The schema ships in dist/ and consumers pin it, so a drift between it
       # and the parser is a defect that reaches users. make test-schema skips

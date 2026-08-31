@@ -8,6 +8,114 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ### Added
 
+- **The rest of Odum's work gate: an n-ary `interaction` and a new `subtract` logic.** GIP-0001 G1; the decision is [ADR 0008](adr/0008-nary-interaction-and-subtracting-action.md).
+
+  *Modeling for All Scales* Fig. 2.6 shows one interaction glyph computing several ways — (a) a product of two inputs, (c) a product of **three** input forces, (d) a divisor action, (e) a **subtracting** action. GSSK shipped (a) as `interaction` and (d) as `ratio` (ADR 0002, extended by ADR 0005). This adds (c) and (e).
+
+  **(c) `params.control_nodes`** — an array of one to eight node ids, giving `F = k × Q_origin × ∏ Q_control`. The singular `params.control_node` is unchanged and remains the one-control spelling; the two are **mutually exclusive**, and an edge carrying both is rejected rather than having one silently win. Only `interaction` accepts more than one control: `ratio` and `subtract` are binary and `limit` takes one half-saturation constant, so a second control on any of them is a `GSSK_ERR_SCHEMA_VIOLATION`. A quotient or a difference of three things is not defined by the figure, and guessing an associativity would be inventing semantics rather than implementing them.
+
+  The workaround this replaces — an intermediate storage node holding the partial product — was never the same model: the intermediate integrates, so it lags the inputs it multiplies, and it shows up in the state vector, in the emergy accounting and in every CSV column.
+
+  **(e) `subtract`** — `F = max(0, k × (Q_origin − Q_control))`, requiring exactly one control node, read and never consumed. Not the GIP's proposed `params.op` string: the divisor action already shipped as its own logic type, so `op` would have made `logic: "ratio"` and `logic: "interaction", op: "div"` two spellings of one thing, in a published schema. `logic` is also the branch key at eight switch sites, where `-Werror` turns a missed case into a build failure — an `op` string is checked by nothing.
+
+  The clamp is the semantics rather than a guard. `subtract` draws a *barbed* pathway, and a negative flow would drain the target along a line whose barb says it cannot; the gate saturates at zero when the control overtakes the origin. Signed flow across a gradient is `reversible` (ADR 0007), which reads the **target** and draws without a barb. The two compute a difference and are not the same statement.
+
+  **Solver eligibility.** The n-ary product is linearised at the current operating point exactly as the two-input one always was — no new error class, whether there are one or seven controls. `subtract` contributes four flow-matrix entries like `reversible`, and is **exact** rather than linearised where the difference is positive, contributing nothing below the clamp. It is therefore *piecewise* exact: an edge whose difference crosses zero inside a step is integrated as though it stayed on the side it started, the same seam `threshold` has, bounded by `dt`.
+
+  Existing single-control models are **bit-identical** — `control_idx` still holds the one control and the product loop runs zero times — and existing `GSSK_LogicType` values are unmoved, with `GSSK_LOGIC_SUBTRACT` appended at 7. Both are pinned by test. `build_topology_json` emits the spelling an edge actually has, so a one-control model does not come back rewritten into the array form. New: `examples/three_input_gate_model.json`, `tests/test_interaction_nary.c`, `make test-interaction-nary`.
+
+### Fixed
+
+- **`price_node` now resolves for expanded archetype members.** GIP-0002, raised from `gssk-budget`. An `exchange` inside an archetype could not have a per-instance price: every instance traded at the template's constant, and the mechanism that exists to make price a state variable did nothing. A model built on such an archetype validated, loaded, ran to completion and reported success while every transaction diamond in it moved the wrong money — or, with the template constant left at its `0.0` default, no money at all.
+
+  Two things were broken, one behind the other. `GSSK_Init` resolves `price_node` in a second pass over the top-level `nodes` array, and for a composite the entry there is the *instance* — `{"id": "groceries", "type": "purchase_consumed"}` — whose params carry no `price_node`; the expanded members that do carry it are never visited. Behind that, the archetype template struct had no field for it at all, so a template's `price_node` was already discarded at parse time, before expansion could have rewritten anything.
+
+  A template's `price_node` names a **sibling member by its template-local id**, and is now rewritten during expansion exactly as an edge's `origin` and `target` already were. An archetype with a `constant` member `price` and an `exchange` member declaring `price_node: "price"`, instantiated as `groceries`, expands to `groceries__price` and `groceries__deal` with the latter priced from the former. The per-instance value is then supplied through `snapshot.state` on `groceries__price` — a channel that already existed, already applied, and, being part of the model document, inside the content hash. That last property is why this is a parser fix and not a new `GSSK_SetNodePrice`: a price set after `GSSK_Init` would sit outside the hashed document, and two models differing only in price would hash identically. For a ledger the hash is the audit anchor, so that is a correctness objection rather than a matter of taste.
+
+  **A template `price_node` naming no member of its archetype is now rejected** with `GSSK_ERR_SCHEMA_VIOLATION` naming the archetype, the member, the unresolved id and the instance — it does not fall back to the constant. This is the one place the implementation departs from the proposal, on ADR 0004's rule that a name matching nothing is an error rather than a silent re-modelling; a fallback is precisely what let the original defect run green. Nothing can have depended on it, since the field was discarded at parse time. **Top-level `price_node` is unchanged**, second-pass forward references and constant fallback included.
+
+  Note that a price delivered through `snapshot.state` is live state, not a topology initial condition, so it round-trips through `GSSK_SerializeSnapshot` and not through `GSSK_SerializeModel`, which emits each node's `initial_value` by design. Both forms emit the member's namespaced `price_node` reference.
+
+  New assertions in `tests/test_price_node.c`: two instances of one archetype at different prices spend different amounts and each satisfies `spent / inventory == its own price`, the shared buyer's debit equals the sum of the two credits, the template's poison constant is not consulted, an unresolvable template reference fails `GSSK_Init`, and the snapshot round-trip reproduces both instances' spend.
+
+---
+
+## [5.1.0] — 2026-08-30
+
+### Added
+
+- **`gssk.schema.json` now ships in the npm package.** `package.json` `"files"` listed `dist/`, `include/` and `README.md`, so the only machine-readable statement of the model vocabulary was not published. Downstream consumers hand-maintained their own copy of the node-type enum instead, with nothing to detect drift against the real one. The schema is now in `"files"`, `make check-version` asserts it stays there, and CI asserts `npm pack` actually puts it in the tarball.
+
+- **`GSSK_NodeType` is public, with `GSSK_GetNodeType` beside the existing string getter.** Most of GIP-0001 G7 was already closed on `main`: `GSSK_GetNodeTypeString` returns the type, the primitive set is a closed enum in `gssk.schema.json`, and `GSSK_Init` rejects an unrecognised type naming the node — G7's acceptance criterion verbatim. What remained is that a C consumer had only string comparison for a decision the kernel makes with an integer. That is slower, and worse, typo-able in a way the compiler cannot see: `strcmp(t, "loop_limted")` is a valid program that quietly never matches.
+
+  The enum already existed privately in `src/gssk.c`, and was already called `GSSK_NodeType`. It has been **moved** to `include/gssk.h` rather than copied, so there is no pair to drift; its internal constants are now `GSSK_`-prefixed, which a public header requires and which `-Werror` verified at all 68 use sites.
+
+  The GIP's proposed enum was incomplete against `main`: the primitive set is nine, not four — `storage`, `source`, `sink`, `constant`, `interaction`, `gain`, `loop_limited`, `exchange`, `switch`. The Phase 7 processing nodes are in it. Composites and archetypes are deliberately **not**: they expand during `GSSK_Init`, so by the time a consumer can ask, every node is a primitive. A node authored as part of a `producer` reports `storage`, `interaction` or `sink` — use `GSSK_GetNodeComposite` / `GSSK_GetNodeRole` to recover where it came from.
+
+  Ordinal values are explicit and pinned by test: they cross the WASM boundary as bare integers, so renumbering them is a silent breaking change for every JS consumer. Append new primitives before `GSSK_NODE_INVALID`.
+
+- **`reversible` edge logic — Odum's barb-less pathway.** `F = k × (Q_origin − Q_target)`, signed. Raised as GIP-0001 G3; the decision is [ADR 0007](adr/0007-reversible-pathway.md).
+
+  Odum draws two pathway kinds and the distinction lives in the notation: a barb where the flow depends only on the force behind it, no barb where it depends on the difference between the force at one end and the back force from the other, *"and this pathway may flow in either direction"* (*Modeling for All Scales*, p.23). Every GSSK logic computed forward from origin quantities and **none of them read the target**, so the entire second class — diffusion, exchange across a gradient, any equilibrating process — was inexpressible.
+
+  `reversible` is the only logic that reads both ends, and therefore the only one that can transport backwards along its declared direction. For a barb-less line `origin` and `target` name the two ends rather than a from and a to: **swapping them produces an identical trajectory**, asserted step-by-step rather than at equilibrium.
+
+  This is not the `exchange` node, which is the transaction diamond — two barbed pathways carrying a money/goods counter-flow. A barb-less pathway is one pathway whose sign is a gradient.
+
+  Two properties worth knowing:
+
+  - **It is exactly integrable.** Being linear in the state, the incipient/IDC solver integrates it exactly rather than linearising about the operating point, unlike `limit` and `ratio`. It stays IDC-eligible. It is also the first logic whose flow-matrix contribution touches **four** entries rather than two, which is why `build_jacobian`'s second-variable slot is no longer named for the control node — `reversible` depends on its *target*, which is not a control.
+  - **A backward flow carries no transformity.** The quality pass's `flow ≤ 0` clamp stops being incidental and becomes a decision: a flow running back up a gradient is not producing the node it arrives at, so `GSSK_GetEdgeQualityFlow` reads `0.0` while the pathway reverses. `GSSK_GetFlows` reports the signed rate.
+
+  `GSSK_LOGIC_REVERSIBLE` is **appended** at 6; every existing `GSSK_LogicType` value is unchanged and pinned by test, because the value crosses the WASM boundary as a bare integer where nothing recompiles.
+
+- **`examples/diffusion_model.json`** — three tanks in a line, two reversible edges, equilibrating from a step gradient. Both edges are declared *against* the physical gradient on purpose, so the example exercises backward transport rather than merely describing it: a build that clamped the flow at zero produces a visibly different CSV. No existing golden moved.
+
+- **Per-edge flow rates are readable (`GSSK_GetFlows` / `GSSK_GetFlowCount`).** A consumer could read every node quantity and not one rate: `GSSK_GetState` reports the storages, and nothing reported the flows between them. Flow was step-local — computed inside `compute_derivatives` to build `deriv[]`, then discarded. That makes a diagram whose entire subject is flow impossible to annotate, and leaves the heat-sink budget and any pathway-level emergy display with nothing to read. Raised as GIP-0001 G4.
+
+  The new pair mirrors `GSSK_GetState` / `GSSK_GetStateSize` exactly, so it introduces no new idiom: index `i` is the edge at position `i` in the input JSON, matching `GSSK_GetEdgeID` and `GSSK_GetEdgeK`. Both are exported to WASM and declared in `src/gssk.d.ts`.
+
+  Semantics worth knowing before you read them:
+
+  - Refreshed by **every** `GSSK_Step` and `GSSK_StepAdaptive`, whether or not quality accounting is enabled. The pre-existing per-edge flow array only existed inside the quality pass, was freed at the end of it, and what it exposed through `GSSK_GetEdgeQualityFlow` is `Tr × flow`, not flow.
+  - Evaluated at the **post-step** state and time, so it is the rate the step just integrated rather than a prediction of the next one.
+  - `0.0` before the first step and after `GSSK_Reset` — no flow has been computed yet, which is more useful than reporting a rate no solver has taken.
+  - An **inactive** edge reads `0.0`, not the rate it would carry if it were live.
+  - **Signed.** `GSSK_GetEdgeQualityFlow` clamps a negative flow to zero following Odum's convention; this does not, because the sign of a flow is information a diagram consumer wants.
+
+### Changed
+
+- **The per-edge flow expression is written once.** The `switch` over edge logic existed twice — in `compute_derivatives` and, in a slightly different dialect, in `compute_quality_pass`. G4 needed it a third time, so it is now one static `edge_flow_rate(e, state, k)`. `k` is a parameter because the callers genuinely disagree about which `k` they mean: the flow cache passes `forced_edge_k`, the rate the derivative integrated; the quality pass passes `e->k`, which is what it has always used. That disagreement is very probably a defect — a forced edge makes emergy accounting disagree with the trajectory it is accounting for — but it moves published emergy numbers, so it is tracked separately as `quality-pass-ignores-edge-forcing` rather than fixed in passing. Behaviour is unchanged: every golden CSV and every focused suite passes untouched.
+
+### Fixed
+
+- **The npm package version was five majors behind the kernel.** `package.json` still said `1.0.0` while `include/gssk.h` said `GSK_VERSION_STRING "5.0.0"`; `scripts/release.sh` had only ever bumped the header. That is not cosmetic — the package ships `include/`, so a consumer who pinned `gssk@1.0.0` from npm was reading a header out of `node_modules` and getting the current one, or pinning a version that never described the kernel it was served. GIP-0001 was written this way: it quotes `INTERACTION /**< Multiplier flow (k * Q1 * Q2) */` and `GetStateSize /* Number of storage nodes */`, neither of which has been the comment for several majors.
+
+  `package.json` is now `5.0.0`, `scripts/release.sh` bumps it alongside the header (and re-reads the file to confirm it is still valid JSON before committing), and `scripts/check_version_sync.py` fails the build when the two disagree — or when `GSK_VERSION_STRING` disagrees with the `GSK_VERSION_MAJOR`/`MINOR`/`PATCH` macros beside it. It is stdlib-only, runs as `make check-version`, and is a prerequisite of `make test`, so a skew cannot survive a local test run.
+
+- **Out of bounds is now reportable.** `GSSK_GetNodeTypeString` returns `"storage"` for a NULL instance or an out-of-range index, which is indistinguishable from a genuine storage node and cannot be checked for. `GSSK_GetNodeType` returns `GSSK_NODE_INVALID` instead, following `GSSK_GetNodeID`'s contract. The string function's behaviour is unchanged — it is load-bearing elsewhere — but it now carries an `@warning` saying so, and a test asserts the warning is still true.
+
+- **`GSSK_GetNodeTypeString`'s header comment listed eight of the nine primitives**, omitting `constant`.
+
+### Documentation
+
+- **The schema now says where limit logic's saturation constant C comes from.** `F = k × Q_origin / (1 + Q_origin/C)` has been implemented since the primitive was added and the formula is stated in `include/gssk.h`, but nothing told a consumer how to *supply* C. `gssk.schema.json` described `control_node` as a node that "modulates the flow" without saying it **is** the denominator constant, and described `threshold` for threshold and ratio logic only, never mentioning that it doubles as C when no control node exists. Raised as GIP-0001 G6.
+
+  Both `EdgeParams` descriptions and the `EdgeLogic` enum now state the rule: `control_node`'s current Q supplies C if that node is named, otherwise `params.threshold` when it is above zero, and **`control_node` wins when both are given** — `threshold` is the source used in its absence, not a runtime fallback.
+
+  Two behaviours that were not written down anywhere are now stated, in the schema and in the header:
+
+  - A C taken from `control_node` is a **state variable, not a constant.** If that node is itself a store, the edge has a moving half-saturation point.
+  - When C falls to `1e-9` or below the flow becomes **exactly 0.0 rather than an error.** A control node that decays toward zero therefore closes the pathway mid-run, in a model that loaded without complaint and whose file says nothing about it. That is deliberate — a saturation constant of zero means the pathway saturates at zero throughput — but it was invisible.
+
+  The GIP filed the second point as "flow is silently 0.0 rather than an error". That is only half true, and the half matters: a limit edge with **neither** source of C is rejected at load with `Logic Error: Edge N (limit) requires control_node or threshold > 0`. Only a C that was valid at load and decayed afterwards reaches the solver.
+
+  `threshold` logic's comparand is documented too: always `Q_origin`, never the control node, and the comparison is strict.
+
+- **`GSSK_LIMIT_C_EPSILON`** is now a named public constant carrying that explanation, following the `GSSK_RATIO_EPSILON` precedent. The eight bare `1e-9` literals in the limit paths use it, so the documentation cannot drift from the threshold it documents. (The loop-limited node's `node_C` guard is a different constant with a different fallback and is untouched.)
+
+- **`tests/test_limit_logic.c`** pins all four facts, so the documentation stays true. The precedence assertion is mutation-tested: swapping `control_node` and `threshold` priority in the kernel makes it fail. The decaying-control test asserts `Q_origin` is *exactly* frozen afterwards, and separately that the origin still holds most of its contents — otherwise a fully-drained store would sit still and pass.
+
 - **Phase D.1 — money is a closed conserved loop, so `conserved: true` finally asserts something.** `examples/odum_gnp_loop.json` circulates money `households → exchange → firms → households` with no money source and no money sink, which is Odum's Fig. 3: energy flows *through* and leaves as heat, money goes *round*, counter-current the whole way. `make test-gnp-loop` pins that asymmetry — money's per-step `GSSK_GetCarrierConservationError` stays under the model's `solver_tolerance` (worst 2.2e-16) while energy's does not over the very same run (worst 1.5e-03, as the reserve depletes from 1001 to 42).
 
   **The declaration was previously vacuous, and the suite says so with a negative control.** Conservation is summed over *storage* nodes only, and C.4's `examples/odum_countercurrent.json` modelled money as a `source`/`sink` pair — no money storage at all. Its reported error is a flawless `0.0` computed over nothing, and `test_open_loop_conservation_is_vacuous` asserts both halves of that: zero money storages **and** a zero error. A check that cannot fail is worse than no check, so the new suite refuses to be one — it also asserts that the loop actually turns (`firms` peaks at 30% of the money stock, so the exchange really cleared) and that the topology contains no money source or sink by construction.

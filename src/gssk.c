@@ -43,14 +43,9 @@
  * Internal types
  * ========================================================================= */
 
-typedef enum {
-  NODE_STORAGE, NODE_SOURCE, NODE_SINK, NODE_CONSTANT,
-  NODE_INTERACTION,  /* Phase 7: multi-input production/work gate */
-  NODE_GAIN,         /* Phase 7: constant gain amplifier */
-  NODE_LOOP_LIMITED, /* Phase 7: Michaelis-Menten loop-limited converter */
-  NODE_EXCHANGE,     /* Phase 7: transaction exchange diamond */
-  NODE_SWITCH        /* Phase 7: digital switching box */
-} GSSK_NodeType;
+/* GSSK_NodeType moved to include/gssk.h (GIP-0001 G7) — it is now part of
+ * the public API, so there is deliberately no private copy here to drift
+ * from it. The value order is unchanged. */
 typedef enum { OUTPUT_PARTITION, OUTPUT_REPLICATE } GSSK_OutputMode;
 
 /* Phase H — forcing.  One parameter block serves the whole vocabulary; each
@@ -116,6 +111,12 @@ typedef struct {
   int             origin_idx;
   int             target_idx;
   int             control_idx;    /* -1 if unused */
+  /* ADR 0008 — controls 2..n of an n-ary interaction.  control_idx above is
+   * control 1, so every logic that takes exactly one control is untouched and
+   * a two-input work gate stays bit-identical: the product loop below runs
+   * zero times when extra_control_count is 0. */
+  int             extra_control_idx[GSSK_MAX_CONTROL_NODES - 1];
+  int             extra_control_count;
   int             numerator_idx;  /* ratio: named numerator; -1 = use origin */
   int             coupled_idx;    /* -1 if unused; index into edges[] */
   GSSK_LogicType  logic;
@@ -152,6 +153,10 @@ typedef struct {
   double value;
   double node_k, node_C, node_threshold, node_price;
   char   carrier[32];
+  /* exchange: template-local id of the sibling member supplying price, empty
+   * for none.  Rewritten to a member slot at expansion, so each instance of
+   * the archetype prices from its own copy of that member (GIP-0002). */
+  char   price_node[64];
 } GSSK_ANodeTmpl;
 
 /* Template for one edge inside an archetype definition */
@@ -225,6 +230,11 @@ struct GSSK_Instance {
   /* Phase 1 — per-edge and step error estimates */
   double *edge_error;  /* |flow_idc - flow_rk4| / max(|flow_rk4|, eps) per edge */
   double  step_error;  /* max over all edges */
+
+  /* GIP-0001 G4 — per-edge flow rate (Odum J), refreshed on every step.
+   * Allocated unconditionally, unlike edge_qflow: a consumer must be able to
+   * read pathway rates from a model that does no quality accounting. */
+  double *edge_flow;
 
   /* Phase 1.3 — threshold event log */
   GSSK_EventInternal *events;
@@ -334,7 +344,7 @@ static void scan_motifs_internal(GSSK_Instance *inst);                    /* Pha
 static void safe_str_copy(char *dst, const char *src, size_t cap);        /* bounded, always NUL-terminates */
 
 /* The nine ESL primitives, and the only strings parse_node_type can actually
- * decode.  parse_node_type returns NODE_STORAGE for anything else, which is a
+ * decode.  parse_node_type returns GSSK_NODE_STORAGE for anything else, which is a
  * usable default only once the string is known to be a primitive — so every
  * caller that takes a type from a model must gate on this first.  A composite
  * or archetype name is NOT a primitive; it is resolved by find_archetype. */
@@ -396,7 +406,7 @@ static const char *const EDGE_KEYS[] = {
 };
 
 static const char *const EDGE_PARAM_KEYS[] = {
-  "k", "control_node", "numerator_node", "threshold"
+  "k", "control_node", "control_nodes", "numerator_node", "threshold"
 };
 
 /* Node params.  Wider than what any single node type reads: the first four
@@ -449,8 +459,8 @@ static const char *const ARCH_NODE_KEYS[]  = { "id", "type", "value", "carrier",
 static const char *const ARCH_EDGE_KEYS[]  = { "id", "origin", "target", "logic",
                                                "carrier", "params" };
 /* Narrower than EDGE_PARAM_KEYS, matching the schema: an archetype edge
- * template has no control_node or numerator_node, because those name model
- * nodes and a template is written before any instance exists. */
+ * template has no control_node, control_nodes or numerator_node, because those
+ * name model nodes and a template is written before any instance exists. */
 static const char *const ARCH_EDGE_PARAM_KEYS[] = { "k", "threshold" };
 
 static const char *const CONFIG_KEYS[] = {
@@ -1059,25 +1069,25 @@ void (*gssk_probe_on_adjoint)(double t)    = NULL;
 #  define GSSK_PROBE(fn, t) ((void)0)
 #endif
 
-/* Decodes a primitive type string.  The NODE_STORAGE tail is a decode default,
+/* Decodes a primitive type string.  The GSSK_NODE_STORAGE tail is a decode default,
  * not a fallback for unknown input: callers validate with
  * is_primitive_node_type (or find_archetype) before getting here. */
 static GSSK_NodeType parse_node_type(const char *s) {
-  if (strcmp(s, "source")       == 0) return NODE_SOURCE;
-  if (strcmp(s, "sink")         == 0) return NODE_SINK;
-  if (strcmp(s, "constant")     == 0) return NODE_CONSTANT;
-  if (strcmp(s, "interaction")  == 0) return NODE_INTERACTION;
-  if (strcmp(s, "gain")         == 0) return NODE_GAIN;
-  if (strcmp(s, "loop_limited") == 0) return NODE_LOOP_LIMITED;
-  if (strcmp(s, "exchange")     == 0) return NODE_EXCHANGE;
-  if (strcmp(s, "switch")       == 0) return NODE_SWITCH;
-  return NODE_STORAGE;
+  if (strcmp(s, "source")       == 0) return GSSK_NODE_SOURCE;
+  if (strcmp(s, "sink")         == 0) return GSSK_NODE_SINK;
+  if (strcmp(s, "constant")     == 0) return GSSK_NODE_CONSTANT;
+  if (strcmp(s, "interaction")  == 0) return GSSK_NODE_INTERACTION;
+  if (strcmp(s, "gain")         == 0) return GSSK_NODE_GAIN;
+  if (strcmp(s, "loop_limited") == 0) return GSSK_NODE_LOOP_LIMITED;
+  if (strcmp(s, "exchange")     == 0) return GSSK_NODE_EXCHANGE;
+  if (strcmp(s, "switch")       == 0) return GSSK_NODE_SWITCH;
+  return GSSK_NODE_STORAGE;
 }
 
 static bool is_processing_node(GSSK_NodeType t) {
-  return t == NODE_INTERACTION || t == NODE_GAIN ||
-         t == NODE_LOOP_LIMITED || t == NODE_EXCHANGE ||
-         t == NODE_SWITCH;
+  return t == GSSK_NODE_INTERACTION || t == GSSK_NODE_GAIN ||
+         t == GSSK_NODE_LOOP_LIMITED || t == GSSK_NODE_EXCHANGE ||
+         t == GSSK_NODE_SWITCH;
 }
 
 static GSSK_OutputMode parse_output_mode(const char *s) {
@@ -1114,6 +1124,45 @@ static double ratio_numer(const GSSK_EdgeInternal *e, const double *state) {
   return state[ratio_numer_idx(e)];
 }
 
+/* Product of every control node's Q on an interaction edge (ADR 0008).
+ *
+ * Callers must have established control_idx != -1; an interaction with no
+ * control never reaches here, because GSSK_Init rejects it.  With no extra
+ * controls this is exactly state[e->control_idx], which is why a two-input
+ * work gate is bit-identical to what it computed before the n-ary form
+ * existed — the loop body never runs. */
+static double interaction_control_product(const GSSK_EdgeInternal *e,
+                                          const double *state) {
+  double p = state[e->control_idx];
+  for (int c = 0; c < e->extra_control_count; c++)
+    p *= state[e->extra_control_idx[c]];
+  return p;
+}
+
+/* The same product with control `skip` left out, for differentiating an n-ary
+ * interaction with respect to one of its controls.  `skip` indexes
+ * e->extra_control_idx, or is -1 to mean control_idx itself. */
+static double interaction_control_product_except(const GSSK_EdgeInternal *e,
+                                                 const double *state, int skip) {
+  double p = (skip == -1) ? 1.0 : state[e->control_idx];
+  for (int c = 0; c < e->extra_control_count; c++)
+    if (c != skip) p *= state[e->extra_control_idx[c]];
+  return p;
+}
+
+/* Odum's subtracting action, Fig. 2.6e (ADR 0008).
+ *
+ * Clamped at zero because the pathway carries a barb: a negative flow would
+ * drain the target and fill the origin along a line whose notation says it
+ * cannot.  Signed flow is GSSK_LOGIC_REVERSIBLE's job, and its barb-less line
+ * is how the diagram declares it.  Callers must have established
+ * control_idx != -1. */
+static double subtract_flow(const GSSK_EdgeInternal *e, const double *state,
+                            double k) {
+  double d = state[e->origin_idx] - state[e->control_idx];
+  return (d > 0.0) ? k * d : 0.0;
+}
+
 static int parse_logic_type(const char *s) {
   if (strcmp(s, "constant")    == 0) return GSSK_LOGIC_CONSTANT;
   if (strcmp(s, "linear")      == 0) return GSSK_LOGIC_LINEAR;
@@ -1121,6 +1170,8 @@ static int parse_logic_type(const char *s) {
   if (strcmp(s, "limit")       == 0) return GSSK_LOGIC_LIMIT;
   if (strcmp(s, "threshold")   == 0) return GSSK_LOGIC_THRESHOLD;
   if (strcmp(s, "ratio")       == 0) return GSSK_LOGIC_RATIO;
+  if (strcmp(s, "reversible")  == 0) return GSSK_LOGIC_REVERSIBLE;
+  if (strcmp(s, "subtract")    == 0) return GSSK_LOGIC_SUBTRACT;
   return -1;
 }
 
@@ -1136,6 +1187,130 @@ static int find_edge_idx(GSSK_Instance *inst, const char *id) {
   for (size_t i = 0; i < inst->edge_count; i++)
     if (strcmp(inst->edges[i].id, id) == 0) return (int)i;
   return -1;
+}
+
+/* ADR 0008 — resolve an edge's control nodes from `params`, and enforce the
+ * arity each logic admits.
+ *
+ * Two spellings, deliberately not one.  `control_node` is a single id and
+ * means what it has always meant; `control_nodes` is an array and is the
+ * n-ary form Odum's three-input interaction (Fig. 2.6c) needs.  An edge
+ * carrying BOTH is rejected rather than having one quietly win: `limit`'s
+ * control_node-beats-threshold precedence is already one silent-precedence
+ * rule too many, and this one would sit in a published schema.
+ *
+ * The first control lands in *out_ctrl and the rest in out_extra, so every
+ * logic that takes exactly one reads control_idx exactly as it did before the
+ * array existed, and a two-input work gate computes a bit-identical flow.
+ *
+ * Resolves into caller-owned locals rather than into the edge, so GSSK_AddEdge
+ * can run the whole check BEFORE its realloc and a rejected add stays a true
+ * no-op.
+ *
+ * `where` names the edge for the error message.  Returns false with err set.
+ */
+static bool resolve_control_nodes(GSSK_Instance *inst, const cJSON *params,
+                                  GSSK_LogicType logic, bool touches_proc,
+                                  const char *where,
+                                  int *out_ctrl,
+                                  int out_extra[GSSK_MAX_CONTROL_NODES - 1],
+                                  int *out_extra_count,
+                                  char *err, size_t errlen) {
+  *out_ctrl        = -1;
+  *out_extra_count = 0;
+
+  const cJSON *one  = cJSON_IsObject(params)
+                      ? cJSON_GetObjectItem(params, "control_node")  : NULL;
+  const cJSON *many = cJSON_IsObject(params)
+                      ? cJSON_GetObjectItem(params, "control_nodes") : NULL;
+
+  if (cJSON_IsString(one) && many) {
+    snprintf(err, errlen,
+             "Logic Error: %s names both control_node and control_nodes; "
+             "they are two spellings of one field, so give exactly one.",
+             where);
+    return false;
+  }
+
+  int resolved[GSSK_MAX_CONTROL_NODES];
+  int count = 0;
+
+  if (cJSON_IsString(one)) {
+    int idx = find_node_idx(inst, one->valuestring);
+    if (idx == -1) {
+      snprintf(err, errlen, "Linkage Error: %s unknown control_node '%s'.",
+               where, one->valuestring);
+      return false;
+    }
+    resolved[count++] = idx;
+  } else if (many) {
+    if (!cJSON_IsArray(many)) {
+      snprintf(err, errlen,
+               "Schema Error: %s has control_nodes but it is not an array.",
+               where);
+      return false;
+    }
+    int n = cJSON_GetArraySize(many);
+    if (n == 0) {
+      snprintf(err, errlen,
+               "Schema Error: %s has an empty control_nodes; omit the field "
+               "rather than naming no control.", where);
+      return false;
+    }
+    if (n > GSSK_MAX_CONTROL_NODES) {
+      snprintf(err, errlen,
+               "Schema Error: %s names %d control nodes; the limit is %d.",
+               where, n, GSSK_MAX_CONTROL_NODES);
+      return false;
+    }
+    for (int j = 0; j < n; j++) {
+      const cJSON *item = cJSON_GetArrayItem(many, j);
+      if (!cJSON_IsString(item)) {
+        snprintf(err, errlen,
+                 "Schema Error: %s control_nodes[%d] is not a node id string.",
+                 where, j);
+        return false;
+      }
+      int idx = find_node_idx(inst, item->valuestring);
+      if (idx == -1) {
+        snprintf(err, errlen,
+                 "Linkage Error: %s unknown control_nodes[%d] '%s'.",
+                 where, j, item->valuestring);
+        return false;
+      }
+      resolved[count++] = idx;
+    }
+  }
+
+  /* Only the work gate is n-ary.  A quotient of three things and a difference
+   * of three things are not defined by Fig. 2.6, and choosing an associativity
+   * here would be inventing semantics rather than implementing them; `limit`
+   * takes one half-saturation constant. */
+  if (count > 1 && logic != GSSK_LOGIC_INTERACTION) {
+    snprintf(err, errlen,
+             "Logic Error: %s (%s) was given %d control nodes; only "
+             "'interaction' takes more than one.",
+             where, logic_type_str(logic), count);
+    return false;
+  }
+
+  /* Edges touching a Phase 7 processing node carry topology only — their flow
+   * is computed by the per-type helper — so the required-control checks that
+   * follow do not apply to them, exactly as the pre-existing interaction check
+   * did not. */
+  if (!touches_proc && count == 0 &&
+      (logic == GSSK_LOGIC_INTERACTION || logic == GSSK_LOGIC_SUBTRACT)) {
+    snprintf(err, errlen, "Logic Error: %s (%s) requires control_node.",
+             where, logic_type_str(logic));
+    return false;
+  }
+
+  if (count > 0) {
+    *out_ctrl = resolved[0];
+    for (int j = 1; j < count; j++) out_extra[j - 1] = resolved[j];
+    *out_extra_count = count - 1;
+  }
+  return true;
 }
 
 /* =========================================================================
@@ -1217,7 +1392,7 @@ static void compute_gain_node(GSSK_Instance *inst, double t, size_t ni,
 
   double F = inst->nodes[ni].node_k * state[control_orig];
 
-  if (energy_orig >= 0 && inst->nodes[energy_orig].type == NODE_STORAGE)
+  if (energy_orig >= 0 && inst->nodes[energy_orig].type == GSSK_NODE_STORAGE)
     deriv[energy_orig] -= F;
 
   size_t out_count = 0;
@@ -1328,7 +1503,7 @@ static void compute_switch_node(GSSK_Instance *inst, double t, size_t ni,
 /* ---- Transaction diamond: shared physics primitive (ADR 0001) -------------
  *
  * Odum's small diamond is both a junction and a coupling ratio.  It has two
- * authoring forms — the NODE_EXCHANGE hub and the inline `coupled_edge` — and
+ * authoring forms — the GSSK_NODE_EXCHANGE hub and the inline `coupled_edge` — and
  * per ADR 0001 both are backed by the helpers below so their behaviour cannot
  * diverge.  Three seams are shared, not one:
  *
@@ -1336,7 +1511,7 @@ static void compute_switch_node(GSSK_Instance *inst, double t, size_t ni,
  *   exchange_primary_flow()      the forward flow, including its money gate
  *   apply_transaction_coupling() the counter-flow F_money = price x F_primary
  *
- * The leg-discovery seam matters because the hand-written NODE_EXCHANGE
+ * The leg-discovery seam matters because the hand-written GSSK_NODE_EXCHANGE
  * Jacobian block re-derived it independently; sharing it is what keeps the RK4
  * and incipient paths from drifting apart.
  */
@@ -1459,13 +1634,13 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
       break;
     case GSSK_LOGIC_INTERACTION:
       if (e->control_idx != -1)
-        flow = k * Q_orig * state[e->control_idx];
+        flow = k * Q_orig * interaction_control_product(e, state);
       break;
     case GSSK_LOGIC_LIMIT: {
       double C = -1.0;
       if (e->control_idx != -1) C = state[e->control_idx];
       else if (e->threshold > 0.0) C = e->threshold;
-      if (C > 1e-9)
+      if (C > GSSK_LIMIT_C_EPSILON)
         flow = (k * Q_orig) / (1.0 + (Q_orig / C));
       break;
     }
@@ -1477,6 +1652,19 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
         flow = k * ratio_numer(e, state) /
                ratio_denom(state[e->control_idx], e->threshold);
       break;
+    case GSSK_LOGIC_REVERSIBLE:
+      /* ADR 0007 — Odum's barb-less pathway.  The ONLY logic that reads the
+       * target: flow follows the gradient, so it is signed and the two
+       * statements below transport it backwards when it is negative.  No
+       * special case is needed for that, which is the point. */
+      flow = k * (Q_orig - state[e->target_idx]);
+      break;
+    case GSSK_LOGIC_SUBTRACT:
+      /* ADR 0008 — Odum's subtracting action.  Reads a control it does not
+       * consume, and clamps at zero: this pathway has a barb. */
+      if (e->control_idx != -1)
+        flow = subtract_flow(e, state, k);
+      break;
     }
 
     deriv[e->origin_idx] -= flow;
@@ -1486,11 +1674,11 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
   /* v4 processing nodes — call per-type helper */
   for (size_t i = 0; i < inst->node_count; i++) {
     switch (inst->nodes[i].type) {
-    case NODE_INTERACTION:  compute_interaction_node(inst, t, i, state, deriv); break;
-    case NODE_GAIN:         compute_gain_node(inst, t, i, state, deriv); break;
-    case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, state, deriv); break;
-    case NODE_SWITCH:       compute_switch_node(inst, t, i, state, deriv); break;
-    case NODE_EXCHANGE:     compute_exchange_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_INTERACTION:  compute_interaction_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_GAIN:         compute_gain_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_SWITCH:       compute_switch_node(inst, t, i, state, deriv); break;
+    case GSSK_NODE_EXCHANGE:     compute_exchange_node(inst, t, i, state, deriv); break;
     default: break;
     }
   }
@@ -1498,8 +1686,8 @@ static void compute_derivatives(GSSK_Instance *inst, double t,
   /* Boundary: non-storage nodes have dQ/dt = 0 (sources, constants, and all
    * processing nodes — they do not accumulate Q). */
   for (size_t i = 0; i < inst->node_count; i++) {
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT ||
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT ||
         is_processing_node(inst->nodes[i].type))
       deriv[i] = 0.0;
   }
@@ -1555,7 +1743,11 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
       break;
     case GSSK_LOGIC_INTERACTION:
       if (e->control_idx != -1) {
-        conductance = k * state[e->control_idx];
+        /* ADR 0008 — the n-ary product is frozen over the step exactly as the
+         * two-input one always was, so the extra controls add no new error
+         * class: one linearisation about the current operating point either
+         * way. */
+        conductance = k * interaction_control_product(e, state);
         A[e->target_idx * (int)n + e->origin_idx] += conductance;
         A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
       }
@@ -1566,7 +1758,7 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
       if (e->control_idx != -1) C = state[e->control_idx];
       else if (e->threshold > 0.0) C = e->threshold;
       double Q = state[e->origin_idx];
-      if (C > 1e-9) {
+      if (C > GSSK_LIMIT_C_EPSILON) {
         conductance = k * C / (C + Q); /* → k as Q→0, → k/2 at Q=C */
         A[e->target_idx * (int)n + e->origin_idx] += conductance;
         A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
@@ -1584,6 +1776,38 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
         A[e->origin_idx * (int)n + num] -= conductance;
       }
       break;
+    case GSSK_LOGIC_REVERSIBLE:
+      /* ADR 0007 — EXACT, not a linearisation.  k(Q_orig - Q_tgt) is linear in
+       * the state, so IDC integrates this edge exactly and `reversible` stays
+       * incipient-eligible, unlike limit (linearised Michaelis-Menten) and
+       * ratio (exact only for a frozen denominator).
+       *
+       * It is also the first logic touching FOUR matrix entries rather than
+       * two, because the flow depends on both ends.  Dropping the second pair
+       * leaves a pathway that drains its origin and never equilibrates. */
+      conductance = k;
+      A[e->target_idx * (int)n + e->origin_idx] += conductance;
+      A[e->origin_idx * (int)n + e->origin_idx] -= conductance;
+      A[e->target_idx * (int)n + e->target_idx] -= conductance;
+      A[e->origin_idx * (int)n + e->target_idx] += conductance;
+      break;
+    case GSSK_LOGIC_SUBTRACT:
+      /* ADR 0008 — four entries, like `reversible`, because the flow depends
+       * on two state variables.  EXACT rather than linearised while the
+       * difference is positive, since k(Q_orig - Q_ctrl) is linear in the
+       * state; below zero the edge contributes nothing at all, which makes
+       * the treatment PIECEWISE exact.  An edge whose difference crosses zero
+       * inside a step is integrated as though it stayed on the side it
+       * started — the same seam `threshold` has, bounded by dt. */
+      if (e->control_idx != -1 &&
+          state[e->origin_idx] > state[e->control_idx]) {
+        conductance = k;
+        A[e->target_idx * (int)n + e->origin_idx]  += conductance;
+        A[e->origin_idx * (int)n + e->origin_idx]  -= conductance;
+        A[e->target_idx * (int)n + e->control_idx] -= conductance;
+        A[e->origin_idx * (int)n + e->control_idx] += conductance;
+      }
+      break;
     default:
       break; /* threshold: handled as constant forcing in build_forcing_vector */
     }
@@ -1591,8 +1815,8 @@ static void build_flow_matrix(GSSK_Instance *inst, double t, const double *state
 
   /* Zero rows for source/constant/processing nodes */
   for (size_t i = 0; i < n; i++) {
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT ||
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT ||
         is_processing_node(inst->nodes[i].type)) {
       for (size_t j = 0; j < n; j++)
         A[i * n + j] = 0.0;
@@ -1633,8 +1857,8 @@ static void build_forcing_vector(GSSK_Instance *inst, double t, const double *st
   }
 
   for (size_t i = 0; i < n; i++) {
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT ||
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT ||
         is_processing_node(inst->nodes[i].type))
       f[i] = 0.0;
   }
@@ -1836,8 +2060,8 @@ static bool network_is_isolated_duet(GSSK_Instance *inst, size_t *out_edge,
   GSSK_EdgeInternal *e = &inst->edges[di];
   if (e->logic != GSSK_LOGIC_INTERACTION) return false;
   if (e->target_idx != e->control_idx)   return false;
-  if (inst->nodes[e->origin_idx].type != NODE_STORAGE) return false;
-  if (inst->nodes[e->target_idx].type  != NODE_STORAGE) return false;
+  if (inst->nodes[e->origin_idx].type != GSSK_NODE_STORAGE) return false;
+  if (inst->nodes[e->target_idx].type  != GSSK_NODE_STORAGE) return false;
   if (out_edge) *out_edge = di;
   if (out_A)    *out_A    = e->origin_idx;
   if (out_B)    *out_B    = e->target_idx;
@@ -1917,18 +2141,18 @@ static void idc_step_ex(GSSK_Instance *inst, double t, const double *Q_in,
       const double *Q_f = apply_node_forcing(inst, t, Q_in);
       for (size_t i = 0; i < inst->node_count; i++) {
         switch (inst->nodes[i].type) {
-        case NODE_INTERACTION:  compute_interaction_node(inst, t, i, Q_f, pf); break;
-        case NODE_GAIN:         compute_gain_node(inst, t, i, Q_f, pf); break;
-        case NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, Q_f, pf); break;
-        case NODE_SWITCH:       compute_switch_node(inst, t, i, Q_f, pf); break;
-        case NODE_EXCHANGE:     compute_exchange_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_INTERACTION:  compute_interaction_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_GAIN:         compute_gain_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_LOOP_LIMITED: compute_loop_limited_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_SWITCH:       compute_switch_node(inst, t, i, Q_f, pf); break;
+        case GSSK_NODE_EXCHANGE:     compute_exchange_node(inst, t, i, Q_f, pf); break;
         default: break;
         }
       }
       /* Don't accumulate into source/constant/processing rows */
       for (size_t i = 0; i < n; i++) {
-        if (inst->nodes[i].type == NODE_SOURCE ||
-            inst->nodes[i].type == NODE_CONSTANT ||
+        if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+            inst->nodes[i].type == GSSK_NODE_CONSTANT ||
             is_processing_node(inst->nodes[i].type))
           pf[i] = 0.0;
         f[i] += pf[i];
@@ -1954,13 +2178,14 @@ static double compute_edge_flow(const GSSK_EdgeInternal *e,
   case GSSK_LOGIC_CONSTANT:    return e->k;
   case GSSK_LOGIC_LINEAR:      return e->k * Q;
   case GSSK_LOGIC_INTERACTION:
-    if (e->control_idx != -1) return e->k * Q * state[e->control_idx];
+    if (e->control_idx != -1)
+      return e->k * Q * interaction_control_product(e, state);
     return 0.0;
   case GSSK_LOGIC_LIMIT: {
     double C = -1.0;
     if (e->control_idx != -1) C = state[e->control_idx];
     else if (e->threshold > 0.0) C = e->threshold;
-    if (C > 1e-9) return (e->k * Q) / (1.0 + Q / C);
+    if (C > GSSK_LIMIT_C_EPSILON) return (e->k * Q) / (1.0 + Q / C);
     return 0.0;
   }
   case GSSK_LOGIC_THRESHOLD:
@@ -1969,6 +2194,13 @@ static double compute_edge_flow(const GSSK_EdgeInternal *e,
     if (e->control_idx != -1)
       return e->k * ratio_numer(e, state) /
              ratio_denom(state[e->control_idx], e->threshold);
+    return 0.0;
+  case GSSK_LOGIC_REVERSIBLE:
+    /* Signed: a negative return means the pathway is running backwards along
+     * its declared direction, which for a barb-less line is not an error. */
+    return e->k * (Q - state[e->target_idx]);
+  case GSSK_LOGIC_SUBTRACT:
+    if (e->control_idx != -1) return subtract_flow(e, state, e->k);
     return 0.0;
   }
   return 0.0;
@@ -2358,7 +2590,7 @@ static double closed_system_conservation_error(GSSK_Instance *inst,
                                                 const double *Q_before,
                                                 const double *Q_after) {
   for (size_t i = 0; i < inst->node_count; i++) {
-    if (inst->nodes[i].active && inst->nodes[i].type != NODE_STORAGE)
+    if (inst->nodes[i].active && inst->nodes[i].type != GSSK_NODE_STORAGE)
       return 0.0; /* open system — skip */
   }
   double sum_b = 0.0, sum_a = 0.0;
@@ -2384,7 +2616,7 @@ static void update_carrier_conservation_errors(GSSK_Instance *inst,
     }
     double sum_b = 0.0, sum_a = 0.0;
     for (size_t ni = 0; ni < inst->node_count; ni++) {
-      if (!inst->nodes[ni].active || inst->nodes[ni].type != NODE_STORAGE) continue;
+      if (!inst->nodes[ni].active || inst->nodes[ni].type != GSSK_NODE_STORAGE) continue;
       if (strcmp(inst->nodes[ni].carrier, inst->carriers[ci].id) != 0) continue;
       sum_b += Q_before[ni];
       sum_a += Q_after[ni];
@@ -2524,6 +2756,106 @@ static GSSK_Status adaptive_step_ex(GSSK_Instance *inst,
  * Called after every GSSK_Step() if quality_enabled.
  * ========================================================================= */
 
+/**
+ * Flow rate (Odum J) on ONE edge at a given state, for a given k.
+ *
+ * The switch used to be written out twice — once in compute_quality_pass and
+ * once, in a slightly different dialect, in compute_derivatives. GIP-0001 G4
+ * needs it a third time for the public flow accessors, and three copies of a
+ * dispatch table is two too many, so it lives here.
+ *
+ * `k` is a parameter rather than being read off `e` because the two callers
+ * genuinely disagree about which k they mean, and the disagreement is load
+ * bearing rather than accidental:
+ *
+ *   update_flow_cache passes forced_edge_k(inst, e, t) — the edge's rate at
+ *   THIS instant, which is what the derivative integrated and therefore what
+ *   a consumer annotating a pathway must be shown.
+ *
+ *   compute_quality_pass passes e->k, the declared rate, which is what it has
+ *   always used. That is very probably a defect of the same class the Phase H
+ *   comment in build_flow_matrix warns about — a forced edge makes emergy
+ *   accounting disagree with the trajectory it is accounting for — but it is
+ *   a change to published emergy numbers and does not belong in a task about
+ *   adding an accessor. Tracked as quality-pass-ignores-edge-forcing.
+ *
+ * Returns the signed rate. Callers that need Odum's non-negative convention
+ * clamp on read; the public accessor does not, because the sign of a flow is
+ * information a diagram consumer wants rather than noise.
+ */
+static double edge_flow_rate(const GSSK_EdgeInternal *e, const double *state,
+                             double k) {
+  double Q = state[e->origin_idx];
+  double f = 0.0;
+
+  switch (e->logic) {
+  case GSSK_LOGIC_CONSTANT:
+    f = k;
+    break;
+  case GSSK_LOGIC_LINEAR:
+    f = k * Q;
+    break;
+  case GSSK_LOGIC_INTERACTION:
+    if (e->control_idx != -1)
+      f = k * Q * interaction_control_product(e, state);
+    break;
+  case GSSK_LOGIC_LIMIT: {
+    double C = -1.0;
+    if (e->control_idx != -1) C = state[e->control_idx];
+    else if (e->threshold > 0.0) C = e->threshold;
+    if (C > GSSK_LIMIT_C_EPSILON) f = (k * Q) / (1.0 + (Q / C));
+    break;
+  }
+  case GSSK_LOGIC_THRESHOLD:
+    f = (Q > e->threshold) ? k : 0.0;
+    break;
+  case GSSK_LOGIC_RATIO:
+    if (e->control_idx != -1)
+      f = k * ratio_numer(e, state) /
+          ratio_denom(state[e->control_idx], e->threshold);
+    break;
+  case GSSK_LOGIC_REVERSIBLE:
+    /* ADR 0007 — Odum's barb-less pathway, the only logic that reads the
+     * target.  Signed: a negative rate means the pathway is running backwards
+     * along its declared direction, which for a barb-less line is not an
+     * error.  Callers wanting Odum's non-negative convention clamp on read. */
+    f = k * (Q - state[e->target_idx]);
+    break;
+  case GSSK_LOGIC_SUBTRACT:
+    /* ADR 0008 — already non-negative, so the clamp callers apply for Odum's
+     * convention never has anything to do on this logic. */
+    if (e->control_idx != -1)
+      f = subtract_flow(e, state, k);
+    break;
+  }
+  return f;
+}
+
+/**
+ * GIP-0001 G4 — refresh the per-edge flow cache.
+ *
+ * Flow was step-local: computed inside compute_derivatives, used to build
+ * deriv[], and discarded. A consumer could read every node quantity and not
+ * one rate, which makes a diagram whose entire subject is flow impossible to
+ * annotate. This writes the rates down once per step so they survive the call.
+ *
+ * Called on EVERY step, not only when quality accounting is on — the whole
+ * point is that a model with no quality_input anywhere still reports flows.
+ *
+ * An inactive edge reports 0.0 rather than its would-be rate: nothing is
+ * moving along it, and reporting the counterfactual would put a number on a
+ * pathway a diagram should be drawing as dead.
+ */
+static void update_flow_cache(GSSK_Instance *inst, double t,
+                              const double *state) {
+  if (!inst->edge_flow) return;
+  for (size_t i = 0; i < inst->edge_count; i++) {
+    GSSK_EdgeInternal *e = &inst->edges[i];
+    if (!e->active) { inst->edge_flow[i] = 0.0; continue; }
+    inst->edge_flow[i] = edge_flow_rate(e, state, forced_edge_k(inst, e, t));
+  }
+}
+
 static void compute_quality_pass(GSSK_Instance *inst, double t, const double *state) {
   /* Node forcing reaches this helper through the `state` it is handed, which
    * the caller has already substituted, and a processing node's rate is
@@ -2548,33 +2880,14 @@ static void compute_quality_pass(GSSK_Instance *inst, double t, const double *st
   for (size_t i = 0; i < inst->edge_count; i++) {
     GSSK_EdgeInternal *e = &inst->edges[i];
     if (!e->active) continue;
-    double Q = state[e->origin_idx];
-    double f = 0.0;
-    switch (e->logic) {
-    case GSSK_LOGIC_CONSTANT:    f = e->k; break;
-    case GSSK_LOGIC_LINEAR:      f = e->k * Q; break;
-    case GSSK_LOGIC_INTERACTION:
-      if (e->control_idx != -1) {
-        f = e->k * Q * state[e->control_idx];
-      }
-      break;
-    case GSSK_LOGIC_LIMIT: {
-      double C = -1.0;
-      if (e->control_idx != -1) C = state[e->control_idx];
-      else if (e->threshold > 0.0) C = e->threshold;
-      if (C > 1e-9) f = (e->k * Q) / (1.0 + Q / C);
-      break;
-    }
-    case GSSK_LOGIC_THRESHOLD:
-      f = (Q > e->threshold) ? e->k : 0.0;
-      break;
-    case GSSK_LOGIC_RATIO:
-      if (e->control_idx != -1)
-        f = e->k * ratio_numer(e, state) /
-            ratio_denom(state[e->control_idx], e->threshold);
-      break;
-    }
-    flow[i] = (f > 0.0) ? f : 0.0;
+    /* e->k, not forced_edge_k: preserving the behaviour this pass has always
+     * had. See the note on edge_flow_rate. */
+    double f = edge_flow_rate(e, state, e->k);
+    /* ADR 0007 — the clamp below is load-bearing now, not incidental: a
+     * reversible pathway running BACKWARDS carries no transformity into the
+     * node it arrives at, because a flow running back up a gradient is not
+     * producing that node.  Its contribution switches off while it reverses
+     * and resumes when the gradient does. */    flow[i] = (f > 0.0) ? f : 0.0;
     outsum[e->origin_idx] += flow[i];
   }
 
@@ -2582,8 +2895,8 @@ static void compute_quality_pass(GSSK_Instance *inst, double t, const double *st
   /* (−Aᵀ)·Tr = b → diagonal = 1, off-diag = −flow_frac, b = quality_input */
   for (size_t i = 0; i < n; i++) {
     M[i * n + i] = 1.0; /* diagonal */
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT) {
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT) {
       b[i] = inst->nodes[i].quality_input;
     }
   }
@@ -2704,6 +3017,12 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
      * implicit/stiff and forward-sensitivity paths, never in plain RK4. */
     int dvar = orig;
 
+    /* Second state variable the flow depends on.  Until ADR 0007 that was
+     * always the control node, so the variable was named for it; `reversible`
+     * depends on its TARGET instead, which is not a control and must not be
+     * resolved as one. */
+    int dvar2 = ctrl;
+
     switch (e->logic) {
     case GSSK_LOGIC_CONSTANT:
       break;
@@ -2712,15 +3031,18 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     case GSSK_LOGIC_INTERACTION:
       if (ctrl >= 0) {
-        dF_dQ_orig = e->k * state[ctrl];
-        dF_dQ_ctrl = e->k * Q;
+        /* ADR 0008 — with no extra controls the product is state[ctrl] and
+         * the "except" product is 1.0, so these are the two expressions the
+         * binary work gate has always used. */
+        dF_dQ_orig = e->k * interaction_control_product(e, state);
+        dF_dQ_ctrl = e->k * Q * interaction_control_product_except(e, state, -1);
       }
       break;
     case GSSK_LOGIC_LIMIT: {
       double C = -1.0;
       if (ctrl >= 0) C = state[ctrl];
       else if (e->threshold > 0.0) C = e->threshold;
-      if (C > 1e-9) {
+      if (C > GSSK_LIMIT_C_EPSILON) {
         double d = C + Q;
         dF_dQ_orig = e->k * C * C / (d * d);
         if (ctrl >= 0)
@@ -2741,13 +3063,45 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     case GSSK_LOGIC_THRESHOLD:
       break; /* step function → 0 derivative almost everywhere */
+    case GSSK_LOGIC_REVERSIBLE:
+      /* F = k(Q_orig - Q_tgt):  ∂F/∂Q_orig = k,  ∂F/∂Q_tgt = -k. */
+      dF_dQ_orig = e->k;
+      dvar2      = tgt;
+      dF_dQ_ctrl = -e->k;
+      break;
+    case GSSK_LOGIC_SUBTRACT:
+      /* ADR 0008 — F = max(0, k(Q_orig - Q_ctrl)).  Above the clamp the two
+       * partials are k and -k; on or below it the flow is identically zero in
+       * a neighbourhood, so both are zero.  The clamp itself is a kink, not a
+       * jump, so the derivative is defined everywhere except the seam. */
+      if (ctrl >= 0 && Q > state[ctrl]) {
+        dF_dQ_orig =  e->k;
+        dF_dQ_ctrl = -e->k;
+      }
+      break;
     }
 
     J[(size_t)orig * n + (size_t)dvar] -= dF_dQ_orig;
     J[(size_t)tgt  * n + (size_t)dvar] += dF_dQ_orig;
-    if (ctrl >= 0 && (dF_dQ_ctrl != 0.0)) {
-      J[(size_t)orig * n + (size_t)ctrl] -= dF_dQ_ctrl;
-      J[(size_t)tgt  * n + (size_t)ctrl] += dF_dQ_ctrl;
+    if (dvar2 >= 0 && (dF_dQ_ctrl != 0.0)) {
+      J[(size_t)orig * n + (size_t)dvar2] -= dF_dQ_ctrl;
+      J[(size_t)tgt  * n + (size_t)dvar2] += dF_dQ_ctrl;
+    }
+
+    /* ADR 0008 — controls 2..n of an n-ary interaction.  Control 1 rides the
+     * dvar2 slot above; each further control owns a column of its own, which
+     * the two-variable dvar/dvar2 scheme has no room for.  Omitting these
+     * leaves a Jacobian that is right for the two-input gate and silently
+     * wrong for the three-input one, visible only in the implicit/stiff and
+     * forward-sensitivity paths. */
+    if (e->logic == GSSK_LOGIC_INTERACTION && ctrl >= 0) {
+      for (int c = 0; c < e->extra_control_count; c++) {
+        int cj = e->extra_control_idx[c];
+        double dF = e->k * Q * interaction_control_product_except(e, state, c);
+        if (dF == 0.0) continue;
+        J[(size_t)orig * n + (size_t)cj] -= dF;
+        J[(size_t)tgt  * n + (size_t)cj] += dF;
+      }
     }
   }
 
@@ -2767,7 +3121,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
 
     switch (inst->nodes[ni].type) {
 
-    case NODE_INTERACTION: {
+    case GSSK_NODE_INTERACTION: {
       /* F = node_k × ∏ Q_j over all inputs; energy_orig = first input */
       int in_orig[GSSK_MAX_ARCH_NODES]; size_t in_n = 0;
       int energy_orig = -1;
@@ -2794,7 +3148,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     }
 
-    case NODE_GAIN: {
+    case GSSK_NODE_GAIN: {
       /* F = node_k × Q_control; optionally draws from energy source */
       int ctrl = -1, esrc = -1; size_t seen = 0;
       for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -2806,7 +3160,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       }
       if (ctrl < 0) break;
       double dF = inst->nodes[ni].node_k;
-      if (esrc >= 0 && inst->nodes[esrc].type == NODE_STORAGE)
+      if (esrc >= 0 && inst->nodes[esrc].type == GSSK_NODE_STORAGE)
         J[(size_t)esrc * n + (size_t)ctrl] -= dF;
       for (size_t ei = 0; ei < inst->edge_count; ei++) {
         GSSK_EdgeInternal *e = &inst->edges[ei];
@@ -2816,7 +3170,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     }
 
-    case NODE_LOOP_LIMITED: {
+    case GSSK_NODE_LOOP_LIMITED: {
       /* F = node_k × Q_in × C / (C + Q_in) */
       int in_orig = -1;
       for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -2838,7 +3192,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     }
 
-    case NODE_SWITCH: {
+    case GSSK_NODE_SWITCH: {
       /* F = node_k × Q_flow when Q_sensor > threshold */
       int flow_o = -1, sens_o = -1; size_t seen = 0;
       for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -2861,7 +3215,7 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
       break;
     }
 
-    case NODE_EXCHANGE: {
+    case GSSK_NODE_EXCHANGE: {
       /* F_goods = node_k × Q_goods_in (× Q_money_in if present).
        * Legs and price come from the shared primitive (ADR 0001) so this
        * Jacobian cannot disagree with compute_exchange_node about which edges
@@ -2895,8 +3249,8 @@ static void build_jacobian(GSSK_Instance *inst, double t, const double *state, d
   }
 
   for (size_t i = 0; i < n; i++) {
-    if (inst->nodes[i].type == NODE_SOURCE ||
-        inst->nodes[i].type == NODE_CONSTANT)
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE ||
+        inst->nodes[i].type == GSSK_NODE_CONSTANT)
       for (size_t j = 0; j < n; j++) J[i * n + j] = 0.0;
   }
 }
@@ -2929,13 +3283,13 @@ static void compute_param_deriv(GSSK_Instance *inst, double t, const double *sta
   case GSSK_LOGIC_CONSTANT:    dF_dk = 1.0; break;
   case GSSK_LOGIC_LINEAR:      dF_dk = Q;   break;
   case GSSK_LOGIC_INTERACTION:
-    if (ctrl >= 0) dF_dk = Q * state[ctrl];
+    if (ctrl >= 0) dF_dk = Q * interaction_control_product(e, state);
     break;
   case GSSK_LOGIC_LIMIT: {
     double C = -1.0;
     if (ctrl >= 0) C = state[ctrl];
     else if (e->threshold > 0.0) C = e->threshold;
-    if (C > 1e-9) dF_dk = Q * C / (C + Q);
+    if (C > GSSK_LIMIT_C_EPSILON) dF_dk = Q * C / (C + Q);
     break;
   }
   case GSSK_LOGIC_THRESHOLD:
@@ -2944,6 +3298,15 @@ static void compute_param_deriv(GSSK_Instance *inst, double t, const double *sta
   case GSSK_LOGIC_RATIO:
     if (ctrl >= 0)
       dF_dk = ratio_numer(e, state) / ratio_denom(state[ctrl], e->threshold);
+    break;
+  case GSSK_LOGIC_REVERSIBLE:
+    /* ∂F/∂k = Q_orig - Q_tgt, and it is signed like the flow itself. */
+    dF_dk = Q - state[tgt];
+    break;
+  case GSSK_LOGIC_SUBTRACT:
+    /* ADR 0008 — the flow is k times the clamped difference, so ∂F/∂k is that
+     * difference, and it is zero wherever the clamp is holding. */
+    if (ctrl >= 0) dF_dk = subtract_flow(e, state, 1.0);
     break;
   }
 
@@ -3025,13 +3388,14 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
     case GSSK_LOGIC_CONSTANT:    f = e->k; break;
     case GSSK_LOGIC_LINEAR:      f = e->k * Q; break;
     case GSSK_LOGIC_INTERACTION:
-      if (e->control_idx != -1) f = e->k * Q * inst->state[e->control_idx];
+      if (e->control_idx != -1)
+        f = e->k * Q * interaction_control_product(e, inst->state);
       break;
     case GSSK_LOGIC_LIMIT: {
       double C = -1.0;
       if (e->control_idx != -1) C = inst->state[e->control_idx];
       else if (e->threshold > 0.0) C = e->threshold;
-      if (C > 1e-9) f = (e->k * Q) / (1.0 + Q / C);
+      if (C > GSSK_LIMIT_C_EPSILON) f = (e->k * Q) / (1.0 + Q / C);
       break;
     }
     case GSSK_LOGIC_THRESHOLD:
@@ -3042,7 +3406,14 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
         f = e->k * ratio_numer(e, inst->state) /
             ratio_denom(inst->state[e->control_idx], e->threshold);
       break;
+    case GSSK_LOGIC_REVERSIBLE:
+      f = e->k * (Q - inst->state[e->target_idx]);
+      break;
+    case GSSK_LOGIC_SUBTRACT:
+      if (e->control_idx != -1) f = subtract_flow(e, inst->state, e->k);
+      break;
     }
+    /* Same clamp, same reason as compute_quality_pass (ADR 0007). */
     flow[ei] = f > 0.0 ? f : 0.0;
     outsum[e->origin_idx] += flow[ei];
   }
@@ -3057,7 +3428,7 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
 
   for (size_t i = 0; i < n; i++) {
     M[i * n + i] = 1.0;
-    if (inst->nodes[i].type == NODE_SOURCE || inst->nodes[i].type == NODE_CONSTANT)
+    if (inst->nodes[i].type == GSSK_NODE_SOURCE || inst->nodes[i].type == GSSK_NODE_CONSTANT)
       b[i] = inst->nodes[i].quality_input;
   }
   for (size_t ei = 0; ei < inst->edge_count; ei++) {
@@ -3081,13 +3452,14 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
   case GSSK_LOGIC_CONSTANT:    dflow_dk = 1.0; break;
   case GSSK_LOGIC_LINEAR:      dflow_dk = Q;   break;
   case GSSK_LOGIC_INTERACTION:
-    if (ej->control_idx >= 0) dflow_dk = Q * inst->state[ej->control_idx];
+    if (ej->control_idx >= 0)
+      dflow_dk = Q * interaction_control_product(ej, inst->state);
     break;
   case GSSK_LOGIC_LIMIT: {
     double C = -1.0;
     if (ej->control_idx >= 0) C = inst->state[ej->control_idx];
     else if (ej->threshold > 0.0) C = ej->threshold;
-    if (C > 1e-9) dflow_dk = Q * C / (C + Q);
+    if (C > GSSK_LIMIT_C_EPSILON) dflow_dk = Q * C / (C + Q);
     break;
   }
   case GSSK_LOGIC_THRESHOLD:
@@ -3097,6 +3469,12 @@ static void compute_quality_sensitivity(GSSK_Instance *inst, double t, size_t ed
     if (ej->control_idx >= 0)
       dflow_dk = ratio_numer(ej, inst->state) /
                  ratio_denom(inst->state[ej->control_idx], ej->threshold);
+    break;
+  case GSSK_LOGIC_REVERSIBLE:
+    dflow_dk = Q - inst->state[ej_tgt];
+    break;
+  case GSSK_LOGIC_SUBTRACT:
+    if (ej->control_idx >= 0) dflow_dk = subtract_flow(ej, inst->state, 1.0);
     break;
   }
 
@@ -3318,10 +3696,13 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
           cJSON *pC  = cJSON_GetObjectItem(npp, "C");
           cJSON *pth = cJSON_GetObjectItem(npp, "threshold");
           cJSON *ppr = cJSON_GetObjectItem(npp, "price");
+          cJSON *ppn = cJSON_GetObjectItem(npp, "price_node");
           if (cJSON_IsNumber(pk))  nt->node_k         = pk->valuedouble;
           if (cJSON_IsNumber(pC))  nt->node_C         = pC->valuedouble;
           if (cJSON_IsNumber(pth)) nt->node_threshold = pth->valuedouble;
           if (cJSON_IsNumber(ppr)) nt->node_price     = ppr->valuedouble;
+          if (cJSON_IsString(ppn))
+            safe_str_copy(nt->price_node, ppn->valuestring, sizeof(nt->price_node));
         }
       }
     }
@@ -3652,9 +4033,39 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         N->node_C         = t->node_C;
         N->node_threshold = t->node_threshold;
         N->node_price     = t->node_price;
-        /* memset above zeroed this, and 0 is a valid node index — an archetype
-         * has no price_node, so it must mean "use the constant". */
+        /* memset above zeroed this, and 0 is a valid node index, so -1 first:
+         * absent price_node means "use the constant". */
         N->price_idx      = -1;
+        /* A template's price_node names a sibling member by its template-local
+         * id.  The instance's members occupy node_slot..node_slot+node_count-1
+         * in template order, so the sibling's slot is known here without a
+         * string lookup — and this is the only place it is knowable, since the
+         * second pass below sees only the top-level instance entry, whose
+         * params carry no price_node (GIP-0002).
+         *
+         * A name matching no member is rejected rather than left at -1.  The
+         * fallback is what made the defect invisible: a model that loads, runs
+         * and reports success while every diamond trades at the template's
+         * constant.  Top-level price_node keeps its fallback — a model may
+         * depend on that — but nothing can depend on this case, which until
+         * now was dropped at parse time. */
+        if (t->price_node[0]) {
+          int price_slot = -1;
+          for (size_t m = 0; m < def->node_count; m++) {
+            if (strcmp(def->nodes[m].id, t->price_node) == 0) {
+              price_slot = (int)(node_slot + m);
+              break;
+            }
+          }
+          if (price_slot < 0) {
+            snprintf(inst->error_msg, sizeof(inst->error_msg),
+                     "Phase 8: archetype '%s' member '%s' has price_node '%s', "
+                     "which names no member of the archetype (instance '%s').",
+                     def->name, t->id, t->price_node, id->valuestring);
+            status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+          }
+          N->price_idx = price_slot;
+        }
         /* Built-in param overrides (producer.gate, etc.) */
         if (cJSON_IsObject(nparams)) {
           if (strcmp(def->name, "producer") == 0 && strcmp(t->id, "gate") == 0) {
@@ -3678,11 +4089,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
       continue;
     }
 
-    /* ---- system_frame: structural-only — record as NODE_CONSTANT ---- */
+    /* ---- system_frame: structural-only — record as GSSK_NODE_CONSTANT ---- */
     if (def && def->is_structural) {
       safe_str_copy(inst->nodes[node_slot].id, id->valuestring, sizeof(inst->nodes[node_slot].id));
       inst->nodes[node_slot].id[63] = '\0';
-      inst->nodes[node_slot].type = NODE_CONSTANT;
+      inst->nodes[node_slot].type = GSSK_NODE_CONSTANT;
       inst->nodes[node_slot].initial_value = val->valuedouble;
       inst->nodes[node_slot].active = node_active;
       inst->state[node_slot] = val->valuedouble;
@@ -3730,7 +4141,7 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         /* A storage node's value is the INTEGRAL of its flows. Forcing it is a
          * contradiction, and quietly ignoring the block is the failure mode
          * h8b exists to remove — so it is an error, named as one. */
-        if (inst->nodes[node_slot].type == NODE_STORAGE) {
+        if (inst->nodes[node_slot].type == GSSK_NODE_STORAGE) {
           snprintf(inst->error_msg, sizeof(inst->error_msg),
                    "Schema Error: Node '%s' is a storage node and cannot be forced. "
                    "A storage node's value is the integral of its flows; force the "
@@ -3876,15 +4287,21 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
       }
 
-      cJSON *ctrl = cJSON_IsObject(params)
-                     ? cJSON_GetObjectItem(params, "control_node") : NULL;
-      inst->edges[i].control_idx = cJSON_IsString(ctrl)
-          ? find_node_idx(inst, ctrl->valuestring) : -1;
-      if (cJSON_IsString(ctrl) && inst->edges[i].control_idx == -1) {
-        snprintf(inst->error_msg, sizeof(inst->error_msg),
-                 "Linkage Error: Edge %d unknown control_node '%s'.",
-                 i, ctrl->valuestring);
-        status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+      /* ADR 0008 — control_node (one) or control_nodes (n-ary), never both.
+       * The interaction/subtract required-control checks live in here too, so
+       * both entry points enforce one rule rather than two copies of it. */
+      {
+        char where[32];
+        snprintf(where, sizeof(where), "Edge %d", i);
+        if (!resolve_control_nodes(inst, params, inst->edges[i].logic,
+                                   touches_proc, where,
+                                   &inst->edges[i].control_idx,
+                                   inst->edges[i].extra_control_idx,
+                                   &inst->edges[i].extra_control_count,
+                                   inst->error_msg,
+                                   sizeof(inst->error_msg))) {
+          status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+        }
       }
 
       cJSON *numer = cJSON_IsObject(params)
@@ -3911,16 +4328,11 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
                     ? cJSON_GetObjectItem(params, "threshold") : NULL;
       inst->edges[i].threshold = cJSON_IsNumber(thr) ? thr->valuedouble : 0.0;
 
-      /* INTERACTION requires control_node; LIMIT accepts control_node or
-       * threshold > 0.  These checks only apply to v3 edges (non-processing). */
+      /* LIMIT accepts control_node or threshold > 0.  INTERACTION's and
+       * SUBTRACT's required-control checks ran inside resolve_control_nodes
+       * above; this one stays here because it reads `threshold`, which is
+       * parsed after the controls.  Applies to v3 edges only (non-processing). */
       if (!touches_proc) {
-        if (inst->edges[i].logic == GSSK_LOGIC_INTERACTION &&
-            inst->edges[i].control_idx == -1) {
-          snprintf(inst->error_msg, sizeof(inst->error_msg),
-                   "Logic Error: Edge %d (%s) requires control_node.",
-                   i, logic_str ? logic_str->valuestring : "interaction");
-          status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
-        }
         if (inst->edges[i].logic == GSSK_LOGIC_LIMIT &&
             inst->edges[i].control_idx == -1 &&
             inst->edges[i].threshold <= 0.0) {
@@ -4160,6 +4572,13 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
                              sizeof(double));
   if (!inst->edge_error) { status = GSSK_ERR_MALLOC_FAILED; goto cleanup; }
 
+  /* GIP-0001 G4 — per-edge flow cache. Unconditional, like edge_error and
+   * unlike edge_qflow: flows are readable from any model, not only one that
+   * does quality accounting. */
+  inst->edge_flow = calloc(inst->edge_count ? inst->edge_count : 1,
+                           sizeof(double));
+  if (!inst->edge_flow) { status = GSSK_ERR_MALLOC_FAILED; goto cleanup; }
+
   /* Phase H — seed the state with the forced values at t_start, so the very
    * first row a consumer reads already shows the waveform rather than the
    * declared placeholder. */
@@ -4385,6 +4804,12 @@ post_step:
   /* ---- Phase 5: per-carrier conservation errors (Q_before saved in idc_state) ---- */
   if (inst->carrier_count > 0 && inst->config.method != GSSK_METHOD_ADAPTIVE)
     update_carrier_conservation_errors(inst, inst->idc_state, inst->state);
+
+  /* ---- GIP-0001 G4: per-edge flow cache ----
+   * Before the quality pass and outside its `if`, so a model with no quality
+   * accounting still reports flows, and so both read the same post-step
+   * state at the same time. */
+  update_flow_cache(inst, inst->current_t + dt, inst->state);
 
   /* ---- Quality accounting pass ---- */
   if (inst->quality_enabled)
@@ -4885,7 +5310,7 @@ GSSK_Status GSSK_AddNode(GSSK_Instance *inst, const char *json_node_fragment) {
       return GSSK_ERR_SCHEMA_VIOLATION;
     }
     if (add_forcing.kind != GSSK_FORCING_NONE) {
-      if (parse_node_type(type->valuestring) == NODE_STORAGE) {
+      if (parse_node_type(type->valuestring) == GSSK_NODE_STORAGE) {
         snprintf(inst->error_msg, sizeof(inst->error_msg),
                  "Schema Error: Node '%s' is a storage node and cannot be forced. "
                  "A storage node's value is the integral of its flows; force the "
@@ -5021,6 +5446,25 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
     }
   }
 
+  /* ADR 0008 — control_node / control_nodes, resolved into locals here with
+   * the other model-content checks so a rejected add leaves the instance
+   * exactly as it was.  Same helper GSSK_Init uses, so the two entry points
+   * cannot drift on what an edge's controls may be. */
+  int add_ctrl = -1;
+  int add_extra[GSSK_MAX_CONTROL_NODES - 1];
+  int add_extra_count = 0;
+  {
+    bool add_touches_proc = is_processing_node(inst->nodes[orig_idx].type) ||
+                            is_processing_node(inst->nodes[tgt_idx].type);
+    if (!resolve_control_nodes(inst, params, (GSSK_LogicType)lt,
+                               add_touches_proc, "GSSK_AddEdge",
+                               &add_ctrl, add_extra, &add_extra_count,
+                               inst->error_msg, sizeof(inst->error_msg))) {
+      cJSON_Delete(edge);
+      return GSSK_ERR_SCHEMA_VIOLATION;
+    }
+  }
+
   /* Grow edge arrays */
   size_t new_ec = inst->edge_count + 1;
   GSSK_EdgeInternal *new_edges = realloc(inst->edges,
@@ -5041,6 +5485,13 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
   inst->edge_error = new_err;
   inst->edge_error[new_ec - 1] = 0.0;
 
+  /* Grow per-edge flow cache. The new edge reads 0.0 until the next step,
+   * which is honest: no flow has been computed along it yet. */
+  double *new_flow = realloc(inst->edge_flow, new_ec * sizeof(double));
+  if (!new_flow) { cJSON_Delete(edge); return GSSK_ERR_MALLOC_FAILED; }
+  inst->edge_flow = new_flow;
+  inst->edge_flow[new_ec - 1] = 0.0;
+
   size_t ei = inst->edge_count;
   memset(&inst->edges[ei], 0, sizeof(GSSK_EdgeInternal));
 
@@ -5056,12 +5507,11 @@ GSSK_Status GSSK_AddEdge(GSSK_Instance *inst, const char *json_edge_fragment) {
   inst->edges[ei].k           = k->valuedouble;
   inst->edges[ei].active      = json_active(edge);
   inst->edges[ei].coupled_idx = -1;
-  inst->edges[ei].control_idx = -1;
+  inst->edges[ei].control_idx = add_ctrl;
+  inst->edges[ei].extra_control_count = add_extra_count;
+  for (int c = 0; c < add_extra_count; c++)
+    inst->edges[ei].extra_control_idx[c] = add_extra[c];
   inst->edges[ei].numerator_idx = numer_idx;
-
-  cJSON *ctrl = cJSON_GetObjectItem(params, "control_node");
-  if (cJSON_IsString(ctrl))
-    inst->edges[ei].control_idx = find_node_idx(inst, ctrl->valuestring);
 
   cJSON *thr = cJSON_GetObjectItem(params, "threshold");
   inst->edges[ei].threshold = cJSON_IsNumber(thr) ? thr->valuedouble : 0.0;
@@ -5150,6 +5600,8 @@ void GSSK_Reset(GSSK_Instance *inst) {
     memset(inst->quality_flow, 0, inst->node_count * sizeof(double));
   if (inst->edge_error)
     memset(inst->edge_error, 0, inst->edge_count * sizeof(double));
+  if (inst->edge_flow)
+    memset(inst->edge_flow, 0, inst->edge_count * sizeof(double));
   inst->step_error         = 0.0;
   inst->event_count        = 0; /* retain capacity, just reset count */
   inst->confidence         = GSSK_CONFIDENCE_HIGH;
@@ -5170,6 +5622,14 @@ const char *GSSK_GetErrorDescription(GSSK_Instance *inst) {
 
 const double *GSSK_GetState(GSSK_Instance *inst) {
   return inst ? inst->state : NULL;
+}
+
+const double *GSSK_GetFlows(GSSK_Instance *inst) {
+  return inst ? inst->edge_flow : NULL;
+}
+
+size_t GSSK_GetFlowCount(GSSK_Instance *inst) {
+  return inst ? inst->edge_count : 0;
 }
 
 size_t GSSK_GetStateSize(GSSK_Instance *inst) {
@@ -5202,6 +5662,14 @@ const char *GSSK_GetNodeID(GSSK_Instance *inst, size_t index) {
 const char *GSSK_GetNodeTypeString(GSSK_Instance *inst, size_t node_idx) {
   if (!inst || node_idx >= inst->node_count) return "storage";
   return node_type_str(inst->nodes[node_idx].type);
+}
+
+GSSK_NodeType GSSK_GetNodeType(GSSK_Instance *inst, size_t node_idx) {
+  /* Unlike GSSK_GetNodeTypeString above, this CAN report the error, so it
+   * does: GIP-0001 G7 asks for GSSK_GetNodeID's out-of-bounds contract, not
+   * the string function's silently-plausible "storage". */
+  if (!inst || node_idx >= inst->node_count) return GSSK_NODE_INVALID;
+  return inst->nodes[node_idx].type;
 }
 
 int GSSK_FindNodeIdx(GSSK_Instance *inst, const char *id) {
@@ -5339,6 +5807,8 @@ GSSK_Status GSSK_StepAdaptive(GSSK_Instance *inst) {
   /* h_last exposed as the externally visible step size for this call */
   inst->h_last = h;
   /* h_next was updated by adaptive_step_ex (PI suggestion from last sub-step) */
+
+  update_flow_cache(inst, inst->current_t, inst->state);
 
   if (inst->quality_enabled)
     compute_quality_pass(inst, inst->current_t, inst->state);
@@ -5721,14 +6191,14 @@ size_t GSSK_GetCompositeMemberIndex(GSSK_Instance *inst, size_t composite_idx,
 
 static const char *node_type_str(GSSK_NodeType t) {
   switch (t) {
-    case NODE_SOURCE:       return "source";
-    case NODE_SINK:         return "sink";
-    case NODE_CONSTANT:     return "constant";
-    case NODE_INTERACTION:  return "interaction";
-    case NODE_GAIN:         return "gain";
-    case NODE_LOOP_LIMITED: return "loop_limited";
-    case NODE_EXCHANGE:     return "exchange";
-    case NODE_SWITCH:       return "switch";
+    case GSSK_NODE_SOURCE:       return "source";
+    case GSSK_NODE_SINK:         return "sink";
+    case GSSK_NODE_CONSTANT:     return "constant";
+    case GSSK_NODE_INTERACTION:  return "interaction";
+    case GSSK_NODE_GAIN:         return "gain";
+    case GSSK_NODE_LOOP_LIMITED: return "loop_limited";
+    case GSSK_NODE_EXCHANGE:     return "exchange";
+    case GSSK_NODE_SWITCH:       return "switch";
     default:                return "storage";
   }
 }
@@ -5745,6 +6215,8 @@ static const char *logic_type_str(GSSK_LogicType lt) {
      * into a proportional flow.  Snapshots and the Phase G archival dumps go
      * through this function, so the loss was permanent, not cosmetic. */
     case GSSK_LOGIC_RATIO:       return "ratio";
+    case GSSK_LOGIC_REVERSIBLE:  return "reversible";
+    case GSSK_LOGIC_SUBTRACT:    return "subtract";
     default:                     return "linear";
   }
 }
@@ -5870,11 +6342,11 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
     if (is_processing_node(nd->type)) {
       cJSON *np = cJSON_CreateObject();
       cJSON_AddNumberToObject(np, "k", nd->node_k);
-      if (nd->type == NODE_LOOP_LIMITED)
+      if (nd->type == GSSK_NODE_LOOP_LIMITED)
         cJSON_AddNumberToObject(np, "C", nd->node_C);
-      else if (nd->type == NODE_SWITCH)
+      else if (nd->type == GSSK_NODE_SWITCH)
         cJSON_AddNumberToObject(np, "threshold", nd->node_threshold);
-      else if (nd->type == NODE_EXCHANGE) {
+      else if (nd->type == GSSK_NODE_EXCHANGE) {
         cJSON_AddNumberToObject(np, "price", nd->node_price);
         /* Emit the reference too, so a price_node survives round-trip rather
          * than silently collapsing to the constant fallback. */
@@ -5903,9 +6375,21 @@ static cJSON *build_topology_json(GSSK_Instance *inst) {
 
     cJSON *params = cJSON_CreateObject();
     cJSON_AddNumberToObject(params, "k", ed->k);
-    if (ed->control_idx >= 0)
+    /* ADR 0008 — emit the spelling the edge actually has: the array form only
+     * when there is more than one control, so a one-control edge round-trips
+     * to the same text it was written as. */
+    if (ed->control_idx >= 0 && ed->extra_control_count == 0) {
       cJSON_AddStringToObject(params, "control_node",
                               inst->nodes[ed->control_idx].id);
+    } else if (ed->control_idx >= 0) {
+      cJSON *ctrls = cJSON_CreateArray();
+      cJSON_AddItemToArray(ctrls,
+          cJSON_CreateString(inst->nodes[ed->control_idx].id));
+      for (int c = 0; c < ed->extra_control_count; c++)
+        cJSON_AddItemToArray(ctrls,
+            cJSON_CreateString(inst->nodes[ed->extra_control_idx[c]].id));
+      cJSON_AddItemToObject(params, "control_nodes", ctrls);
+    }
     if (ed->numerator_idx >= 0)
       cJSON_AddStringToObject(params, "numerator_node",
                               inst->nodes[ed->numerator_idx].id);
@@ -6230,6 +6714,7 @@ void GSSK_Free(GSSK_Instance *inst) {
   free(inst->tmp_state);
   free(inst->idc_state);
   free(inst->edge_error);
+  free(inst->edge_flow);
   free(inst->events);
   free(inst->nodes);
   free(inst->edges);

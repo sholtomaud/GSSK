@@ -4,10 +4,19 @@ export interface GSSKModule {
   _GSSK_Step(kernelPtr: number, dt: number): number;
   _GSSK_GetState(kernelPtr: number): number;
   _GSSK_GetStateSize(kernelPtr: number): number;
+  /** Pointer to the per-edge flow vector (Odum J), length _GSSK_GetFlowCount.
+   *  Read through HEAPF64; refreshed by every step, 0 before the first one. */
+  _GSSK_GetFlows(kernelPtr: number): number;
+  /** Length of the _GSSK_GetFlows vector. Always == _GSSK_GetEdgeCount. */
+  _GSSK_GetFlowCount(kernelPtr: number): number;
   _GSSK_GetTStart(kernelPtr: number): number;
   _GSSK_GetTEnd(kernelPtr: number): number;
   _GSSK_GetDt(kernelPtr: number): number;
   _GSSK_GetNodeID(kernelPtr: number, index: number): number;
+  /** Node type as a GSSK_NodeType ordinal: 0 storage, 1 source, 2 sink,
+   *  3 constant, 4 interaction, 5 gain, 6 loop_limited, 7 exchange, 8 switch,
+   *  9 invalid (null instance or out-of-range index). */
+  _GSSK_GetNodeType(kernelPtr: number, index: number): number;
   _GSSK_FindNodeIdx(kernelPtr: number, idPtr: number): number;
   _GSSK_GetEdgeID(kernelPtr: number, index: number): number;
   _GSSK_FindEdgeIdx(kernelPtr: number, idPtr: number): number;

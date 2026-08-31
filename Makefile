@@ -60,15 +60,17 @@ CONTAINER_BIN    := container
 CONTAINER_PLATFORM := linux/amd64
 IMAGE_WASM       := gssk-wasm
 IMAGE_LINUX      := gssk-linux
+IMAGE_DEMO       := gssk-demo
 EMSDK_VERSION    := 3.1.64
 UBUNTU_VERSION   := 24.04
 CWORKDIR         := /work
 CRUN              = $(CONTAINER_BIN) run --rm --platform $(CONTAINER_PLATFORM) -v $(shell pwd):$(CWORKDIR)
 
-.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-gnp-loop test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-schema test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
+.PHONY: all clean test test-update test-advanced test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-gnp-loop test-node-types test-unknown-keys test-deactivation test-stage-times test-forcing test-forcing-wasm test-carrier-api test-edge-flows test-schema check-version test-python demo demo-python plot-demo directories swift-build swift-test swift-clean dist \
         shared asan test-asan coverage-build coverage-report coverage-check \
         fuzz-build fuzz-run test-valgrind bench bench-check bench-gen \
         container-start container-image container-image-wasm container-image-linux \
+        container-image-demo demo-native \
         wasm-container test-linux test-linux-clang shell-wasm shell-linux ci-local
 
 all: directories $(TARGET_LIB) $(TARGET_CLI) $(TARGET_COMPARE)
@@ -102,7 +104,7 @@ RESULTS = $(patsubst examples/%.json,tests/results/%.csv,$(MODELS))
 # the annotated twin describe a model that is no longer running.
 ANNOTATED = $(wildcard examples/*_annotated.json)
 
-test: all test-schema
+test: all check-version test-schema
 	@echo "Running Regression Tests..."
 	@mkdir -p tests/results
 	@for model in $(MODELS); do \
@@ -135,8 +137,26 @@ demo-python: shared
 	@echo "=== Python binding demo ==="
 	@python3 python/demo.py
 
-# Quick demo — run two models, print CSV output, and generate PNG plot
-demo: all
+# Quick demo — run two models, print CSV output, and generate PNG plot.
+#
+# This runs in a container (see Containerfile.demo) because the plotting step
+# needs matplotlib, and a bare macOS python3 does not have it — the target used
+# to fail with "ERROR: matplotlib is required for plot-demo". The image carries
+# a uv-managed interpreter and a pinned matplotlib, so `make demo` works with
+# nothing installed on the host but the `container` CLI.
+#
+# `make clean` first because the bind mount is shared with the host: without it
+# the Linux build inside would link against macOS objects left in lib/.
+demo: container-image-demo
+	@$(MAKE) clean
+	$(CRUN) $(IMAGE_DEMO) make demo-native
+	@echo ""
+	@echo "──────────────────────────────────────────────"
+	@echo "Tree now holds Linux artefacts; run 'make clean && make all' to restore native."
+
+# The demo proper. Run directly if you have matplotlib on the host; otherwise
+# `make demo` runs exactly this inside the container.
+demo-native: all
 	@echo "=== Decay model (exponential decay, RK4) ==="
 	@$(TARGET_CLI) examples/decay_model.json /tmp/gssk_demo_decay.csv
 	@head -6 /tmp/gssk_demo_decay.csv
@@ -221,6 +241,20 @@ test-price-dynamics: all $(TARGET_TEST_PRICEDYN)
 # which has full archetype dispatch, and GSSK_AddNode, which has none.
 TARGET_TEST_NODETYPE = $(BIN_DIR)/test_node_type_validation
 
+# Limit / threshold logic constants (GIP-0001 G6). The formula was always
+# implemented; where C comes from was never written down. These pin the four
+# facts the schema now states, including the invisible one: a control-supplied
+# C that decays past GSSK_LIMIT_C_EPSILON closes the pathway without an error.
+TARGET_TEST_LIMIT = $(BIN_DIR)/test_limit_logic
+
+$(TARGET_TEST_LIMIT): $(TEST_DIR)/test_limit_logic.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-limit-logic
+test-limit-logic: all $(TARGET_TEST_LIMIT)
+	@echo "Running limit/threshold logic tests..."
+	@./$(TARGET_TEST_LIMIT)
+
 $(TARGET_TEST_NODETYPE): $(TEST_DIR)/test_node_type_validation.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
 
@@ -258,6 +292,35 @@ test-gnp-loop: all $(TARGET_TEST_GNPLOOP)
 # convergence test is the one that catches forcing sampled once per STEP
 # instead of once per STAGE; every other test here passes either way.
 TARGET_TEST_FORCING = $(BIN_DIR)/test_forcing
+
+# Reversible (barb-less) pathway, GIP-0001 G3 / ADR 0007. Conservation and
+# origin/target symmetry are the sharp assertions: any sign or index error in
+# build_flow_matrix's four entries breaks them, and neither is visible in a
+# golden CSV of node quantities that was regenerated from the same bug.
+TARGET_TEST_REVERSIBLE = $(BIN_DIR)/test_reversible
+
+$(TARGET_TEST_REVERSIBLE): $(TEST_DIR)/test_reversible.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-reversible
+test-reversible: all $(TARGET_TEST_REVERSIBLE)
+	@echo "Running reversible pathway tests..."
+	@./$(TARGET_TEST_REVERSIBLE)
+
+# n-ary interaction and the subtracting action, GIP-0001 G1 / ADR 0008. The
+# sharp assertions are the closed forms and the bit-identity of the n-ary form
+# against a collapsed binary one: a build that multiplied only the first
+# control still decays, and a golden CSV regenerated from that build agrees
+# with itself.
+TARGET_TEST_NARY = $(BIN_DIR)/test_interaction_nary
+
+$(TARGET_TEST_NARY): $(TEST_DIR)/test_interaction_nary.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-interaction-nary
+test-interaction-nary: all $(TARGET_TEST_NARY)
+	@echo "Running n-ary interaction / subtract tests..."
+	@./$(TARGET_TEST_NARY)
 
 $(TARGET_TEST_FORCING): $(TEST_DIR)/test_forcing.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
@@ -332,6 +395,21 @@ test-unknown-keys: all $(TARGET_TEST_UNKNOWNKEY)
 # outright, having no k to hide behind.
 TARGET_TEST_DEACT = $(BIN_DIR)/test_deactivation_round_trip
 
+# GSSK_NodeType (GIP-0001 G7). The enum and GSSK_GetNodeTypeString read the
+# same field, so they cannot disagree by accident — what these catch is the
+# set changing under one and not the other, an ordinal being renumbered (a
+# silent break for every WASM consumer), and a composite leaking its own name
+# where a primitive belongs.
+TARGET_TEST_NODEENUM = $(BIN_DIR)/test_node_type_enum
+
+$(TARGET_TEST_NODEENUM): $(TEST_DIR)/test_node_type_enum.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+.PHONY: test-node-type-enum
+test-node-type-enum: all $(TARGET_TEST_NODEENUM)
+	@echo "Running node type enum tests..."
+	@./$(TARGET_TEST_NODEENUM)
+
 $(TARGET_TEST_DEACT): $(TEST_DIR)/test_deactivation_round_trip.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
 
@@ -351,6 +429,20 @@ test-carrier-api: all $(TARGET_TEST_CARRIER)
 	@echo "Running carrier accessor tests..."
 	@./$(TARGET_TEST_CARRIER)
 
+# Per-edge flow accessors (GIP-0001 G4). Flow used to be step-local, so a
+# consumer could read every node quantity and not one rate. Asserts the cache
+# is written at the post-step state, on both step paths, with and without
+# quality accounting, and that it agrees with the quality pass it now shares a
+# flow expression with.
+TARGET_TEST_FLOWS = $(BIN_DIR)/test_edge_flows
+
+$(TARGET_TEST_FLOWS): $(TEST_DIR)/test_edge_flows.c $(TARGET_LIB)
+	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+test-edge-flows: all $(TARGET_TEST_FLOWS)
+	@echo "Running per-edge flow accessor tests..."
+	@./$(TARGET_TEST_FLOWS)
+
 # Schema conformance — examples/ must match gssk.schema.json.
 #
 # The kernel does not validate against the schema at load time (ADR 0004), so
@@ -365,6 +457,12 @@ TARGET_DUMP_SER = $(BIN_DIR)/dump_serialized
 
 $(TARGET_DUMP_SER): $(TEST_DIR)/dump_serialized.c $(TARGET_LIB)
 	$(CC) $(CFLAGS) $< $(TARGET_LIB) -o $@ $(LDFLAGS)
+
+# The npm package version and GSK_VERSION_STRING drifted five majors apart
+# before anything noticed, because nothing compared them. Stdlib-only, so it
+# runs in any checkout without pip.
+check-version:
+	@python3 scripts/check_version_sync.py
 
 test-schema: directories $(TARGET_DUMP_SER)
 	@rm -rf $(SER_DIR) && mkdir -p $(SER_DIR)
@@ -505,7 +603,7 @@ dist: directories
 	cp gssk.schema.json $(DIST_DIR)/gssk.schema.json
 
 # WASM Build (Requires emscripten)
-WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_GetStateSize",\
+WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_GetStateSize","_GSSK_GetFlows","_GSSK_GetFlowCount",\
 "_GSSK_GetTStart","_GSSK_GetTEnd","_GSSK_GetDt","_GSSK_GetCurrentTime","_GSSK_GetStepCount",\
 "_GSSK_GetNodeID","_GSSK_FindNodeIdx","_GSSK_GetEdgeID","_GSSK_FindEdgeIdx",\
 "_GSSK_GetEdgeCount","_GSSK_GetEdgeK","_GSSK_SetEdgeK",\
@@ -534,7 +632,7 @@ WASM_EXPORTS = ["_GSSK_Init","_GSSK_Step","_GSSK_Reset","_GSSK_GetState","_GSSK_
 "_GSSK_GetCarrierID","_GSSK_GetCarrierUnit","_GSSK_GetCarrierConserved",\
 "_GSSK_FindCarrierIdx",\
 "_GSSK_GetEdgeCarrier","_GSSK_GetCarrierConservationError",\
-"_GSSK_GetNodeTypeString",\
+"_GSSK_GetNodeTypeString","_GSSK_GetNodeType",\
 "_GSSK_GetArchetypeCount","_GSSK_GetArchetypeName",\
 "_GSSK_GetCompositeCount","_GSSK_GetCompositeID",\
 "_GSSK_GetCompositeArchetype","_GSSK_GetNodeComposite","_GSSK_GetNodeRole",\
@@ -591,7 +689,15 @@ container-image-linux: container-start
 		--platform $(CONTAINER_PLATFORM) \
 		--build-arg UBUNTU_VERSION=$(UBUNTU_VERSION) .
 
-# Build both images
+# Build the demo image (uv-managed Python + pinned matplotlib, plus the C
+# toolchain, so `make demo` needs nothing on the host)
+container-image-demo: container-start
+	$(CONTAINER_BIN) build -f Containerfile.demo -t $(IMAGE_DEMO) \
+		--platform $(CONTAINER_PLATFORM) \
+		--build-arg UBUNTU_VERSION=$(UBUNTU_VERSION) .
+
+# Build both build-toolchain images (the demo image is built on demand by
+# `make demo`, which is not part of the CI-parity set)
 container-image: container-image-wasm container-image-linux
 
 # Build the WASM artefacts into dist/. This is the check that CI does NOT
@@ -602,7 +708,7 @@ wasm-container: container-image-wasm
 
 # Full native build + both test suites under real GCC with -Werror.
 test-linux: container-image-linux
-	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-deactivation && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy test-gnp-loop'
+	$(CRUN) $(IMAGE_LINUX) sh -c 'make clean && make CC=gcc all && make CC=gcc test && make CC=gcc test-advanced && make CC=gcc test-node-types && make CC=gcc test-unknown-keys && make CC=gcc test-deactivation && make CC=gcc test-stage-times && make CC=gcc test-forcing && make CC=gcc test-carrier-api && make CC=gcc test-price-node test-ratio test-delivered-work test-price-dynamics test-net-energy && make CC=gcc test-interaction-nary test-gnp-loop'
 
 # Same under Linux clang, the other half of CI's build-native matrix.
 test-linux-clang: container-image-linux
@@ -642,10 +748,10 @@ LATEXMK    = latexmk -pdf -interaction=nonstopmode -halt-on-error -outdir=build
 # beside the source instead. Both locations are gitignored.
 report_pdf = ls -1 $(DOCO_BUILD)/$(1).pdf $(DOCO_DIR)/$(1).pdf 2>/dev/null | head -1 | sed 's/^/→ /'
 
-.PHONY: doco whitepaper article doco-clean
+.PHONY: doco whitepaper article conformance doco-clean
 
-# Build both documents
-doco: whitepaper article
+# Build all documents
+doco: whitepaper article conformance
 
 whitepaper:
 	@command -v latexmk >/dev/null 2>&1 || { echo "latexmk not found — install a TeX distribution (e.g. MacTeX, TeX Live)"; exit 1; }
@@ -656,6 +762,12 @@ article:
 	@command -v latexmk >/dev/null 2>&1 || { echo "latexmk not found — install a TeX distribution (e.g. MacTeX, TeX Live)"; exit 1; }
 	cd $(DOCO_DIR) && $(LATEXMK) article.tex
 	@$(call report_pdf,article)
+
+# Companion to ADR 0009 — where IFRS/AASB recognition and Odum's method diverge.
+conformance:
+	@command -v latexmk >/dev/null 2>&1 || { echo "latexmk not found — install a TeX distribution (e.g. MacTeX, TeX Live)"; exit 1; }
+	cd $(DOCO_DIR) && $(LATEXMK) conformance.tex
+	@$(call report_pdf,conformance)
 
 # Remove LaTeX build output only; leaves sources untouched.
 doco-clean:
