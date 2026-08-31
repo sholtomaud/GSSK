@@ -153,6 +153,10 @@ typedef struct {
   double value;
   double node_k, node_C, node_threshold, node_price;
   char   carrier[32];
+  /* exchange: template-local id of the sibling member supplying price, empty
+   * for none.  Rewritten to a member slot at expansion, so each instance of
+   * the archetype prices from its own copy of that member (GIP-0002). */
+  char   price_node[64];
 } GSSK_ANodeTmpl;
 
 /* Template for one edge inside an archetype definition */
@@ -3692,10 +3696,13 @@ static GSSK_Status parse_user_archetypes(GSSK_Instance *inst, cJSON *root) {
           cJSON *pC  = cJSON_GetObjectItem(npp, "C");
           cJSON *pth = cJSON_GetObjectItem(npp, "threshold");
           cJSON *ppr = cJSON_GetObjectItem(npp, "price");
+          cJSON *ppn = cJSON_GetObjectItem(npp, "price_node");
           if (cJSON_IsNumber(pk))  nt->node_k         = pk->valuedouble;
           if (cJSON_IsNumber(pC))  nt->node_C         = pC->valuedouble;
           if (cJSON_IsNumber(pth)) nt->node_threshold = pth->valuedouble;
           if (cJSON_IsNumber(ppr)) nt->node_price     = ppr->valuedouble;
+          if (cJSON_IsString(ppn))
+            safe_str_copy(nt->price_node, ppn->valuestring, sizeof(nt->price_node));
         }
       }
     }
@@ -4026,9 +4033,39 @@ GSSK_Status GSSK_Init(const char *json_data, GSSK_Instance **out_inst) {
         N->node_C         = t->node_C;
         N->node_threshold = t->node_threshold;
         N->node_price     = t->node_price;
-        /* memset above zeroed this, and 0 is a valid node index — an archetype
-         * has no price_node, so it must mean "use the constant". */
+        /* memset above zeroed this, and 0 is a valid node index, so -1 first:
+         * absent price_node means "use the constant". */
         N->price_idx      = -1;
+        /* A template's price_node names a sibling member by its template-local
+         * id.  The instance's members occupy node_slot..node_slot+node_count-1
+         * in template order, so the sibling's slot is known here without a
+         * string lookup — and this is the only place it is knowable, since the
+         * second pass below sees only the top-level instance entry, whose
+         * params carry no price_node (GIP-0002).
+         *
+         * A name matching no member is rejected rather than left at -1.  The
+         * fallback is what made the defect invisible: a model that loads, runs
+         * and reports success while every diamond trades at the template's
+         * constant.  Top-level price_node keeps its fallback — a model may
+         * depend on that — but nothing can depend on this case, which until
+         * now was dropped at parse time. */
+        if (t->price_node[0]) {
+          int price_slot = -1;
+          for (size_t m = 0; m < def->node_count; m++) {
+            if (strcmp(def->nodes[m].id, t->price_node) == 0) {
+              price_slot = (int)(node_slot + m);
+              break;
+            }
+          }
+          if (price_slot < 0) {
+            snprintf(inst->error_msg, sizeof(inst->error_msg),
+                     "Phase 8: archetype '%s' member '%s' has price_node '%s', "
+                     "which names no member of the archetype (instance '%s').",
+                     def->name, t->id, t->price_node, id->valuestring);
+            status = GSSK_ERR_SCHEMA_VIOLATION; goto cleanup;
+          }
+          N->price_idx = price_slot;
+        }
         /* Built-in param overrides (producer.gate, etc.) */
         if (cJSON_IsObject(nparams)) {
           if (strcmp(def->name, "producer") == 0 && strcmp(t->id, "gate") == 0) {

@@ -24,6 +24,20 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
   Existing single-control models are **bit-identical** — `control_idx` still holds the one control and the product loop runs zero times — and existing `GSSK_LogicType` values are unmoved, with `GSSK_LOGIC_SUBTRACT` appended at 7. Both are pinned by test. `build_topology_json` emits the spelling an edge actually has, so a one-control model does not come back rewritten into the array form. New: `examples/three_input_gate_model.json`, `tests/test_interaction_nary.c`, `make test-interaction-nary`.
 
+### Fixed
+
+- **`price_node` now resolves for expanded archetype members.** GIP-0002, raised from `gssk-budget`. An `exchange` inside an archetype could not have a per-instance price: every instance traded at the template's constant, and the mechanism that exists to make price a state variable did nothing. A model built on such an archetype validated, loaded, ran to completion and reported success while every transaction diamond in it moved the wrong money — or, with the template constant left at its `0.0` default, no money at all.
+
+  Two things were broken, one behind the other. `GSSK_Init` resolves `price_node` in a second pass over the top-level `nodes` array, and for a composite the entry there is the *instance* — `{"id": "groceries", "type": "purchase_consumed"}` — whose params carry no `price_node`; the expanded members that do carry it are never visited. Behind that, the archetype template struct had no field for it at all, so a template's `price_node` was already discarded at parse time, before expansion could have rewritten anything.
+
+  A template's `price_node` names a **sibling member by its template-local id**, and is now rewritten during expansion exactly as an edge's `origin` and `target` already were. An archetype with a `constant` member `price` and an `exchange` member declaring `price_node: "price"`, instantiated as `groceries`, expands to `groceries__price` and `groceries__deal` with the latter priced from the former. The per-instance value is then supplied through `snapshot.state` on `groceries__price` — a channel that already existed, already applied, and, being part of the model document, inside the content hash. That last property is why this is a parser fix and not a new `GSSK_SetNodePrice`: a price set after `GSSK_Init` would sit outside the hashed document, and two models differing only in price would hash identically. For a ledger the hash is the audit anchor, so that is a correctness objection rather than a matter of taste.
+
+  **A template `price_node` naming no member of its archetype is now rejected** with `GSSK_ERR_SCHEMA_VIOLATION` naming the archetype, the member, the unresolved id and the instance — it does not fall back to the constant. This is the one place the implementation departs from the proposal, on ADR 0004's rule that a name matching nothing is an error rather than a silent re-modelling; a fallback is precisely what let the original defect run green. Nothing can have depended on it, since the field was discarded at parse time. **Top-level `price_node` is unchanged**, second-pass forward references and constant fallback included.
+
+  Note that a price delivered through `snapshot.state` is live state, not a topology initial condition, so it round-trips through `GSSK_SerializeSnapshot` and not through `GSSK_SerializeModel`, which emits each node's `initial_value` by design. Both forms emit the member's namespaced `price_node` reference.
+
+  New assertions in `tests/test_price_node.c`: two instances of one archetype at different prices spend different amounts and each satisfies `spent / inventory == its own price`, the shared buyer's debit equals the sum of the two credits, the template's poison constant is not consulted, an unresolvable template reference fails `GSSK_Init`, and the snapshot round-trip reproduces both instances' spend.
+
 ---
 
 ## [5.1.0] — 2026-08-30
