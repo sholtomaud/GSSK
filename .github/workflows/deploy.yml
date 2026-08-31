@@ -126,6 +126,15 @@ jobs:
       - name: Net-energy feedback tests (Phase C.4)
         run: make test-net-energy
 
+      # D.1 asserts an asymmetry, which no single golden CSV can express:
+      # money's conservation error stays inside solver_tolerance over a closed
+      # circuit while energy's does not over the same run. It also carries the
+      # negative control — C.4's open money path scores a perfect 0.0 because
+      # conservation sums storage nodes and that model has none — so a
+      # regression that deletes the loop fails loudly instead of passing.
+      - name: GNP-loop conservation tests (Phase D.1)
+        run: make test-gnp-loop
+
   # ────────────────────────────────────────────────────────────
   # Quality gate — all Linux-only checks as serial steps.
   # One checkout, one apt-get, one runner.
