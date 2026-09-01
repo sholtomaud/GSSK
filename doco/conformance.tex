@@ -123,7 +123,7 @@ Three commitments here mirror and oppose Odum's. Recognition is \emph{event-shap
 
 \subsection{The thesis}
 
-The dynamics and the standards agree far more than the framing suggests, and where they disagree it is in a small number of identifiable places rather than diffusely. The emergy accounting is the exception, and its exclusion is settled early (Section~\ref{sec:valuation}) so that the remainder can proceed without it. Section~\ref{sec:agree} sets out four structural correspondences that already hold. Section~\ref{sec:divergences} sets out the seven genuine divergences and resolves each. The distinction matters because most of the apparent conflict is vocabulary: a \emph{stock} is a \emph{balance}, a \emph{flow} is a \emph{posting rate}, a \emph{carrier} is a \emph{unit of account}, and a counter-current is a double entry. Treating vocabulary differences as substantive is how one ends up building two models that must then be reconciled, which is the outcome this design exists to avoid.
+The dynamics and the standards agree far more than the framing suggests, and where they disagree it is in a small number of identifiable places rather than diffusely. The emergy accounting is the exception, and its exclusion is settled early (Section~\ref{sec:valuation}) so that the remainder can proceed without it. Section~\ref{sec:agree} sets out five structural correspondences that already hold. Section~\ref{sec:divergences} sets out the seven genuine divergences and resolves each. The distinction matters because most of the apparent conflict is vocabulary: a \emph{stock} is a \emph{balance}, a \emph{flow} is a \emph{posting rate}, a \emph{carrier} is a \emph{unit of account}, and a counter-current is a double entry. Treating vocabulary differences as substantive is how one ends up building two models that must then be reconciled, which is the outcome this design exists to avoid.
 
 \section{Where the dynamics and the standards already agree}
 \label{sec:agree}
@@ -157,6 +157,26 @@ which is an output method in the language of \S41. A continuously running diamon
 \subsection{The topology rule is a chart of accounts}
 
 \esl{} draws a hard line between pathways, which carry flows, and units, which hold state. \gssk{} enforces it: coefficients belong to nodes, never to edges. A chart of accounts draws the same line --- accounts hold balances, transactions move between them --- and the discipline has the same purpose in both systems, which is that the structure of the model can be read off without knowing the numbers in it.
+
+\subsection{Money is a force, not only a record}
+\label{sec:moneyforce}
+
+The four correspondences above map a construct in one system onto a construct in the other. This one is different in kind, and it is the strongest claim in this section: the model does something with money that a ledger does not do at all.
+
+In Odum's notation a pathway carries a \emph{force} as well as a flow --- in the \textsc{extend} implementation, position two of the four-position array. A storage determines the force on its outgoing connector, and the downstream unit uses that force to set its rate \citep{odum2000}. Force is a driving potential, not a record of what has already happened.
+
+\gssk{} applies that treatment to money. The forward flow through a diamond is gated by the buyer's balance:
+\begin{lstlisting}[style=c]
+double F = inst->nodes[ni].node_k * state[L->goods_in];
+if (L->money_in >= 0) F *= state[L->money_in];
+\end{lstlisting}
+so that $F_{\text{goods}} = k\,Q_{\text{seller}}Q_{\text{buyer}}$. The buyer's balance is a \emph{multiplicand in the real flow}, not merely the account that is later debited. Purchasing power drives delivery, and an entity whose balance falls transacts more slowly for that reason alone.
+
+This is what a balance sheet is for, and it is the half a balance sheet cannot express. A ledger records that an entity holds $\$1000$; it has no mechanism by which that figure restrains anything. Solvency and liquidity are read \emph{off} the statements by a human who then draws a conclusion. In the model the conclusion is the mechanism: the balance is causal, and the restraint is enforced by the arithmetic rather than inferred from it. The two systems agree about what a balance \emph{is} and differ about what it \emph{does}, which is a more interesting relationship than equivalence.
+
+It also explains a result that would otherwise look like a coincidence. Section~\ref{sec:silence} finds that a defaulted price inflates goods delivered by $27\%$, which is a strange consequence for an error in a money field. It follows directly from this subsection: a buyer who never pays never depletes, so the gate never closes and the real economy runs unconstrained. The money channel is load-bearing for the physical trajectory, which is why an error in it is not confined to the money column.
+
+Two qualifications are owed. First, the gating is a modelling commitment and not a neutral fact: $F \propto Q_{\text{buyer}}$ is a \emph{cash-constrained} entity, one that can transact only to the extent it holds money. A firm drawing on a revolving credit facility is not that entity, and \gssk{} has no representation of credit --- there is no way today to let a buyer's balance go negative against a declared limit, which is an ordinary commercial arrangement and a real gap rather than a simplification. Second, the correspondence is asymmetric, and the direction matters for what may be claimed: the model may be used to \emph{explain} why delivery slowed, but the ledger remains the record of what was delivered. Nothing here licenses reading a recognised amount out of the gating term.
 
 \section{Evidence from the kernel}
 \label{sec:findings}
