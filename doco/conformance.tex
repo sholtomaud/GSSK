@@ -11,7 +11,11 @@
 \maketitle
 
 \begin{abstract}
-A \gssk{} model is a system of ordinary differential equations describing flows of energy, matter and money through a network of storages. Over that same network Odum's emergy accounting values those flows by the energy embodied in producing them, under an algebra of its own. A general ledger is a third thing again: a set of discrete, exactly balancing entries recognised under a body of accounting standards. The premise of this document is that one artefact can serve all three purposes --- that a model can be simultaneously a faithful Odum simulation, an emergy evaluation, and a compliant set of books --- and that this is achievable without deforming any of them. Every term of art used here is defined in Section~\ref{sec:terms}, in both directions, because the argument requires a reader fluent in one field to follow reasoning drawn from the other. That section is placed at the end rather than the front: it is a reference to be consulted, and reading it in sequence delays the argument it exists to support.
+A \gssk{} model is a system of ordinary differential equations describing flows of energy, matter and money through a network of storages. Over that same network Odum's emergy accounting values those flows by the energy embodied in producing them, under an algebra of its own. A general ledger is a third thing again: a set of discrete, exactly balancing entries recognised under a body of accounting standards. The premise of this document is that one artefact can serve all three purposes --- that a model can be simultaneously a faithful Odum simulation, an emergy evaluation, and a compliant set of books --- and that this is achievable without deforming any of them.
+
+The reconciliation turns on a single algebraic distinction, stated in Section~\ref{sec:additivity} and used throughout: the quantities travelling a pathway divide into \emph{extensive} ones, which add over subsystems and enter the dynamics as summands, and \emph{intensive} ratios, which do not add and enter as multiplicands. Because zero is the identity for addition and the annihilator for multiplication, that distinction decides both what may be posted to a ledger and where a kernel may supply a default. Two results below are instances of it rather than separate arguments.
+
+Two boundary conditions are stated here rather than left to be discovered. The argument holds for \emph{conservative extensive} carriers --- mass, energy, goods, money --- and not for carriers that are consumed rather than transferred, or that may be minted and burned. And \gssk{} implements the half of emergy algebra that breaks additivity without the rule that bounds it, so on any topology where co-product pathways recombine it overstates transformity by a factor equal to the number of reuniting branches: it is a faithful simulator of Odum's dynamics, and is not yet a faithful implementation of his emergy algebra. Every term of art used here is defined in Section~\ref{sec:terms}, in both directions, because the argument requires a reader fluent in one field to follow reasoning drawn from the other. That section is placed at the end rather than the front: it is a reference to be consulted, and reading it in sequence delays the argument it exists to support.
 
 A single arithmetic criterion organises two of the results below. A quantity may be posted to a ledger only if two of them can be added, and the quantities travelling along a pathway divide into those that add --- the carriers, of which money is one among an open set --- and those that are ratios and do not, such as price and transformity. That one test both excludes emergy from the ledger and forbids the kernel to supply a price its author never stated, because zero is the identity for addition and the annihilator for multiplication. We identify seven specific points at which the dynamics and the standards genuinely diverge, distinguish them from the larger set of points at which they merely differ in vocabulary, and resolve each against the IFRS/AASB standards. Emergy is treated as a peer accounting rather than as a change of units, because its algebra deliberately allows a process to yield more emergy than it consumed, and a quantity that behaves that way cannot be a balancing ledger entry --- an exclusion that follows from arithmetic rather than from the fact that accounting standards do not list emergy among the permitted ways of measuring things. The organising resolution is that the simulated trajectory is \emph{evidence from which entries are derived} rather than the authoritative record itself: a numerical solver is accurate only to a stated tolerance, while a ledger must balance to the last cent, so the two remain separate artefacts connected by an explicit and specified conversion procedure.
 
@@ -52,40 +56,18 @@ One construct is used throughout and has no counterpart in either field's vocabu
 
 The companion decision record is ADR 0009 in \code{docs/adr/}. The ADR decides; this document argues. Where the two differ in emphasis the ADR governs, because it is the artefact the repository enforces against.
 
-\section{Three accountings}
-\label{sec:accountings}
-
-Three systems are in play, and they are not three views of one thing. Odum's dynamics says how much of a carrier moves and when; emergy accounting says what a flow cost the biosphere to produce; financial reporting says what is recognised, at what amount, on what date. Each has its own rules and each is coherent on its own terms, so the reconciliation cannot proceed by translating two of them into the third.
-
-This section states what each asserts, in the order that matters for the argument. Section~\ref{sec:dynamics} gives the dynamics, which is the substrate everything else runs on. Section~\ref{sec:additivity} then draws the one distinction all three depend on and none of them names, because two later results turn out to be instances of it. Sections~\ref{sec:emergy} and~\ref{sec:campbell} take up emergy and the prior attempt to put it in a ledger, Section~\ref{sec:idc} disposes of a common misunderstanding about the incipient calculus, and Section~\ref{sec:standards} states what the standards require.
-
-\subsection{What Odum's dynamics asserts}
-\label{sec:dynamics}
-
-Odum's Energy Systems Language describes a system as storages connected by pathways, where every pathway carries a flow and every storage integrates the flows incident on it \citep{odum1994,odum2000}. The state of the system is a vector $Q$ of stocks, and its evolution is
-\begin{equation}
-\frac{dQ_i}{dt} \;=\; \sum_{j} F_{ji}(Q,t) \;-\; \sum_{k} F_{ik}(Q,t),
-\label{eq:state}
-\end{equation}
-where each $F$ is determined by a small vocabulary of pathway logics --- linear, interaction, limit, ratio, subtract, reversible --- evaluated from the current state. Three commitments in this method matter for what follows. Time is \emph{continuous}: the model has a value at every instant, not merely at reporting dates. Quantities are \emph{real-valued}: a stock is a real number of units, not a count of indivisible minor units. And the dynamics are silent about value: Equation~\eqref{eq:state} counts units of a carrier, and says nothing about what a unit is worth. Both of the other two accountings exist to answer that question, and they answer it differently.
-
-The transaction is where money enters. Odum draws it as a counter-current: a forward flow of goods met by a backward flow of money, coupled at a diamond, so that a purchase is one construct with two flows rather than two independent events. In \gssk{} this is the \code{exchange} node, and the coupling is
-\begin{equation}
-F_{\text{money}} \;=\; p \cdot F_{\text{goods}},
-\label{eq:coupling}
-\end{equation}
-with $p$ either a constant or, since the endogenous-price work, the current value of a state node so that price can be driven by the system rather than dialled in by the author.
-
-\subsection{What adds and what does not}
+\section{The arithmetic criterion: what adds and what does not}
 \label{sec:additivity}
 
-One distinction underlies everything that follows, and none of the three accountings names it, because inside each field it is too obvious to be worth saying. Drawing it once here turns two later conclusions --- the exclusion of emergy in Section~\ref{sec:valuation} and the refusal of a defaulted price in Section~\ref{sec:silence} --- from separate assertions into two instances of one result.
+This section is placed before the three accountings rather than inside them because all three depend on it and none of them names it: inside each field it is too obvious to be worth saying. It is the organising result of the document. Two conclusions that look unrelated --- the exclusion of emergy from the ledger in Section~\ref{sec:valuation}, and the refusal of a defaulted price in Section~\ref{sec:silence} --- are the same theorem applied in different places, and stating it once makes both of them consequences rather than assertions.
 
-Odum's method is more general than the energy it is named for. A pathway in his notation is not a single number: the \textsc{extend} implementation passes a four-position array along every connection, carrying a code, a force, a flow and a transformity, so a pathway is a bundle of co-varying quantities \citep{odum2000}. \gssk{} follows the same instinct by a different route, through an open set of \emph{carriers}. A model declares whatever substances it moves --- energy, money, goods, a control signal --- and every pathway names the one it carries. The set is not fixed by the kernel: a model needing to move water, a permit, a token or a unit of compute would declare it as a carrier and change nothing else. Nothing in this document treats money as privileged, and the argument below runs identically for any carrier a preparer must account for.
+Odum's method is more general than the energy it is named for. A pathway in his notation is not a single number: the \textsc{extend} implementation passes a four-position array along every connection, carrying a code, a force, a flow and a transformity, so a pathway is a bundle of co-varying quantities \citep{odum2000}. \gssk{} follows the same instinct by a different route, through an open set of \emph{carriers}. A model declares whatever substances it moves --- energy, money, goods, a control signal --- and every pathway names the one it carries. The set is not fixed by the kernel: a model needing to move water, a permit, a token or a unit of compute would declare it as a carrier and change nothing else. Nothing in this document treats money as privileged.
+
+The generality has a boundary, and it is worth fixing before it is relied on. The argument below runs identically for any \emph{conservative extensive} carrier --- one whose total is invariant except at declared boundaries, and which adds over subsystems. Mass, energy, goods and money qualify. A carrier that is not conservative does not: a control signal is consumed by being read rather than transferred, and a token subject to programmatic minting or burning has no closure for a conservation check to test, so the diagnostics of Section~\ref{sec:conservation} and the posting procedure of Section~\ref{sec:posting} do not carry over to it unchanged. \gssk{} permits such carriers --- \code{conserved} is a per-carrier declaration, and the \code{signal} carrier in several shipped models is exactly this --- so the restriction is a real one about which models the argument covers, not a hypothetical.
 
 What the argument does depend on is that not everything travelling along a pathway is a carrier. Two kinds of quantity live there, and they compose differently.
 
-An \emph{extensive} quantity adds over subsystems. Five joules and three joules into a tank make eight; five dollars and three dollars into an account make eight. Carriers are extensive, which is why Equation~\eqref{eq:state} can be written as a sum at all --- and why a ledger can be written, since double entry is an additivity requirement before it is anything else.
+The distinction is standard in systems dynamics \citep{sterman2000}, and is stated here because the two fields this document addresses use it without naming it. An \emph{extensive} quantity adds over subsystems. Five joules and three joules into a tank make eight; five dollars and three dollars into an account make eight. Carriers are extensive, which is why Equation~\eqref{eq:state} can be written as a sum at all --- and why a ledger can be written, since double entry is an additivity requirement before it is anything else.
 
 An \emph{intensive} quantity is a ratio, and ratios do not add. Transformity is emergy per unit energy; price is money per unit goods; a Leontief coefficient is input per unit output \citep{odum1996}. Two of them combine only by a weighted average, and the weights are the extensive quantities they are ratios of.
 
@@ -115,12 +97,36 @@ One further property of the split does the work in Section~\ref{sec:silence}, an
 
 An extensive quantity enters Equation~\eqref{eq:state} as a summand, so defaulting it to zero contributes nothing --- exactly what an absent pathway should contribute. This is why Odum's implementation can safely leave unwritten array positions at zero, and why a model in which most pathways move no money at all needs no declaration to that effect. An intensive quantity enters as a multiplicand: Equation~\eqref{eq:coupling} multiplies price by the goods flow. Defaulting a multiplicand to zero does not encode absence --- it annihilates whatever passed through, however large it was. The same default is harmless in one position and destructive in the other, and which position a quantity occupies is settled by whether it is extensive or intensive.
 
+\section{Three accountings}
+\label{sec:accountings}
+
+Three systems are in play, and they are not three views of one thing. Odum's dynamics says how much of a carrier moves and when; emergy accounting says what a flow cost the biosphere to produce; financial reporting says what is recognised, at what amount, on what date. Each has its own rules and each is coherent on its own terms, so the reconciliation cannot proceed by translating two of them into the third.
+
+This section states what each asserts, in the order that matters for the argument. Section~\ref{sec:dynamics} gives the dynamics, which is the substrate everything else runs on. Section~\ref{sec:additivity} then draws the one distinction all three depend on and none of them names, because two later results turn out to be instances of it. Sections~\ref{sec:emergy} and~\ref{sec:campbell} take up emergy and the prior attempt to put it in a ledger, Section~\ref{sec:idc} disposes of a common misunderstanding about the incipient calculus, and Section~\ref{sec:standards} states what the standards require.
+
+\subsection{What Odum's dynamics asserts}
+\label{sec:dynamics}
+
+Odum's Energy Systems Language describes a system as storages connected by pathways, where every pathway carries a flow and every storage integrates the flows incident on it \citep{odum1994,odum2000}. The state of the system is a vector $Q$ of stocks, and its evolution is
+\begin{equation}
+\frac{dQ_i}{dt} \;=\; \sum_{j} F_{ji}(Q,t) \;-\; \sum_{k} F_{ik}(Q,t),
+\label{eq:state}
+\end{equation}
+where each $F$ is determined by a small vocabulary of pathway logics --- linear, interaction, limit, ratio, subtract, reversible --- evaluated from the current state. Three commitments in this method matter for what follows. Time is \emph{continuous}: the model has a value at every instant, not merely at reporting dates. Quantities are \emph{real-valued}: a stock is a real number of units, not a count of indivisible minor units. And the dynamics are silent about value: Equation~\eqref{eq:state} counts units of a carrier, and says nothing about what a unit is worth. Both of the other two accountings exist to answer that question, and they answer it differently.
+
+The transaction is where money enters. Odum draws it as a counter-current: a forward flow of goods met by a backward flow of money, coupled at a diamond, so that a purchase is one construct with two flows rather than two independent events. In \gssk{} this is the \code{exchange} node, and the coupling is
+\begin{equation}
+F_{\text{money}} \;=\; p \cdot F_{\text{goods}},
+\label{eq:coupling}
+\end{equation}
+with $p$ either a constant or, since the endogenous-price work, the current value of a state node so that price can be driven by the system rather than dialled in by the author.
+
 \subsection{What emergy accounting asserts}
 \label{sec:emergy}
 
 Emergy is the second accounting, and it is a genuine peer of the third rather than a change of units. It values a flow by the available energy of one kind required, directly and indirectly, to produce it, expressed through a transformity \citep{odum1996,bastianoni2011}. Its purpose is explicitly to measure what price does not: Odum's argument is that market value tracks willingness to pay while emergy tracks what nature and the economy actually expended, and that the two systematically disagree about anything abundant.
 
-What makes it an accounting rather than a valuation heuristic is that it has recognition rules, and they are specific. Emergy algebra assigns all source emergy of a process to its output. Where a pathway \emph{splits} --- the same flow divided between destinations --- emergy is apportioned between the legs in proportion to energy, which is additive and unremarkable. Where a process yields \emph{co-products} --- different things emerging together, hides and meat from one animal --- the rule is different: each co-product pathway carries the \emph{whole} emergy of the input, not a share of it. A fourth rule then forbids counting emergy twice within a system, and in particular forbids adding co-products back together should their pathways reunite downstream.
+What makes it an accounting rather than a valuation heuristic is that it has recognition rules, and they are specific. Emergy algebra assigns all source emergy of a process to its output. Where a pathway \emph{splits} --- the same flow divided between destinations --- emergy is apportioned between the legs in proportion to energy, which is additive and unremarkable. Where a process yields \emph{co-products} --- different things emerging together, hides and meat from one animal --- the rule is different: each co-product pathway carries the \emph{whole} emergy of the input, not a share of it. A fourth rule then forbids counting emergy twice within a system, and in particular forbids adding co-products back together should their pathways reunite downstream; the rule and its consequences for network algebra are examined by \citet{brown1996}.
 
 That pair of rules is the crux of this document's treatment of emergy, so it is worth stating flatly what it implies. In the vocabulary of Section~\ref{sec:additivity}, the co-product rule is where emergy stops being extensive. Under the co-product rule, the emergy leaving a process can exceed the emergy entering it, and this is not an error to be corrected but the intended semantics: each co-product genuinely required the whole upstream process to exist. Emergy is therefore \emph{non-additive} across co-products by construction. The prohibition on re-adding them exists precisely because the quantity does not behave additively, and an accounting that needs such a rule is telling you that its quantities are not sums.
 
@@ -129,6 +135,38 @@ That pair of rules is the crux of this document's treatment of emergy, so it is 
 What is absent is the rule that bounds it. Emergy algebra forbids counting the same emergy twice within a system, and in particular forbids adding co-products back together when their pathways reunite downstream. The kernel's propagation accumulates one contribution per incoming pathway, so where two co-product pathways from a common origin meet again at a single node, that node receives two full copies of the upstream transformity and its value is their sum --- precisely the quantity the fourth rule exists to prevent. \code{docs/giannantoni\_assessment.md} records the same gap, as the deferred choice between a maximum and a sum where co-products recombine.
 
 The consequence is the opposite of reassuring, and it is stated here rather than softened. The half of emergy algebra that breaks additivity is implemented and reachable from any model document; the correction that emergy algebra pairs with it is not. A model that declares co-products and later recombines them can therefore produce a transformity that emergy algebra says is not a well-formed quantity, with nothing in the kernel objecting. This is filed as \code{emergy-reunion-double-counting} and is a decision rather than a patch, because the corrective rule takes a maximum where pathways rejoin, and a maximum is not a linear operation --- while the propagation is currently a linear solve.
+
+\subsubsection*{How wrong, measured}
+
+``Systematically overstates'' is not a useful description of a defect, so it was measured. One process feeds $n$ branches declared as co-products, and the branches reunite at a single downstream node. The source transformity is $1.0$, so $1.0$ is the correct answer in every row: the reunited node descends from one source through one process, and Odum's fourth rule exists precisely to stop the co-product replication being counted again when the pathways meet.
+
+\begin{center}
+\begin{tabular}{crrr}
+\toprule
+Branches $n$ & \code{partition} (split) & \code{replicate} (co-product) & Odum's rule \\
+\midrule
+2 & $1.000000$ & $2.000000$ & $1.0$ \\
+3 & $1.000000$ & $3.000000$ & $1.0$ \\
+4 & $1.000000$ & $4.000000$ & $1.0$ \\
+5 & $1.000000$ & $5.000000$ & $1.0$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The overstatement is exactly $n$. It is not a small error that grows slowly with network size; it is a factor equal to the number of co-products that reunite, and it is unbounded. Note also where the error is \emph{not}: a split reuniting is exactly correct at $1.000000$, because a split genuinely divides the quality and summing the parts recovers the whole. The defect is confined to the co-product rule, which is the one place emergy algebra is deliberately non-additive, and the corrective rule is the one the kernel lacks.
+
+This bounds a claim made in the abstract. \gssk{} is a faithful simulator of Odum's \emph{dynamics}; it is not presently a faithful implementation of Odum's \emph{emergy algebra} on any topology where co-product pathways recombine, and a transformity read off such a model is wrong by a factor this table gives.
+
+\subsubsection*{Supporting both rules rather than choosing}
+
+The corrective rule takes a maximum where pathways rejoin, and a maximum is not a linear operation while the propagation is a linear solve. That is the obstacle, and it suggests the resolution: rather than the kernel choosing an algebra on the author's behalf, the algebra becomes something the model declares, as the recognition basis of a diamond already is.
+
+The shape is a \code{quality\_algebra} declaration with at least two values. \code{linear} is the present behaviour --- contributions sum at every join --- which is exact for splits and wrong by $n$ for reuniting co-products. \code{odum\_max} applies the fourth rule. A third value for the incipient calculus is the natural home for the question Section~\ref{sec:idc} leaves open, which is presently a solver-method choice sitting awkwardly beside a valuation decision.
+
+The implementation is less forbidding than ``non-linear'' suggests, and the decomposition is worth recording because it is not obvious. A maximum at every join would be wrong: two genuinely independent sources converging must \emph{add}, and only co-product siblings descending from a common ancestor must not. The rule therefore needs provenance, not merely a different operator --- which is what makes the naive patch fail. But if each source's contribution is propagated separately, the two operations separate cleanly: across distinct sources the combination is a sum, and within one source's subgraph the reunion is a maximum over paths, which is a longest-path computation in the $(\max, +)$ semiring rather than an ordinary linear solve. On an acyclic network that is exact and costs one pass per source. Feedback loops --- which Odum networks routinely have, and which this kernel supports --- are where it stops being straightforward, and no claim is made here that the cyclic case is solved.
+
+What that buys is agnosticism where agnosticism is honest. Odum's fourth rule is a convention, and Section~\ref{sec:campbell} argues that a convention cannot be proved and need not be. A kernel that implements one convention silently is making a measurement decision on the author's behalf; a kernel that implements several and requires the author to name one is doing what this document asks of it everywhere else. Tracked as \code{quality-algebra-declaration}, with the defect itself as \code{emergy-reunion-double-counting}.
+
 
 \subsection{Prior art: one set of books for the environment and the economy}
 \label{sec:campbell}
@@ -408,7 +446,15 @@ First, the second and third columns are \emph{identical}, not merely similar. No
 
 Second, the defaulted model reports the \emph{better} conservation error. The correctly priced run leaves $1.137\times10^{-16}$ because real money is moving and floating-point arithmetic leaves a residue; the run that charges nothing leaves exactly zero, because nothing happened. Any diagnostic that ranks models by conservation error prefers the broken one. This is the measured form of the caveat in Section~\ref{sec:conservation}: carrier conservation is a \emph{closure} check, not a correctness check. It asks whether money was created or destroyed, and a transfer of the wrong amount is still a transfer, so it is blind to every price error and blindest to this one.
 
-Third, the damage is not confined to the money column. Goods delivered rise from $78.69$ to $100.00$ --- $27\%$ more --- because the buyer who never pays never depletes, so the interaction gate never closes and the real economy runs hotter for the rest of the simulation. A defaulted price is therefore not only a misstatement of revenue; it corrupts the physical trajectory. That makes it a defect on Odum's own terms, with no accounting standard in the room, which is worth stating plainly for the reader who regards the financial argument as somebody else's problem.
+Third --- and this is the result of the three that should travel furthest --- the damage is not confined to the money column. Goods delivered rise from $78.69$ to $100.00$, $27\%$ more, because the buyer who never pays never depletes, so the interaction gate never closes and the real economy runs hotter for the rest of the run. The finding generalises past the instance, and is worth stating as its own claim:
+
+\begin{quote}
+\emph{In a network where a carrier gates a flow, an unstated value in that carrier's channel deterministically corrupts the biophysical trajectory. The error is not confined to the accounts.}
+\end{quote}
+
+It is worth being exact about what is and is not corrupted, because the loose version of this claim is false and would be easy to repeat. Conservation is \emph{not} violated: the money carrier's conservation error is exactly $0.0$ in the defaulted run, as the first row of the table shows, and total money is invariant to the last digit. Nothing leaks. What moves is the \emph{trajectory} --- the physical stocks take a different path through time --- and it moves precisely because the model is a coupled system in which the money channel is load-bearing for the real one, as Section~\ref{sec:moneyforce} sets out. A conservation check cannot detect this, and neither can a ledger that balances.
+
+That makes a defaulted price a defect on Odum's own terms, with no accounting standard in the room. A modeller who regards the financial argument as somebody else's problem still has a model that delivers $27\%$ too much.
 
 \textbf{The cost} is that some models which load today will stop loading, which is the intended effect. Tracked as \code{exchange-price-authored-vs-defaulted}.
 
