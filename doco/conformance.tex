@@ -29,7 +29,7 @@ Four defects found in the kernel while establishing this are reported with the m
 \section{Introduction}
 \label{sec:intro}
 
-The question this document answers was posed, in very nearly its modern form, by \citet{campbell2013}: can one set of books be kept for the environment and the economy at once? Campbell's answer was a construction --- a combined journal carrying both monetary and emergy entries, cross-indexed to parallel emergy and money ledgers, brought together on a unified emdollar balance sheet --- demonstrated on a partial account for the State of West Virginia. \citet{ortega2005} had applied parallel emergy and money bookkeeping to a working farm at the same conference. The ambition is the right one, and this document takes it up rather than around.
+The question this document answers was posed, in very nearly its modern form, by \citet{campbell_Keeping_2013}: can one set of books be kept for the environment and the economy at once? Campbell's answer was a construction --- a combined journal carrying both monetary and emergy entries, cross-indexed to parallel emergy and money ledgers, brought together on a unified emdollar balance sheet --- demonstrated on a partial account for the State of West Virginia. \citet{ortega2005} had applied parallel emergy and money bookkeeping to a working farm at the same conference. The ambition is the right one, and this document takes it up rather than around.
 
 It reaches the opposite conclusion on one of its three parts, for reasons given in Section~\ref{sec:campbell} and demonstrated by a measurement rather than argued. That disagreement is the origin of the work reported here: \gssk{} exists because settling the question required a kernel that could actually run the models, and running them turned out to be the only way to tell which of the disagreements were substantive and which were vocabulary.
 
@@ -52,9 +52,124 @@ This document is written for two readers who do not usually share a page. The fi
 
 The standards in scope are the recognition and measurement rules: the \emph{Conceptual Framework for Financial Reporting}, AASB 15 / IFRS 15 \emph{Revenue from Contracts with Customers}, AASB 102 / IAS 2 \emph{Inventories}, AASB 9 / IFRS 9 \emph{Financial Instruments} where a model carries financial assets, and AASB 101 / IAS 1 for the accrual basis and materiality. Auditing standards, tax-effect accounting and management accounting are out of scope; they sit on top of a compliant ledger rather than defining one. Paragraph references are to the IFRS text and should be verified against the current compiled AASB standard before being relied upon.
 
-One construct is used throughout and has no counterpart in either field's vocabulary, so it is introduced here rather than left to Section~\ref{sec:terms}. An \emph{archetype} is a reusable template for a piece of network structure. Rather than draw the same arrangement of nodes and pathways once for every place it occurs, the author declares it once, names it, and then instantiates it wherever it is needed. Each instance is expanded into its own private copy of the members, so a model with two instances of a two-node template has four nodes and not two. Accountants will recognise the idea from a chart of accounts, where a standard account structure is replicated per cost centre or per subsidiary; modellers will recognise it as a macro. It matters to the argument for one specific reason. Because the members of an instance are generated rather than written out, they are not directly visible in the model document, and a reference from one member to another has to be rewritten at expansion time to point at the right copy. Section~\ref{sec:silence} turns on a case where exactly that rewriting failed silently.
+One construct is used throughout and has no counterpart in either field's vocabulary, so it is introduced here. An \emph{archetype} is a reusable template for a piece of network structure. Networks are graphs, and graphs are combinatorial objects: an intersection between lines of the network are `nodes', and the lines of the network are `edges.' To make a graph is to add or remove nodes and edges. In relation to the graph structure of a network, an archetype is a subgraph that is declared once and then instantiated multiple times. An archetype can be an arbitrarily complex assembly of nodes and edges which can feedback within the archetype. In Odum's Ecological Systems modelling, a 'consumer' is an archetype, constructed out of other more fundamental archetypes, 'storage node archetype' with feedback into a 'interaction node archetype'. Storage and interaction nodes are fundamental archetypes, and the consumer archetype is what \cite{odum2000} referred to as a composite of these.  
+
+
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+  every node/.style={font=\footnotesize},
+  nd/.style={circle,draw,minimum size=6mm,inner sep=0pt},
+  st/.style={draw,minimum width=8mm,minimum height=6mm,inner sep=1pt},
+  ix/.style={regular polygon,regular polygon sides=3,draw,shape border rotate=270,minimum size=8mm,inner sep=0pt},
+  ed/.style={-{Latex[length=1.6mm]},thick}]
+
+% (a) node
+\begin{scope}
+  \node[nd] (a1) at (0,0) {};
+  \node at (0,-0.85) {(a) a \emph{node}};
+\end{scope}
+
+% (b) edge
+\begin{scope}[xshift=2.3cm]
+  \node[nd] (b1) at (0,0) {};
+  \node[nd] (b2) at (1.3,0) {};
+  \draw[ed] (b1) -- (b2);
+  \node at (0.65,-0.85) {(b) an \emph{edge}};
+\end{scope}
+
+% (c) graph
+\begin{scope}[xshift=5.6cm]
+  \node[nd] (c1) at (0,0.35) {};
+  \node[nd] (c2) at (1.1,0.7) {};
+  \node[nd] (c3) at (1.1,-0.2) {};
+  \node[nd] (c4) at (2.2,0.35) {};
+  \draw[ed] (c1) -- (c2); \draw[ed] (c1) -- (c3);
+  \draw[ed] (c2) -- (c4); \draw[ed] (c3) -- (c4);
+  \node at (1.1,-0.85) {(c) a \emph{graph}};
+\end{scope}
+
+% (d) archetype: a named subgraph, instantiated twice
+\begin{scope}[yshift=-2.6cm]
+  \node[nd] (t1) at (0,0.3) {};
+  \node[nd] (t2) at (1.1,0.3) {};
+  \draw[ed] (t1) -- (t2);
+  \draw[ed] (t2) to[out=120,in=60] (t1);
+  \begin{scope}[on background layer]
+    \node[draw,dashed,rounded corners,fit=(t1)(t2),inner sep=4pt] (T) {};
+  \end{scope}
+  \node at (0.55,-0.75) {template \code{P}};
+
+  \node[nd] (i1) at (3.0,0.3) {}; \node[nd] (i2) at (4.1,0.3) {};
+  \draw[ed] (i1) -- (i2); \draw[ed] (i2) to[out=120,in=60] (i1);
+  \begin{scope}[on background layer]
+    \node[draw,dotted,rounded corners,fit=(i1)(i2),inner sep=4pt] {};
+  \end{scope}
+  \node at (3.55,-0.75) {\code{a\_\_}$\ast$};
+
+  \node[nd] (j1) at (5.6,0.3) {}; \node[nd] (j2) at (6.7,0.3) {};
+  \draw[ed] (j1) -- (j2); \draw[ed] (j2) to[out=120,in=60] (j1);
+  \begin{scope}[on background layer]
+    \node[draw,dotted,rounded corners,fit=(j1)(j2),inner sep=4pt] {};
+  \end{scope}
+  \node at (6.15,-0.75) {\code{b\_\_}$\ast$};
+
+  \draw[ed,gray,dashed] (T) -- node[above,midway,font=\scriptsize]{instantiate} (2.45,0.3);
+  \node at (3.35,-1.35) {(d) an \emph{archetype}: declared once, instantiated twice};
+\end{scope}
+
+% (e) ecological archetype: the consumer
+\begin{scope}[yshift=-5.6cm, xshift=1.6cm]
+  \node[st] (S) at (0,0) {\scriptsize storage};
+  \node[ix] (I) at (2.4,0) {};
+  \node[font=\scriptsize] at (2.4,-0.62) {interaction};
+  \node[font=\scriptsize] at (-1.5,0) {input};
+  \draw[ed] (-1.15,0) -- (I.west);
+  \draw[ed] (I.east) -- (3.7,0);
+  \draw[ed] (I.north) to[out=90,in=30] (S.east);
+  \draw[ed] (S.south) to[out=-70,in=210] (I.south west);
+  \begin{scope}[on background layer]
+    \node[draw,dashed,rounded corners,fit=(S)(I),inner sep=7pt] {};
+  \end{scope}
+  \node at (1.2,-1.5) {(e) an \emph{ecological} archetype: the \emph{consumer}};
+\end{scope}
+\end{tikzpicture}
+\caption{From the graph primitives to a named composite. (a)--(c) fix the
+vocabulary: nodes, edges, and the graph they compose. (d) An archetype is a
+subgraph declared once and instantiated many times; each instance is a private
+copy whose members are renamed \code{\{instance\}\_\_\{member\}}, so two
+instances of a two-member template yield four nodes. (e) Odum's consumer is such
+an archetype --- a storage feeding back into an interaction --- and is what
+\citet{odum2000} calls a composite of the fundamental storage and interaction
+types.}
+\label{fig:archetype}
+\end{figure}
+
+Rather than draw the same arrangement of nodes and pathways once for every place it occurs, the author declares it once, names it, and then instantiates it wherever it is needed. Each instance is expanded into its own private copy of the members, so a model with two instances of a two-node template has four nodes and not two. Accountants will recognise the idea from a chart of accounts, where a standard account structure is replicated per cost centre or per subsidiary; modellers will recognise it as a macro. It matters to the argument for one specific reason. Because the members of an instance are generated rather than written out, they are not directly visible in the model document, and a reference from one member to another has to be rewritten at expansion time to point at the right copy. Section~\ref{sec:silence} turns on a case where exactly that rewriting failed silently.
+
 
 The companion decision record is ADR 0009 in \code{docs/adr/}. The ADR decides; this document argues. Where the two differ in emphasis the ADR governs, because it is the artefact the repository enforces against.
+
+\subsection{What archetypes cost, computationally}
+
+Instantiation is a source of difficulty rather than merely a convenience, and three consequences bear on everything later in this document.
+
+\emph{The running model is not the written model.} Expansion happens inside \code{GSSK\_Init}, so the node set the solver integrates is larger than, and typed differently from, the \code{nodes} array the author wrote. A two-member template instantiated twice contributes four state variables. Anything that reasons about the model by reading the document --- a schema validator, a diff, a reviewer --- is reasoning about the pre-expansion surface, while the trajectory, the conservation checks and the diagnostics all describe the post-expansion one. The two are different graphs and this document is careful to say which it means.
+
+\emph{References inside a template must be rewritten, and the rewriting can fail quietly.} A template member naming a sibling names it by its template-local id, which does not exist after expansion; expansion must repoint it at \code{\{instance\}\_\_\{member\}}. Where that rewriting is not performed the reference dangles, and the interesting failure is not a crash but a fallback --- the kernel finds nothing, keeps a default, and runs. Section~\ref{sec:silence} is built on exactly this case: a template's price reference was discarded at parse time, every instance silently traded at the template's constant, and the model reported success.
+
+\emph{Instances are structurally identical and must be numerically distinguishable.} Two instances of one template have, by construction, the same topology and the same parameters. If they are to represent two different transactions they must differ somewhere, and the only channel that reaches an expanded member is the state vector, addressed by post-expansion id. That works for a quantity which is naturally a state, such as a price held on a member node, and does not extend to a rate coefficient or a capacity, which are parameters rather than states. Section~\ref{sec:open} records this as unresolved.
+
+\subsection{What archetypes cost, in the books}
+
+The bookkeeping consequences are sharper than the computational ones, because a ledger is answerable in a way a simulation is not.
+
+\emph{An archetype is a chart of accounts, and instantiation is opening a new set of them.} The accounting analogue is exact: a standard account structure replicated per cost centre, per subsidiary, per contract. That is what makes archetypes worth having --- a hundred contracts on identical terms are one declaration --- and it is also what makes an error in the template a hundred errors rather than one. A defect in a hand-written account affects that account; a defect in a template is instantiated faithfully everywhere it is used.
+
+\emph{Auditability runs through a name the author never wrote.} An auditor tracing an entry needs to reach the account it was posted to. For an expanded member that account is \code{\{instance\}\_\_\{member\}}, a name generated at load time and absent from the document the author signed. The audit trail therefore depends on the expansion being deterministic and on the naming convention being stable across versions --- properties which are true here but which are commitments rather than accidents, since changing either would silently break every historical reference.
+
+\emph{Per-instance values are the ones that carry the accounting content, and they arrive by the least visible route.} What distinguishes two instances of a purchase archetype is precisely what an accountant cares about: the price each transacted at. Section~\ref{sec:silence} shows that this value must be authored rather than defaulted, and the expansion makes that harder to enforce, because the value is attached to a generated id which the schema cannot check --- a mistyped instance name is not a schema error, it is a state entry that matches no node and is skipped in silence. That is why the fixture described there poisons both failure modes rather than trusting either to be noticed.
+
 
 \section{The arithmetic criterion: what adds and what does not}
 \label{sec:additivity}
@@ -155,6 +270,8 @@ Branches $n$ & \code{partition} (split) & \code{replicate} (co-product) & Odum's
 
 The overstatement is exactly $n$. It is not a small error that grows slowly with network size; it is a factor equal to the number of co-products that reunite, and it is unbounded. Note also where the error is \emph{not}: a split reuniting is exactly correct at $1.000000$, because a split genuinely divides the quality and summing the parts recovers the whole. The defect is confined to the co-product rule, which is the one place emergy algebra is deliberately non-additive, and the corrective rule is the one the kernel lacks.
 
+A second defect compounds it and is recorded here rather than left in the tracker: the quality pass reads each edge's \emph{declared} conductance rather than the forced one, so in any model using the forcing vocabulary of Section~\ref{sec:dynamics} the transformities are computed from rates the simulation did not actually run at. Tracked as \code{quality-pass-ignores-edge-forcing}.
+
 This bounds a claim made in the abstract. \gssk{} is a faithful simulator of Odum's \emph{dynamics}; it is not presently a faithful implementation of Odum's \emph{emergy algebra} on any topology where co-product pathways recombine, and a transformity read off such a model is wrong by a factor this table gives.
 
 \subsubsection*{Supporting both rules rather than choosing}
@@ -171,7 +288,7 @@ What that buys is agnosticism where agnosticism is honest. Odum's fourth rule is
 \subsection{Prior art: one set of books for the environment and the economy}
 \label{sec:campbell}
 
-\citet{campbell2013} proposes the construction this document is in dialogue with, and it deserves stating properly rather than in summary. Three artefacts are involved. A \emph{combined journal} records each transaction once, carrying both its monetary and its emergy lines --- a purchase of 1000 short tons of coal appears as a \$20{,}000 debit to assets, a $1.05\mathrm{E}18$~sej debit to assets, a \$20{,}000 credit to accounts payable, and a $1.56\mathrm{E}16$~sej credit to environmental liabilities for extraction damage. Those lines are cross-indexed to \emph{separate} emergy and money ledgers, each keeping its own running balance. The two are brought together only at the end, on a \emph{unified emdollar balance sheet}, by an emergy-to-money ratio; Campbell's contribution there is a route to that ratio through the emergy of human service, $\mathrm{EMR_S} = PI/\mathrm{GSP\$}$, which avoids the circularity of deriving it from total emergy use. A partial balance sheet for the State of West Virginia demonstrates the method.
+\citet{campbell_Keeping_2013} proposes the construction this document is in dialogue with, and it deserves stating properly rather than in summary. Three artefacts are involved. A \emph{combined journal} records each transaction once, carrying both its monetary and its emergy lines --- a purchase of 1000 short tons of coal appears as a \$20{,}000 debit to assets, a $1.05\mathrm{E}18$~sej debit to assets, a \$20{,}000 credit to accounts payable, and a $1.56\mathrm{E}16$~sej credit to environmental liabilities for extraction damage. Those lines are cross-indexed to \emph{separate} emergy and money ledgers, each keeping its own running balance. The two are brought together only at the end, on a \emph{unified emdollar balance sheet}, by an emergy-to-money ratio; Campbell's contribution there is a route to that ratio through the emergy of human service, $\mathrm{EMR_S} = PI/\mathrm{GSP\$}$, which avoids the circularity of deriving it from total emergy use. A partial balance sheet for the State of West Virginia demonstrates the method.
 
 Much of this is right and is adopted here. Environmental liability genuinely is a liability, and the choice to define it through an Energy Systems Language model rather than a verbal argument is the same choice this document makes. Campbell is also candid about the weak joint in his own construction: the conventional emergy-to-money ratio is circular, and he says so before offering a repair.
 
@@ -330,7 +447,7 @@ An absent price is an authored zero &
 A node price is zero-initialised and assigned only when the key is present. An \code{exchange} with no price and one with \code{"price": 0.0} are indistinguishable, and both post nothing. \\
 \addlinespace
 Node-level \code{output\_mode} is silently ignored &
-The schema documents \code{output\_mode} on a node as governing quality propagation from it, with the edge-level field as a per-edge override. The quality pass reads only the edge field, and an edge that does not declare one defaults to \code{partition} without consulting its origin. \code{nodes[].output\_mode} is parsed, stored and re-serialised, and never read. A model declaring co-products the way the schema documents gets splits: transformity $0.6/0.4$ where $1.0/1.0$ was asked for. \\
+The schema documents \code{output\_mode} on a node as governing quality propagation from it, with the edge-level field as a per-edge override. The quality pass reads only the edge field, and an edge that does not declare one defaults to \code{partition} without consulting its origin. \code{nodes[].output\_mode} is parsed, stored and re-serialised, and never read. A model declaring co-products the way the schema documents gets splits: transformity $0.6/0.4$ where $1.0/1.0$ was asked for. Tracked as \code{node-output-mode-ignored}. \\
 \bottomrule
 \end{tabular}
 \caption{Five defects found while establishing conformance, each verified by execution.}
@@ -379,7 +496,7 @@ The stronger argument is arithmetic, and it does not depend on the list at all. 
 
 So emergy is not excluded because the standards happen not to list it. It is excluded because there is no posting step, however carefully specified, that could turn a non-additive quantity into a balancing entry --- the incompatibility is in the arithmetic rather than in the measurement, and Section~\ref{sec:posting}'s procedure has no purchase on it. This is a stronger claim than the closed-list one and it settles the question permanently rather than provisionally.
 
-\textbf{The resolution} is that emergy is supplementary information and never the measurement basis of a recognised amount. Note that this holds whichever calculus computed it, so the open question in Section~\ref{sec:idc} does not reach here: an emergy figure is inadmissible as a ledger entry because of how it composes, not because of how it was integrated. The resolution constrains both directions, and the second direction is easy to miss. No recognised amount may be derived from a transformity --- that is the obvious half. But equally, the money leg of a transaction must not contribute emergy inflow, because counting money as an energy input double-counts the transaction in the one accounting that is supposed to be independent of price. Odum's own treatment of the counter-current says the same thing for his own reasons, which is a useful convergence: the standards and the method agree on the exclusion even though they reach it differently.
+\textbf{The resolution} is that emergy is supplementary information and never the measurement basis of a recognised amount. Note that this holds whichever calculus computed it, so the open question in Section~\ref{sec:idc} does not reach here: an emergy figure is inadmissible as a ledger entry because of how it composes, not because of how it was integrated. The resolution constrains both directions, and the second direction is easy to miss. No recognised amount may be derived from a transformity --- that is the obvious half. But equally, the money leg of a transaction must not contribute emergy inflow, because counting money as an energy input double-counts the transaction in the one accounting that is supposed to be independent of price. That exclusion is not yet enforced in the kernel and is tracked as \code{b3-coupling-quality-directionality}. Odum's own treatment of the counter-current says the same thing for his own reasons, which is a useful convergence: the standards and the method agree on the exclusion even though they reach it differently.
 
 \textbf{The cost} is that a model carries two valuations that must not be mixed, and the discipline of keeping them apart falls partly on the modeller. A statement that presents emergy alongside monetary amounts must label which is which. That discipline is required now rather than later: as Section~\ref{sec:emergy} sets out, the non-additive rule is already implemented and reachable from any model document, so a model can produce emergy quantities that must not be summed with anything today, not at some future point when a feature lands.
 
@@ -630,7 +747,8 @@ This document argues across two fields, and a reader fluent in one is unlikely t
 \end{description}
 
 
-\bibliographystyle{plainnat}
-\bibliography{references}
+% Bibliography temporarily disabled -- references.bib needs a pass.
+% \bibliographystyle{plainnat}
+% \bibliography{references}
 
 \end{document}
