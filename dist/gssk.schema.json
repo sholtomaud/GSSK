@@ -1,0 +1,492 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gssk.io/schema/v4/model.json",
+  "title": "GSSK Model (Schema v4)",
+  "description": "Schema for General Systems Simulation Kernel (GSSK) models. Based on Odum's Energy Systems Language. Each inter-block connection carries four channels (Odum 2000, Appendix A): Code (carrier), Force (driving potential, implicit in logic+Q), Flow (rate, computed by logic), and Transformity (quality ratio, computed from quality_input).\n\nThis schema describes the PRE-EXPANSION model surface — what a consumer writes and hands to GSSK_Init. It is NOT the post-expansion vocabulary. Composite nodes (see Node.type) are expanded at GSSK_Init time into namespaced primitives, so the node set reported by GSSK_GetNodeID/GSSK_GetNodeTypeString after init is larger than, and typed differently from, the 'nodes' array here. In particular the post-expansion set can contain 'interaction' nodes that no model declared. Query membership with GSSK_GetNodeComposite/GSSK_GetNodeRole rather than parsing the '{instance}__{member}' id convention.\n\nv4 adds the 'archetypes' block and composite node types. v3 added metadata versioning, snapshot support for deterministic replay, topology mutation logging, and multi-carrier declarations. v2 models auto-migrate to v3 with a warning.\n\nAny property whose name begins with an underscore is permitted anywhere and ignored, both by this schema and by the kernel. See examples/household_model_annotated.json, which uses '_note' throughout.",
+  "type": "object",
+  "required": ["nodes"],
+  "additionalProperties": false,
+  "patternProperties": { "^_": true },
+
+  "properties": {
+    "metadata": { "$ref": "#/$defs/Metadata" },
+    "archetypes": { "$ref": "#/$defs/Archetypes" },
+    "nodes":    {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Node" },
+      "minItems": 1,
+      "description": "Ordered array of compartments. For models with no composite nodes, the index of each node here is its column index in GSSK_GetState(). Composite nodes expand to several state columns, so once any composite is present, resolve indices with GSSK_FindNodeIdx() instead of assuming positional correspondence."
+    },
+    "edges":    {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Edge" },
+      "description": "Directed flows between nodes. Omit for a single isolated storage. An endpoint naming a composite instance resolves to that composite's declared 'in'/'out' port."
+    },
+    "config":   { "$ref": "#/$defs/Config" },
+    "snapshot": { "$ref": "#/$defs/Snapshot" },
+    "mutation_log": {
+      "$ref": "#/$defs/MutationLog",
+      "description": "Archival copy of a mutation history, as produced by GSSK_ExportMutationLog. GSSK_Init does NOT read it here — the kernel restores a log only from snapshot.mutation_log, and gssk replay takes one as a separate file. Allowed at the root so an exported log can be stored alongside the model it belongs to."
+    },
+    "carriers": { "$ref": "#/$defs/Carriers" }
+  },
+
+  "$defs": {
+
+    "Metadata": {
+      "type": "object",
+      "description": "Model provenance, versioning, and identity.",
+      "required": ["schema_version"],
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "enum": [2, 3, 4],
+          "description": "Schema version. v4 supports the archetypes block and composite node types. v3 supports snapshot/mutation_log/carriers. v2 models auto-migrate to v3 with a warning. Any other value is rejected by GSSK_Init. Defaults to 3 when the metadata block is absent."
+        },
+        "name":            { "type": "string", "description": "Friendly model name." },
+        "description":     { "type": "string", "description": "Prose model description." },
+        "author":          { "type": "string", "description": "Serialiser or author name." },
+        "created_at":      { "type": "string", "format": "date-time", "description": "ISO8601 creation timestamp. Auto-generated if not provided." },
+        "kernel_version":  { "type": "string", "description": "Semver of GSSK kernel that created this model. Defaults to current kernel version at init time." },
+        "model_hash":      { "type": "string", "description": "SHA256 hex hash of the topology (nodes+edges) for reproducibility check. Auto-computed if not provided." }
+      }
+    },
+
+    "Archetypes": {
+      "type": "object",
+      "description": "User-defined composite templates, keyed by archetype name. The key becomes a usable value for Node.type. User archetype names are registered after the four built-ins (producer, consumer, misc_box, system_frame) and may not exceed 32 archetypes in total. A user archetype whose name collides with a built-in shadows nothing — the built-in is found first.",
+      "additionalProperties": { "$ref": "#/$defs/ArchetypeDefn" },
+      "propertyNames": { "maxLength": 63 }
+    },
+
+    "ArchetypeDefn": {
+      "type": "object",
+      "description": "One composite template. At expansion time each template node becomes a state node with id '{instance_id}__{template_node_id}', and each template edge becomes an edge with id '{instance_id}__{template_edge_id}'.",
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "maxItems": 16,
+          "description": "Template nodes. Max 16 per archetype.",
+          "items": {
+            "type": "object",
+            "required": ["id", "type"],
+            "additionalProperties": false,
+            "patternProperties": { "^_": true },
+            "properties": {
+              "id":      { "type": "string", "maxLength": 63, "description": "Internal id within the archetype namespace. Becomes the node's 'role' (GSSK_GetNodeRole)." },
+              "type":    { "$ref": "#/$defs/PrimitiveNodeType" },
+              "value":   { "type": "number", "default": 0.0, "description": "Initial state. Overridden by the instance's 'value' for the node named by ports.in." },
+              "carrier": { "type": "string", "description": "Odum Position 1 carrier label. Falls back to the instance's carrier if omitted." },
+              "params":  {
+                "$ref": "#/$defs/NodeParams",
+                "description": "Template node parameters. Declared as the full NodeParams for consistency with a model node, but parse_user_archetypes reads only k, C, threshold, price and price_node — k_production, k_respiration and k_metabolism are accepted and ignored on a template. The wider set is kept because narrowing it would reject models this schema calls valid. A template's price_node names a SIBLING MEMBER by its template-local id, and expansion rewrites it to '{instance}__{member}' exactly as it does an edge origin or target, so two instances of one archetype can trade at two different prices. Naming no member of the archetype is a schema error, not a fallback to the scalar price."
+              }
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 32,
+          "description": "Template edges, wired between template node ids. Max 32 per archetype.",
+          "items": {
+            "type": "object",
+            "required": ["origin", "target"],
+            "additionalProperties": false,
+            "patternProperties": { "^_": true },
+            "properties": {
+              "id":      { "type": "string", "maxLength": 63, "description": "Internal edge id within the archetype namespace." },
+              "origin":  { "type": "string", "description": "Template node id the flow leaves." },
+              "target":  { "type": "string", "description": "Template node id the flow enters." },
+              "logic":   { "$ref": "#/$defs/EdgeLogic", "default": "linear" },
+              "carrier": { "type": "string", "description": "Odum Position 1 carrier label." },
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "patternProperties": { "^_": true },
+                "properties": {
+                  "k":         { "type": "number", "default": 1.0, "description": "Conductance/rate coefficient. Defaults to 1.0 within archetype templates." },
+                  "threshold": { "type": "number", "default": 0.0 }
+                }
+              }
+            }
+          }
+        },
+        "ports": {
+          "type": "object",
+          "description": "Named external attachment points, mapping port name to internal template node id. The 'in' and 'out' ports are special: an external edge naming the composite instance as its target resolves to 'in', and as its origin resolves to 'out'. Without them the composite cannot be wired to the rest of the model, and the instance's declared 'value' is not applied to any member.",
+          "additionalProperties": { "type": "string", "maxLength": 63 },
+          "properties": {
+            "in":  { "type": "string", "description": "Template node id receiving inbound external flows." },
+            "out": { "type": "string", "description": "Template node id supplying outbound external flows." }
+          }
+        }
+      }
+    },
+
+    "PrimitiveNodeType": {
+      "type": "string",
+      "description": "A fundamental (non-composite) node type. storage: dQ/dt computed. source/constant: Q fixed at value. sink: accumulates inflows, not depleted. interaction/gain/loop_limited/exchange/switch: Phase 7 processing nodes, parameterised via the node 'params' block. This enum is the complete set of primitives; GSSK_Init rejects any type string that is neither one of these, a built-in composite, nor an archetype the model declares (GSSK_ERR_SCHEMA_VIOLATION). GSSK_AddNode is stricter still: it performs no composite expansion, so it accepts only the primitives listed here.",
+      "enum": [
+        "storage",
+        "source",
+        "sink",
+        "constant",
+        "interaction",
+        "gain",
+        "loop_limited",
+        "exchange",
+        "switch"
+      ]
+    },
+
+    "Snapshot": {
+      "type": "object",
+      "description": "State snapshot for deterministic replay, as emitted by GSSK_SerializeSnapshot.",
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "t":     { "type": "number", "description": "Simulation time at capture." },
+        "dt":    { "type": "number", "description": "Time step in force at capture. Informational: GSSK_Init does NOT read it back — a reloaded snapshot takes dt from 'config', exactly as a model with no snapshot does. Declared and accepted because the serialiser emits it, and a kernel that rejected its own output would be a defect." },
+        "step":  { "type": "number", "description": "Steps taken since init." },
+        "state": {
+          "type": "array",
+          "description": "Live state keyed by post-expansion node id — one entry per state node, so composite members appear individually under their '{instance}__{member}' ids.",
+          "items": {
+            "type": "object",
+            "required": ["id", "Q"],
+            "additionalProperties": false,
+            "patternProperties": { "^_": true },
+            "properties": {
+              "id": { "type": "string", "description": "Post-expansion node id." },
+              "Q":  { "type": "number", "description": "Current state value." },
+              "Tr": { "type": "number", "description": "Transformity; 0.0 when quality accounting is disabled." }
+            }
+          }
+        },
+        "edge_k": {
+          "type": "array",
+          "description": "Live conductance of every NAMED edge, including composite-internal edges (which are named '{instance}__{template_edge}'). Edges declared without an 'id' are omitted entirely, so this array is not positionally aligned with the model's 'edges' array.",
+          "items": {
+            "type": "object",
+            "required": ["id", "k"],
+            "additionalProperties": false,
+            "patternProperties": { "^_": true },
+            "properties": {
+              "id": { "type": "string", "description": "Edge id." },
+              "k":  { "type": "number", "description": "Current conductance." }
+            }
+          }
+        },
+        "solver": {
+          "type": "object",
+          "additionalProperties": false,
+          "patternProperties": { "^_": true },
+          "properties": {
+            "confidence":         { "type": "string", "enum": ["high", "degraded"] },
+            "incipient_eligible": { "type": "boolean" }
+          }
+        },
+        "rng_state": {
+          "type": ["object", "null"],
+          "description": "PRNG seed and live stream position for the stochastic entry points (GSSK_EnsembleForecast, GSSK_CalibrateMonteCarlo). Both are hex strings, not numbers: a uint64 exceeds the 53-bit exact-integer range of a JSON number. Restoring a snapshot restores both, so a stochastic result is reproducible from the snapshot alone. Null is accepted for snapshots written before seeding existed; the kernel then falls back to GSSK_DEFAULT_SEED.",
+          "additionalProperties": false,
+          "patternProperties": { "^_": true },
+          "properties": {
+            "seed":  { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,16}$", "description": "Seed last passed to GSSK_SetSeed. This is the value to pin in a run manifest." },
+            "state": { "type": "string", "pattern": "^0[xX][0-9a-fA-F]{1,16}$", "description": "Live SplitMix64 stream position. Differs from 'seed' once any draw has been taken." }
+          }
+        },
+        "mutation_log": { "$ref": "#/$defs/MutationLog" }
+      }
+    },
+
+    "MutationLog": {
+      "type": "array",
+      "description": "Topology mutation history. Each entry records a successful AddNode/AddEdge/DeactivateEdge/DeactivateNode/SetEdgeK operation with causality.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "patternProperties": { "^_": true },
+        "properties": {
+          "t":         { "type": "number", "description": "Simulation time the mutation was applied." },
+          "op":        { "type": "string", "enum": ["add_node", "add_edge", "deactivate_edge", "deactivate_node", "set_edge_k"] },
+          "target_id": { "type": "string", "description": "Node or edge id the operation acted on." },
+          "payload":   { "type": "string", "description": "Operation-specific detail (e.g. the JSON fragment added)." },
+          "cause":     { "type": "string", "description": "Attribution string; defaults to 'user'." }
+        }
+      }
+    },
+
+    "Carriers": {
+      "type": "array",
+      "description": "Multi-carrier type definitions. Each carrier can be conserved independently.",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "patternProperties": { "^_": true },
+        "properties": {
+          "id":        { "type": "string", "description": "Unique carrier identifier (e.g. 'money', 'energy', 'material')." },
+          "unit":      { "type": "string", "description": "Physical unit (e.g. 'AUD', 'kWh', 'kg')." },
+          "conserved": { "type": "boolean", "default": true, "description": "Whether this carrier obeys conservation law within isolated sub-systems." }
+        }
+      }
+    },
+
+    "Forcing": {
+      "type": "object",
+      "description": "A forcing waveform. ONE vocabulary, attachable in TWO places: on a node it drives the node's held value (Odum X/N, a force); on an edge it drives the edge's rate k (Odum J, a flow). Odum's eleven forcing annotations (Systems Ecology Fig. 7-2) are a node-value vs edge-rate distinction crossed with a carrier distinction, and carriers are already modelled by `carrier` on nodes and edges — so the eleven collapse to this. See docs/adr/0006-forcing-one-vocabulary-two-attachments.md. Evaluated at RK4/DOPRI5 STAGE times, not once per step. PHASE CONVENTION: `phase` is a TIME offset in the same units as t — not radians, not a fraction of the period — and is SUBTRACTED, so a positive phase delays the waveform. Clamping by `min`/`max` is applied last, after the formula.",
+      "required": ["waveform"],
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "waveform": {
+          "type": "string",
+          "enum": ["step", "impulse", "ramp", "sawtooth", "square", "sine", "exponential", "jitter"],
+          "description": "Which waveform. With tau = t - t_on and frac(x) = x - floor(x): step -> v0 if t < t_on else v1. impulse -> area/w on [t_on, t_on+w) else 0, where w is config.dt so the INTEGRAL is `area` at any dt. ramp -> v0 if t < t_on else v0 + slope*tau. sawtooth -> mean + amplitude*(2*frac((tau-phase)/period) - 1). square -> mean+amplitude while frac((tau-phase)/period) < duty, else mean-amplitude. sine -> mean + amplitude*sin(2*PI*(tau-phase)/period). exponential -> v0 if t < t_on else v0*exp(rate*tau). jitter -> mean + amplitude*(2u-1), u from the instance RNG, LATCHED once per accepted step."
+        },
+        "t_on":      { "type": "number", "description": "Onset time. Defaults to config.t_start. Used by step, impulse, ramp and exponential as the switch-on point, and by the periodic waveforms as the origin of tau." },
+        "v0":        { "type": "number", "description": "step: value before t_on. ramp/exponential: value at t_on." },
+        "v1":        { "type": "number", "description": "step: value at and after t_on." },
+        "area":      { "type": "number", "description": "impulse: the INTEGRAL delivered, held constant across dt. A bare amplitude would make the delivered quantity depend on step size — a discretisation artefact masquerading as physics." },
+        "slope":     { "type": "number", "description": "ramp: rate of change per unit time after t_on." },
+        "rate":      { "type": "number", "description": "exponential: growth (positive) or decay (negative) rate. Value is v0*exp(rate*tau)." },
+        "period":    { "type": "number", "exclusiveMinimum": 0, "description": "sine/square/sawtooth: period in time units. REQUIRED and positive for those three — a periodic waveform with no period is an authoring mistake, not a slow waveform, and GSSK_Init rejects it rather than silently treating it as constant." },
+        "phase":     { "type": "number", "description": "sine/square/sawtooth: a TIME offset, not radians and not a fraction of the period. SUBTRACTED, so a positive phase DELAYS the waveform." },
+        "duty":      { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "description": "square: fraction of each period spent at mean+amplitude." },
+        "mean":      { "type": "number", "description": "sine/square/sawtooth/jitter: the centre value." },
+        "amplitude": { "type": "number", "description": "sine/square/sawtooth/jitter: half the peak-to-peak range." },
+        "min":       { "type": "number", "description": "Lower clamp, applied after the formula. Omit for no lower bound." },
+        "max":       { "type": "number", "description": "Upper clamp, applied after the formula. Omit for no upper bound." }
+      }
+    },
+
+    "Node": {
+      "type": "object",
+      "description": "A compartment. Either a fundamental type (storage/source/sink/constant or a Phase 7 processing node) or a composite that expands at GSSK_Init time.",
+      "required": ["id", "type", "value"],
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 63,
+          "description": "Unique identifier. Max 63 chars (C internal limit). Stable across model mutations. For composite nodes the id becomes the namespace prefix for expanded members, which truncates to 29 chars in member ids. An id may legitimately contain '__' — that does not make it a composite member."
+        },
+        "type": {
+          "type": "string",
+          "description": "Node type. One of: (a) a fundamental type — storage, source, sink, constant, interaction, gain, loop_limited, exchange, switch; (b) a built-in composite — producer (expands to body/gate/heat), consumer (body/heat), misc_box (box), system_frame (structural only, recorded as a single constant node); or (c) the name of any archetype declared in the top-level 'archetypes' block. Because (c) is open-ended this cannot be a closed enum, so validating against this schema cannot catch a mistyped type. GSSK_Init can and does: it parses the 'archetypes' block before the node list, so anything matching none of (a), (b) or (c) is rejected with GSSK_ERR_SCHEMA_VIOLATION naming the node id and the offending string. GSSK_AddNode accepts only (a) — it expands nothing at runtime and rejects composite and archetype names rather than mis-modelling them as single nodes."
+        },
+        "value": {
+          "type": "number",
+          "description": "Initial state Q at t_start, or fixed value for source/constant nodes. For a composite, this is applied to the member named by the archetype's 'in' port."
+        },
+        "carrier": {
+          "type": "string",
+          "description": "Odum Position 1 (Code) carrier label for this node. Metadata only; does not affect ODE integration. For a composite, applied to every expanded member that does not declare its own."
+        },
+        "params": { "$ref": "#/$defs/NodeParams" },
+        "forcing": {
+          "$ref": "#/$defs/Forcing",
+          "description": "Drives this node's HELD value (Odum X/N, a force). REJECTED on a storage node: a storage node's value is the integral of its flows, so forcing it is a contradiction — force the source or the edge that drives it instead. GSSK_Init returns GSSK_ERR_SCHEMA_VIOLATION rather than ignoring the block."
+        },
+        "quality_input": {
+          "type": "number",
+          "minimum": 0.0,
+          "description": "Odum Position 4 (Transformity) at system boundary. Solar transformity convention: 1.0 for solar. Set on source/constant nodes to enable the quality accounting pass. Units are domain-defined (e.g. sej/J, sej/$, or dimensionless). Omit to disable quality accounting for this source."
+        },
+        "output_mode": {
+          "type": "string",
+          "enum": ["partition", "replicate"],
+          "default": "partition",
+          "description": "How quality propagates at bifurcations from this node. partition: quality divides proportionally to flow (Bastianoni split). replicate: each downstream branch receives the full quality (Bastianoni co-product). Does NOT affect ODE integration."
+        },
+        "active": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this node takes part in the network. GSSK_Init restores it, so a node deactivated via GSSK_DeactivateNode survives serialise/reload as deactivated. Read as the authored flag alone and never inferred from params.k: an edge with k of 0 is present and carrying nothing, which is not the same network as one the author removed, and the two differ in every pass that counts active elements rather than summing flows. Emitted as false by GSSK_SerializeModel for a deactivated node, and omitted otherwise. Deactivating a node also deactivates every edge touching it; those edges carry their own flag, so restoring a node does not re-cascade."
+        },
+        "visual": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "UI layout hints. Ignored by the kernel."
+        }
+      }
+    },
+
+    "NodeParams": {
+      "type": "object",
+      "description": "Node-level parameters. The first four configure Phase 7 processing nodes; the remainder override internal edge conductances on built-in composites and are ignored on other node types.",
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "k":         { "type": "number", "description": "Gain/rate coefficient for processing nodes." },
+        "C":         { "type": "number", "description": "Saturation constant for loop_limited nodes: F = k·Q/(1 + Q/C)." },
+        "threshold": { "type": "number", "description": "Switching threshold for switch nodes." },
+        "price":     { "type": "number", "description": "exchange: constant price — units of the money carrier per unit of the goods carrier. Used when price_node is absent or unresolvable. The transaction diamond applies F_money = price x F_goods to the money counter-flow." },
+        "price_node": { "type": "string", "description": "exchange: id of a node whose current state supplies the price, making price a state variable rather than a constant. Takes precedence over price. May refer to a node declared later in the array — references are resolved in a second pass. This is what lets price be driven endogenously (e.g. by M/W) so inflation emerges rather than being dialled in by the author." },
+        "k_production":  { "type": "number", "description": "producer composites only: gain of the internal 'gate' interaction node. Default 0.01." },
+        "k_respiration": { "type": "number", "description": "producer composites only: conductance of the internal body→heat 'resp' edge. Default 0.05." },
+        "k_metabolism":  { "type": "number", "description": "consumer composites only: conductance of the internal body→heat 'metab' edge. Default 0.1." }
+      }
+    },
+
+    "Edge": {
+      "type": "object",
+      "description": "A directed flow between two nodes. Implements Odum's four-position inter-block connection: carrier (Code), logic+Q (Force+Flow), quality_input on origin node (Transformity).\n\nOnly 'origin' and 'target' are unconditionally required. 'logic' and 'params.k' are required UNLESS the edge touches a Phase 7 processing node (interaction, gain, loop_limited, exchange, switch), in which case logic defaults to 'linear' and k defaults to 1.0. That condition depends on the types of the referenced nodes, which JSON Schema cannot resolve, so both fields are declared optional here and the rule is enforced by GSSK_Init.",
+      "required": ["origin", "target"],
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 63,
+          "description": "Stable identifier. Required for GSSK_SetEdgeK(), GSSK_DeactivateEdge(), and coupled_edge references."
+        },
+        "origin": {
+          "type": "string",
+          "description": "ID of the node the flow leaves. May name a composite instance, resolving to its 'out' port."
+        },
+        "target": {
+          "type": "string",
+          "description": "ID of the node the flow enters. May name a composite instance, resolving to its 'in' port."
+        },
+        "carrier": {
+          "type": "string",
+          "description": "Odum Position 1 (Code): what substance or entity is flowing. Free string — use domain conventions: 'energy', 'money', 'material', 'information', 'force', or specific types ('H2O', 'GBP', 'bits'). Does NOT affect ODE integration. Used by quality accounting pass and UI."
+        },
+        "logic": { "$ref": "#/$defs/EdgeLogic" },
+        "params": { "$ref": "#/$defs/EdgeParams" },
+        "forcing": {
+          "$ref": "#/$defs/Forcing",
+          "description": "Drives this edge's RATE k (Odum J, a flow). Overrides params.k at every stage time; params.k remains the value used when no forcing is declared."
+        },
+        "output_mode": {
+          "type": "string",
+          "enum": ["partition", "replicate"],
+          "default": "partition",
+          "description": "Quality propagation mode for this specific edge. Overrides the origin node's output_mode for this edge only."
+        },
+        "coupled_edge": {
+          "type": ["string", "null"],
+          "default": null,
+          "description": "ID of a paired counter-flow edge. Used to model commodity-payment pairs where money flows opposite to goods (e.g. 'salary_payment' coupled with 'labour_delivery'). Kernel uses this for quality accounting directionality."
+        },
+        "active": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether this edge takes part in the network. GSSK_Init restores it, so a edge deactivated via GSSK_DeactivateEdge survives serialise/reload as deactivated. Read as the authored flag alone and never inferred from params.k: an edge with k of 0 is present and carrying nothing, which is not the same network as one the author removed, and the two differ in every pass that counts active elements rather than summing flows. Emitted as false by GSSK_SerializeModel for a deactivated edge, and omitted otherwise."
+        },
+        "visual": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "UI layout hints. Ignored by the kernel."
+        }
+      }
+    },
+
+    "EdgeLogic": {
+      "type": "string",
+      "enum": ["constant", "linear", "interaction", "limit", "threshold", "ratio", "reversible", "subtract"],
+      "description": "Flow calculation type. Encodes Odum Position 2 (Force) and Position 3 (Flow) jointly. An unrecognised logic string is rejected by GSSK_Init, as an unrecognised node type now is.\n\nratio: F = k x Q_numerator / max(Q_control, epsilon) — division, requiring params.control_node as the denominator. The numerator is Q_origin unless params.numerator_node names another node. The denominator is floored so the flow saturates rather than diverging as the control approaches zero; params.threshold sets that floor when above zero, otherwise GSSK_RATIO_EPSILON (1e-9) applies. A model whose control rides the floor is reporting a saturated constant, not a quotient.\n\nlimit: F = k x Q_origin / (1 + Q_origin/C) \u2014 Michaelis-Menten saturation, approaching k x C as Q_origin grows. C is the half-saturation constant and comes from ONE of two places, in this order: params.control_node's current Q if that node is named, otherwise params.threshold when it is above zero. control_node WINS when both are given; params.threshold is not a fallback the kernel falls back to at runtime, only the source it uses when no control node exists. A limit edge with neither is rejected by GSSK_Init.\n\nTwo consequences worth knowing before you author one. A C taken from control_node is a STATE VARIABLE, not a constant: if that node is itself a store, the half-saturation point moves as the run proceeds. And when C falls to 1e-9 or below the flow is 0.0 rather than an error \u2014 so a control node that decays toward zero silently closes the pathway mid-run, in a model that loaded without complaint. Neither is a defect; both are invisible in the model file.\n\nthreshold: F = k if Q_origin > params.threshold, else 0. The comparand is the ORIGIN node's Q, never the control node \u2014 threshold logic ignores control_node entirely. The comparison is strict, so Q_origin exactly equal to the threshold does not flow.\n\nreversible: F = k x (Q_origin - Q_target) \u2014 Odum's BARB-LESS pathway, the only logic that reads the target end. The flow is SIGNED and follows the gradient, so it transports backwards along the declared direction whenever Q_target exceeds Q_origin: for this logic `origin` and `target` name the two ends of a line, not a from and a to, and swapping them produces an identical trajectory. Use it for diffusion, exchange across a gradient, and any equilibrating process.\n\nIt is NOT two opposed linear edges. That pair equals the gradient form only when the two conductances happen to be equal, which nothing enforces, and it draws as two barbed pathways \u2014 which in Odum's notation means something else (see the exchange node's counter-current). Nor is it linear logic with a negative k, which still never reads the target.\n\nBeing linear in the state it is integrated EXACTLY by the incipient/IDC solver rather than linearised, unlike limit and ratio. Quality accounting attributes no transformity to a backward flow (ADR 0007), so GSSK_GetEdgeQualityFlow reads 0.0 while the pathway reverses; GSSK_GetFlows reports the signed rate.\n\ninteraction: F = k x Q_origin x Q_control \u2014 Odum's work gate, and the one logic that is N-ARY. params.control_node names one control; params.control_nodes names between one and eight, and the flow is then k x Q_origin multiplied by EVERY named control's Q, which is the three-input interaction of Modeling for All Scales Fig. 2.6c. Controls are read, never consumed. The two fields are mutually exclusive \u2014 an edge carrying both is rejected by GSSK_Init rather than having one silently win. Expressing a three-input gate the old way, through an intermediate storage node holding the partial product, is a DIFFERENT model: the intermediate integrates, so it lags, and it appears in the state vector and in every CSV column list. See ADR 0008.\n\nsubtract: F = max(0, k x (Q_origin - Q_control)) \u2014 Odum's subtracting action (Fig. 2.6e). Requires exactly one control node, read and never consumed; a second is rejected. The clamp is the semantics, not a guard: this is a BARBED pathway, so a negative flow would drain the target along a line whose barb says it cannot. The gate saturates at zero once the control overtakes the origin. Signed flow across a gradient is `reversible`, which reads the TARGET rather than a control and draws without a barb \u2014 the two are different statements and neither substitutes for the other. Being linear in the state where the difference is positive, `subtract` is integrated EXACTLY by the incipient/IDC solver there and contributes nothing below the clamp, which makes it PIECEWISE exact: an edge whose difference crosses zero inside one step is integrated as though it stayed on the side it started, the same seam `threshold` has, bounded by dt. See ADR 0008."
+    },
+
+    "EdgeParams": {
+      "type": "object",
+      "description": "Logic-specific flow parameters.",
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "k": {
+          "type": "number",
+          "description": "Conductance/rate coefficient. Modifiable at runtime via GSSK_SetEdgeK(). For constant logic: flow = k. For linear: flow = k × Q_origin. Required unless the edge touches a Phase 7 processing node, where it defaults to 1.0."
+        },
+        "control_node": {
+          "type": "string",
+          "description": "Required for interaction and subtract logic; the denominator for ratio logic; one of the two sources of the saturation constant C for limit logic, where it takes precedence over params.threshold. ID of the node whose Q value modulates the flow. The control node is read, never consumed.\n\nUnder limit logic C is Q_control at the current instant, so naming a storage node here gives the edge a MOVING half-saturation point rather than a constant one, and a control that decays to 1e-9 or below silently reduces the flow to 0.0 rather than raising an error. Threshold logic ignores this field entirely: its comparand is always Q_origin.\n\nThis is the ONE-control spelling. For a work gate with more than one control use params.control_nodes instead; naming both fields on one edge is rejected by GSSK_Init. See ADR 0008."
+        },
+        "control_nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": { "type": "string" },
+          "description": "The N-ARY spelling of params.control_node (ADR 0008), for Odum's multi-input interaction (Modeling for All Scales, Fig. 2.6c). IDs of the nodes whose Q values multiply the flow: F = k x Q_origin x the product of every listed control. Controls are read, never consumed.\n\nMutually exclusive with params.control_node \u2014 an edge naming both is rejected with GSSK_ERR_SCHEMA_VIOLATION, rather than one quietly winning as control_node does over threshold under limit logic. A single-entry array is legal and identical to the singular field.\n\nOnly `interaction` accepts MORE THAN ONE control. `ratio` and `subtract` are binary operations and `limit` takes one half-saturation constant, so a second control node on any of them is rejected with GSSK_ERR_SCHEMA_VIOLATION \u2014 a quotient or a difference of three things is not defined by the figure, and the kernel will not guess an associativity. The cap of eight is GSSK_MAX_CONTROL_NODES: past it a product of stores is dominated by floating-point range rather than by the model."
+        },
+        "numerator_node": {
+          "type": "string",
+          "description": "ratio logic only \u2014 rejected by GSSK_Init on any other logic, since silently ignoring it would leave a model that reads as though the quotient were wired up while the kernel used Q_origin. ID of the node supplying the numerator, read by id and NOT consumed, exactly as control_node is. Omitted, the numerator is Q_origin and behaviour is unchanged. This is what lets a stock enter a quotient without being drained by the edge that reads it: the edge stays a flow from origin to target (pin that origin with a source or constant node when the flow must cost nothing), while both operands of the division are named. See ADR 0005."
+        },
+        "threshold": {
+          "type": "number",
+          "default": 0.0,
+          "description": "Required for threshold logic: flow = k if Q_origin > threshold, else 0. The comparand is the origin node's Q and the comparison is strict, so Q_origin exactly equal to threshold does not flow.\n\nFor ratio logic it is the denominator floor, overriding GSSK_RATIO_EPSILON when above zero.\n\nFor limit logic it supplies the half-saturation constant C in F = k x Q_origin / (1 + Q_origin/C), but ONLY when params.control_node is absent \u2014 a named control node wins, and this value is then never read. A limit edge with neither a control_node nor a threshold above zero is rejected by GSSK_Init."
+        }
+      }
+    },
+
+    "Config": {
+      "type": "object",
+      "description": "Simulation parameters. All fields optional — defaults shown.",
+      "additionalProperties": false,
+      "patternProperties": { "^_": true },
+      "properties": {
+        "t_start": {
+          "type": "number",
+          "default": 0.0,
+          "description": "Simulation start time."
+        },
+        "t_end": {
+          "type": "number",
+          "default": 100.0,
+          "description": "Simulation end time. Must be > t_start."
+        },
+        "dt": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 0.1,
+          "description": "Time step. Must be > 0."
+        },
+        "method": {
+          "type": "string",
+          "enum": ["auto", "euler", "rk4", "incipient"],
+          "default": "auto",
+          "description": "Integration method. auto: kernel selects incipient where eligible (all-constant/linear/interaction edges), RK4 otherwise, with dual-solver verification. euler/rk4: force specific solver (debugging). incipient: force IDC (testing only — falls back to RK4 for limit/threshold edges)."
+        },
+        "solver_tolerance": {
+          "type": "number",
+          "default": 1e-6,
+          "description": "Maximum relative error between IDC and RK4 before dual-solver confidence degrades to DEGRADED and k-adjustments are frozen. Only used in auto mode."
+        },
+        "rel_tol": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1e-6,
+          "description": "DOPRI5 relative error tolerance. Only used by GSSK_StepAdaptive; ignored by the fixed-step solvers. Emitted by the serializer when it differs from the default."
+        },
+        "abs_tol": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "default": 1e-9,
+          "description": "DOPRI5 absolute error tolerance. Only used by GSSK_StepAdaptive; ignored by the fixed-step solvers. Emitted by the serializer when it differs from the default."
+        },
+        "h_min": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Smallest adaptive step size accepted before a step is taken anyway with GSSK_WARN_SOLVER_DIVERGENCE. 0 means dt * 1e-6."
+        },
+        "h_max": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Largest adaptive step size. 0 means dt, further capped by the spectral-radius heuristic h_max <= 3.5 / lambda_bound."
+        }
+      }
+    }
+  }
+}
