@@ -1,5 +1,7 @@
 # GSSK: General Systems Simulation Kernel
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22339313.svg)](https://doi.org/10.5281/zenodo.22339313)
+
 A high-performance numerical engine for General Systems Theory and Odum Energy Systems Language.
 
 ## Quick Demo
