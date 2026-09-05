@@ -8,6 +8,12 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
 
 ### Added
 
+---
+
+## [5.3.0] — 2026-09-05
+
+### Added
+
 - **The rest of Odum's work gate: an n-ary `interaction` and a new `subtract` logic.** GIP-0001 G1; the decision is [ADR 0008](adr/0008-nary-interaction-and-subtracting-action.md).
 
   *Modeling for All Scales* Fig. 2.6 shows one interaction glyph computing several ways — (a) a product of two inputs, (c) a product of **three** input forces, (d) a divisor action, (e) a **subtracting** action. GSSK shipped (a) as `interaction` and (d) as `ratio` (ADR 0002, extended by ADR 0005). This adds (c) and (e).
@@ -37,6 +43,18 @@ All notable changes to GSSK are documented here. The format follows [Keep a Chan
   Note that a price delivered through `snapshot.state` is live state, not a topology initial condition, so it round-trips through `GSSK_SerializeSnapshot` and not through `GSSK_SerializeModel`, which emits each node's `initial_value` by design. Both forms emit the member's namespaced `price_node` reference.
 
   New assertions in `tests/test_price_node.c`: two instances of one archetype at different prices spend different amounts and each satisfies `spent / inventory == its own price`, the shared buyer's debit equals the sum of the two credits, the template's poison constant is not consulted, an unresolvable template reference fails `GSSK_Init`, and the snapshot round-trip reproduces both instances' spend.
+
+### Changed
+
+- **The repository moved to the `energese-project` organisation, and the citation metadata now reflects it.** GitHub redirects a renamed org for repository URLs but **not** for GitHub Pages, so `sholtomaud.github.io/GSSK` began returning 404 while `github.com/sholtomaud/GSSK` kept working. Three published links were dead rather than merely stale: the README's **Live Docs** and **Interactive Demo**, the **WASM Demo** entry in the docs site's own nav (`docs/.vitepress/config.mts`), and the demo link in the household example. All URLs across the README, the docs site, `package.json`, `web/index.html`, this changelog's compare links and `docs/gip/` now name `energese-project`. `doco/conformance.tex` is deliberately untouched — it carries a scholarly claim about which release its numbers came from, which is the author's to update.
+
+- **`CITATION.cff` is now a complete Zenodo deposit record.** It carried a title, an author and a version, and nothing else; the minted Zenodo record consequently had no keywords at all and was close to undiscoverable by subject. It now carries the concept DOI, an abstract, keywords, the docs URL and a release date. The README gained a **Citation** section distinguishing the **concept DOI** — `10.5281/zenodo.22339312`, which always resolves to the latest release and is what the badge points at — from the per-release **version DOI**, which is what a reproducibility claim should cite. The badge previously pointed at a version DOI, so it would have kept advertising v5.2.0 after every subsequent release.
+
+- **`CITATION.cff` joined the version-sync gate.** `scripts/check_version_sync.py` held `package.json` and `include/gssk.h` to the same version but knew nothing about `CITATION.cff`, and `scripts/release.sh` never touched it — which is how it came to claim 5.1.0 while the archived release was v5.2.0. Both now include it, so a citation that misstates the version fails the build rather than reaching Zenodo.
+
+### Fixed
+
+- **The v5.2.0 tag was cut without running `scripts/release.sh`**, leaving `include/gssk.h` and `package.json` declaring 5.1.0 at a commit tagged v5.2.0, and the changelog's feature work still sitting under `[Unreleased]`. This release restores the invariant: the header, `package.json`, `CITATION.cff` and the changelog all say 5.3.0. The changelog's link-reference definitions had also stopped being maintained at 3.6.0, so `[Unreleased]` compared against v3.6.0 across three majors; 4.1.0, 5.0.0, 5.1.0 and 5.3.0 are now defined.
 
 ---
 
@@ -436,10 +454,14 @@ The first release published under an immutable version tag. Everything below shi
 
 ---
 
-[Unreleased]: https://github.com/sholtomaud/GSSK/compare/v3.6.0...HEAD
-[3.6.0]: https://github.com/sholtomaud/GSSK/compare/v3.5.0...v3.6.0
-[3.5.0]: https://github.com/sholtomaud/GSSK/compare/v3.4.0...v3.5.0
-[3.4.0]: https://github.com/sholtomaud/GSSK/compare/v3.3.0...v3.4.0
-[3.3.0]: https://github.com/sholtomaud/GSSK/compare/v3.2.0...v3.3.0
-[3.2.0]: https://github.com/sholtomaud/GSSK/compare/v3.1.0...v3.2.0
-[3.1.0]: https://github.com/sholtomaud/GSSK/releases/tag/v3.1.0
+[Unreleased]: https://github.com/energese-project/GSSK/compare/v5.3.0...HEAD
+[5.3.0]: https://github.com/energese-project/GSSK/compare/v5.2.0...v5.3.0
+[5.1.0]: https://github.com/energese-project/GSSK/compare/v5.0.0...v5.1.0
+[5.0.0]: https://github.com/energese-project/GSSK/compare/v4.1.0...v5.0.0
+[4.1.0]: https://github.com/energese-project/GSSK/compare/v3.6.0...v4.1.0
+[3.6.0]: https://github.com/energese-project/GSSK/compare/v3.5.0...v3.6.0
+[3.5.0]: https://github.com/energese-project/GSSK/compare/v3.4.0...v3.5.0
+[3.4.0]: https://github.com/energese-project/GSSK/compare/v3.3.0...v3.4.0
+[3.3.0]: https://github.com/energese-project/GSSK/compare/v3.2.0...v3.3.0
+[3.2.0]: https://github.com/energese-project/GSSK/compare/v3.1.0...v3.2.0
+[3.1.0]: https://github.com/energese-project/GSSK/releases/tag/v3.1.0

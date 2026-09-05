@@ -129,7 +129,7 @@ The script bumps `GSK_VERSION_*` in `include/gssk.h`, updates `docs/CHANGELOG.md
 
 If you use GSSK in published work, please cite the archived release. Citation metadata for this repository is in [CITATION.cff](CITATION.cff); GitHub renders it under **Cite this repository**, and Zenodo reads it when minting each deposit.
 
-The badge above resolves to the **concept DOI** — [10.5281/zenodo.22339312](https://doi.org/10.5281/zenodo.22339312) — which always redirects to the most recent release. Cite that when you mean "GSSK" as an ongoing work. To pin a result to the exact code that produced it, cite the **version DOI** instead: each release gets its own, listed on the Zenodo record, and v5.2.0 is [10.5281/zenodo.22339313](https://doi.org/10.5281/zenodo.22339313). Reproducibility claims should use the version DOI, since the concept DOI moves.
+The badge above resolves to the **concept DOI** — [10.5281/zenodo.22339312](https://doi.org/10.5281/zenodo.22339312) — which always redirects to the most recent release. Cite that when you mean "GSSK" as an ongoing work. To pin a result to the exact code that produced it, cite the **version DOI** instead: every release is minted its own, and they are listed under *Versions* on the [Zenodo record](https://doi.org/10.5281/zenodo.22339312). Reproducibility claims should use the version DOI, because the concept DOI moves with each release.
 
 ```bibtex
 @software{maud_gssk,

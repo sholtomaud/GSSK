@@ -21,13 +21,10 @@ keywords:
 repository-code: "https://github.com/energese-project/GSSK"
 url: "https://energese-project.github.io/GSSK/"
 license: MIT
-version: "5.2.0"
+version: "5.3.0"
 date-released: "2026-09-05"
 doi: 10.5281/zenodo.22339312
 identifiers:
   - type: doi
     value: 10.5281/zenodo.22339312
-    description: "Concept DOI — always resolves to the latest release."
-  - type: doi
-    value: 10.5281/zenodo.22339313
-    description: "Version DOI for release v5.2.0."
+    description: "Concept DOI — always resolves to the latest release. Each release also has its own version DOI, listed on the Zenodo record; cite that one to pin a result to exact code."
