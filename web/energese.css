@@ -2,17 +2,21 @@
  * energese.css — the Energese design tokens
  * ============================================================================
  *
- * PROVENANCE. This file is a DUPLICATE, kept byte-identical across repositories
- * on purpose. The canonical copy lives at:
+ * PROVENANCE. This file is kept BYTE-IDENTICAL in more than one repository:
  *
- *     energese-project/energese-project.github.io — src/styles/energese.css
+ *     energese-project.github.io   src/styles/energese.css   ← canonical
+ *     GSSK                         web/energese.css
  *
- * --e-tokens-version below is how you tell whether a copy is stale: compare it
- * against the canonical file before assuming the palettes still agree.
+ * The canonical copy is the one in energese-project.github.io. If the two ever
+ * disagree, that one is right. `diff` them — they are meant to match exactly,
+ * this header included, so any difference at all is drift.
+ *
+ * --e-tokens-version below is the quick check: compare it before assuming the
+ * palettes still agree.
  *
  * We duplicate rather than share a package deliberately. GSSK's demo has no
- * build step at all — .github/workflows/deploy.yml copies web/index.html into
- * public/demo/ as a raw file — so consuming a published stylesheet would mean
+ * build step — its deploy workflow copies web/index.html into the Pages
+ * artifact as a raw file — so consuming a published stylesheet would mean
  * adding npm to a C99 kernel whose releases are archived and citable. That is a
  * real dependency edge to buy a guarantee about a colour. The trade is that
  * drift is possible; the version token is what stops it being silent.
@@ -25,8 +29,8 @@
  * their ORDER are a colour-blindness-safety mechanism: candidate orderings were
  * run through a validator and only ones clearing every adjacent-pair gate in
  * both modes were kept. Reordering them, or adding a ninth, silently breaks
- * that. Past eight, cycle the hues and vary the LINE STYLE — see
- * --e-series-dashes below.
+ * that. Past eight, cycle the hues and vary the LINE STYLE instead of
+ * inventing a ninth hue (SERIES_DASHES, in GSSK's web/index.html).
  * ========================================================================== */
 
 :root {
