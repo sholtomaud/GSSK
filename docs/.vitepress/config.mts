@@ -11,7 +11,7 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Spec', link: '/SPECIFICATION' },
-      { text: 'WASM Demo', link: 'https://sholtomaud.github.io/GSSK/demo/', target: '_blank' }
+      { text: 'WASM Demo', link: 'https://energese-project.github.io/GSSK/demo/', target: '_blank' }
     ],
     sidebar: [
       {
@@ -43,7 +43,7 @@ export default defineConfig({
       }
     ],
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/sholtomaud/GSSK' }
+      { icon: 'github', link: 'https://github.com/energese-project/GSSK' }
     ]
   }
 })

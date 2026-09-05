@@ -1,7 +1,7 @@
 # GIP 0002 — Resolve `price_node` for expanded archetype members
 
 - **Status**: proposed
-- **Target**: [sholtomaud/GSSK](https://github.com/sholtomaud/GSSK)
+- **Target**: [energese-project/GSSK](https://github.com/energese-project/GSSK)
 - **Raised from**: gssk-budget, task `p0a-exchange-price-per-instance`
 - **Affects**: GSSK v5.1.0 (`dist-v5.1.0`, commit `3ca217e4`)
 - **Kind**: defect in composite expansion, not a feature request

@@ -19,6 +19,12 @@ actually gone wrong:
      machine-readable statement of the model vocabulary; downstream
      consumers that cannot read it hand-maintain a copy of the node-type
      enum instead, with nothing to detect drift.
+  4. CITATION.cff "version" == GSK_VERSION_STRING. This is the file Zenodo
+     reads when minting a DOI and GitHub reads for "Cite this repository",
+     so a stale value does not just sit in the tree — it is published as
+     the citation for the archived release and cannot be corrected in
+     place afterwards. It said 5.1.0 while the archived release was v5.2.0,
+     because nothing bumped it and nothing checked it.
 
 Standard library only, on purpose: this gate has to run everywhere the build
 runs, including a checkout with no pip packages installed.
@@ -32,6 +38,7 @@ import sys
 PACKAGE = "package.json"
 HEADER = "include/gssk.h"
 SCHEMA = "gssk.schema.json"
+CITATION = "CITATION.cff"
 
 MACROS = ("GSK_VERSION_MAJOR", "GSK_VERSION_MINOR", "GSK_VERSION_PATCH")
 
@@ -55,6 +62,22 @@ def read_header(path):
         raise LookupError(f"{path}: no #define GSK_VERSION_STRING")
 
     return numbers[0], numbers[1], numbers[2], match.group(1)
+
+
+def read_citation_version(path):
+    """Return the version string in CITATION.cff.
+
+    Parsed with a regex rather than a YAML library on purpose: this gate runs
+    everywhere the build runs, including a checkout with no pip packages, and
+    PyYAML is not in the standard library.
+    """
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+
+    match = re.search(r"""^version:\s*["']?([^"'\s]+)["']?\s*$""", text, re.MULTILINE)
+    if match is None:
+        raise LookupError(f"{path}: no top-level 'version:' key")
+    return match.group(1)
 
 
 def main():
@@ -88,6 +111,20 @@ def main():
             f"Bump {PACKAGE} — scripts/release.sh does this for you."
         )
 
+    try:
+        citation_version = read_citation_version(CITATION)
+    except (OSError, LookupError) as exc:
+        failures.append(str(exc))
+    else:
+        if citation_version != header_version:
+            failures.append(
+                f"{CITATION}: \"version\" is {citation_version!r} but "
+                f"{HEADER} says GSK_VERSION_STRING is \"{header_version}\". "
+                f"Zenodo publishes this as the citation for the archived "
+                f"release, so it cannot be fixed after the fact. "
+                f"Bump {CITATION} — scripts/release.sh does this for you."
+            )
+
     files = package.get("files") or []
     if SCHEMA not in files:
         failures.append(
@@ -101,8 +138,8 @@ def main():
             print(f"FAILED: {failure}")
         return 1
 
-    print(f"OK: {PACKAGE} and {HEADER} agree on {header_version}; "
-          f"{SCHEMA} is shipped")
+    print(f"OK: {PACKAGE}, {HEADER} and {CITATION} agree on "
+          f"{header_version}; {SCHEMA} is shipped")
     return 0
 
 
