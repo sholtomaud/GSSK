@@ -406,10 +406,35 @@ jobs:
           cp -r docs/.vitepress/dist/* public/
           cp web/index.html public/demo/
           cp web/favicon.png public/demo/
+          # The demo links this with a relative href and has no build step, so
+          # it has to travel with index.html. Without it every colour on the
+          # page falls back to an unset custom property and the demo renders
+          # unstyled — a failure that only appears in the deployed artifact.
+          cp web/energese.css public/demo/
           cp dist/gssk.js public/demo/
           cp dist/gssk.wasm public/demo/
           touch public/.nojekyll
           sed -i 's|../dist/gssk.js|gssk.js|' public/demo/index.html
+
+      # The demo is assembled by copying files, not by a bundler, so nothing
+      # checks that what index.html asks for actually arrived. A missing
+      # stylesheet or wasm blob is invisible until someone loads the deployed
+      # page. This asserts every local asset the demo references is in the
+      # artifact.
+      - name: Verify the demo's local assets reached the artifact
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          html = open('public/demo/index.html').read()
+          refs = re.findall(r'(?:href|src)="([^"#?:]+)"', html)
+          missing = [r for r in refs
+                     if not r.startswith(('http', '//', 'data:'))
+                     and not os.path.exists(os.path.join('public/demo', r))]
+          if missing:
+              print(f'::error::demo assets referenced but not in the artifact: {missing}')
+              sys.exit(1)
+          print(f'All {len(refs)} local demo asset references resolve.')
+          PY
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

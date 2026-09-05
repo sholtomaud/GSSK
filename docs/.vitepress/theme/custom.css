@@ -1,0 +1,61 @@
+/* Map VitePress's theme variables onto the energese tokens.
+ *
+ * The tokens come from web/energese.css — ONE copy in this repository, shared
+ * by the docs site and the WASM demo, so /GSSK/ and /GSSK/demo/ cannot drift
+ * from each other. That file is itself a duplicate of the canonical copy in the
+ * energese-project.github.io repository; its header explains why, and carries
+ * the version token that tells you whether this copy is stale.
+ *
+ * VitePress stamps `.dark` on <html>, which energese.css already scopes for, so
+ * the toggle in the navbar drives the tokens with nothing further needed here.
+ */
+@import '../../../web/energese.css';
+
+:root {
+  --vp-c-bg: var(--e-ground);
+  --vp-c-bg-alt: var(--e-surface);
+  --vp-c-bg-soft: var(--e-surface-sunken);
+  --vp-c-bg-elv: var(--e-surface);
+
+  --vp-c-text-1: var(--e-ink);
+  --vp-c-text-2: var(--e-muted);
+  --vp-c-text-3: var(--e-muted);
+
+  --vp-c-divider: var(--e-rule);
+  --vp-c-border: var(--e-rule);
+  --vp-c-gutter: var(--e-rule);
+
+  /* VitePress numbers its brand ramp 1 (text) → 3 (solid button ground).
+     Keeping 3 on the accent and 1 on the hover step preserves its own contrast
+     assumptions: brand-1 is used as link text, brand-3 as a filled background. */
+  --vp-c-brand-1: var(--e-accent);
+  --vp-c-brand-2: var(--e-accent-hover);
+  --vp-c-brand-3: var(--e-accent);
+  --vp-c-brand-soft: var(--e-accent-soft);
+
+  --vp-button-brand-bg: var(--e-accent);
+  --vp-button-brand-hover-bg: var(--e-accent-hover);
+  /* Not #ffffff. The accent is a dark teal in light mode and a bright teal in
+     dark mode, so a fixed white label is 4.8:1 in one and about 1.7:1 in the
+     other. The ground token inverts with the accent, giving near-white on dark
+     teal and near-black on bright teal — the same pairing the demo's run
+     button uses. */
+  --vp-button-brand-text: var(--e-ground);
+
+  --vp-font-family-base: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  --vp-c-success-1: var(--e-good);
+  --vp-c-warning-1: var(--e-warning);
+  --vp-c-danger-1: var(--e-critical);
+}
+
+/* The home hero's gradient text: two steps of the one accent rather than the
+   default purple→blue, which belongs to no palette here. */
+:root {
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(
+    120deg,
+    var(--e-accent) 30%,
+    var(--e-accent-hover)
+  );
+}
