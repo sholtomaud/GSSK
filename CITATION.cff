@@ -5,6 +5,29 @@ type: software
 authors:
   - family-names: Maud
     given-names: Sholto
-repository-code: "https://github.com/sholtomaud/GSSK"
+abstract: "GSSK is a C99 numerical kernel for simulating systems expressed in Howard T. Odum's Energy Systems Language. A model is a JSON description of storages, sources, sinks and the pathways between them; the kernel integrates the resulting system of ordinary differential equations using Euler, RK4 or adaptive Dormand–Prince methods, and tracks several carriers — energy, material, money, information — independently over the same network. Odum's symbol vocabulary is implemented as node primitives and composite archetypes, with emergy and transformity accounting over the same topology, and deterministic snapshot and replay for reproducible runs. Bindings are provided for C, Python, JavaScript/WebAssembly and Swift."
+keywords:
+  - systems ecology
+  - energy systems language
+  - Howard T. Odum
+  - emergy
+  - transformity
+  - general systems theory
+  - system dynamics
+  - ordinary differential equations
+  - numerical simulation
+  - C99
+  - WebAssembly
+repository-code: "https://github.com/energese-project/GSSK"
+url: "https://energese-project.github.io/GSSK/"
 license: MIT
-version: "5.1.0"
+version: "5.2.0"
+date-released: "2026-09-05"
+doi: 10.5281/zenodo.22339312
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.22339312
+    description: "Concept DOI — always resolves to the latest release."
+  - type: doi
+    value: 10.5281/zenodo.22339313
+    description: "Version DOI for release v5.2.0."
