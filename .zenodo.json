@@ -1,0 +1,40 @@
+{
+  "upload_type": "software",
+  "title": "GSSK: General Systems Simulation Kernel",
+  "description": "<p>GSSK is a C99 numerical kernel for simulating systems expressed in Howard T. Odum's Energy Systems Language. A model is a JSON description of storages, sources, sinks and the pathways between them; the kernel integrates the resulting system of ordinary differential equations using Euler, RK4 or adaptive Dormand&ndash;Prince methods.</p><p>Several carriers &mdash; energy, material, money, information &mdash; are tracked independently over the same network, so a single topology carries an ecological energy budget and a monetary ledger at once. Odum's symbol vocabulary is implemented as node primitives and composite archetypes, with emergy and transformity accounting over that same topology, and deterministic snapshot and replay for reproducible runs.</p><p>Bindings are provided for C, Python, JavaScript/WebAssembly and Swift. Correctness is asserted against analytical solutions where they exist, against conservation and accounting invariants where they do not, and through a schema conformance suite that pins the model surface; the accompanying conformance whitepaper documents what is checked and why.</p>",
+  "creators": [
+    {
+      "name": "Maud, Sholto"
+    }
+  ],
+  "license": "mit",
+  "access_right": "open",
+  "keywords": [
+    "systems ecology",
+    "energy systems language",
+    "H.T. Odum",
+    "emergy",
+    "transformity",
+    "general systems theory",
+    "system dynamics",
+    "ordinary differential equations",
+    "numerical simulation",
+    "reproducible research",
+    "C99",
+    "WebAssembly"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/energese-project/GSSK",
+      "relation": "isSupplementTo",
+      "resource_type": "software",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://energese-project.github.io/GSSK/",
+      "relation": "isDocumentedBy",
+      "resource_type": "publication-softwaredocumentation",
+      "scheme": "url"
+    }
+  ]
+}
