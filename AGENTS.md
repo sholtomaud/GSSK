@@ -35,6 +35,57 @@ We use a **Registration-based Regression Testing** system.
 GSSK is designed for web integration. Ensure any core changes are compatible with `emcc` (Emscripten).
 Command: `make wasm`
 
+## 🎨 Web surfaces and the design tokens
+
+Two web surfaces ship from this repository, and they must look like one site:
+the VitePress docs at `/GSSK/` and the WASM demo at `/GSSK/demo/`. Both take
+their colours from **`web/energese.css`** — one copy in this repository, imported
+by `docs/.vitepress/theme/custom.css` and linked by `web/index.html`.
+
+`web/energese.css` is itself a **duplicate** of the canonical file in the
+`energese-project.github.io` repository. That is deliberate, and its header says
+why: the demo has no build step, so consuming a published stylesheet would mean
+adding npm to a C99 kernel whose releases are archived and citable. The price is
+that drift is possible, so:
+
+- **Never patch `web/energese.css` in place.** Edit the canonical copy, bump
+  `--e-tokens-version`, and copy the whole file across. A one-sided edit is how
+  the two repositories start disagreeing about the brand.
+- Compare `--e-tokens-version` against the canonical file before assuming the
+  palettes still agree.
+
+### The series palette is a safety mechanism, not a preference
+
+`--e-series-1` … `--e-series-8` and **the order they are in** were chosen by
+running candidate orderings through a colour-blindness validator and keeping only
+those that clear every adjacent-pair gate in both light and dark, against these
+surfaces. Reordering them, substituting a hue, or adding a ninth silently breaks
+that guarantee — the chart still renders, and two series become
+indistinguishable to a protanope.
+
+Past eight series, hue is reused and **line style** carries identity
+(`SERIES_DASHES` in `web/index.html`). This replaced an `hsl(i * 137.5, ...)`
+generator that produced unbounded unvalidated colours. Do not reintroduce a
+generated palette.
+
+A legend is always present on the demo chart. Three of the light-mode hues sit
+below 3:1 against the white card, so identity must not rest on colour alone;
+the legend's text labels are what discharge that.
+
+### Verifying a change to either surface
+
+Neither surface has an automated visual test, so look at it:
+
+```sh
+npm install && npm run docs:build     # the docs must build; the theme @import must resolve
+npm run docs:preview                  # then open it in both colour schemes
+```
+
+For the demo, serve `web/` alongside a built `dist/gssk.js`. The deploy workflow
+has a step that asserts every local asset `web/index.html` references reached the
+Pages artifact — that catches a forgotten `cp`, which is otherwise invisible
+until someone loads the deployed page.
+
 ## ✅ Programmatic Checks
 Before submitting any changes, you MUST ensure:
 1. `make clean && make` completes without any errors or warnings.
@@ -141,6 +192,8 @@ it was found). Before marking a task done, confirm its code is on `main`.
 - `lib/`: Compiled libraries.
 - `tests/expected/`: "Gold Standard" results for regression.
 - `examples/`: Reference JSON models.
+- `web/`: The WASM demo (`index.html`) and the shared design tokens (`energese.css`).
+- `docs/.vitepress/theme/`: VitePress restyled through CSS variables only.
 
 ## UPDATES PRE-COMMIT CHECK
 

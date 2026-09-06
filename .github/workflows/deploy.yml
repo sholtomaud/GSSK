@@ -340,6 +340,73 @@ jobs:
             dist/gssk.wasm
 
   # ────────────────────────────────────────────────────────────
+  # Docs + demo — runs on pull requests too.
+  #
+  # The deploy job below builds the VitePress site and assembles the demo, but
+  # it is gated on push-to-main, so before this job existed a broken docs theme
+  # or a demo asset that never got copied was unverified until after merge —
+  # at which point the same push publishes it. This is the same gap the WASM
+  # job was added to close, in a different corner.
+  #
+  # It deliberately does NOT build WASM: the point is the docs theme and the
+  # demo's static references, and gssk.js/gssk.wasm are covered by the wasm job.
+  # ────────────────────────────────────────────────────────────
+  docs:
+    name: Docs theme & demo assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The theme imports web/energese.css across directories. If that path
+      # breaks, or the token file is deleted, this is what says so — the build
+      # fails rather than silently emitting an unresolved @import.
+      - name: Build documentation
+        run: |
+          npm install
+          npm run docs:build
+
+      - name: Tokens must be inlined, not left as an unresolved @import
+        run: |
+          set -euo pipefail
+          if grep -rq "@import" docs/.vitepress/dist/assets/*.css; then
+            echo "::error::an @import survived the build; the token file did not inline"
+            exit 1
+          fi
+          if ! grep -rq -- "--e-accent" docs/.vitepress/dist/assets/*.css; then
+            echo "::error::energese tokens are absent from the built docs CSS"
+            exit 1
+          fi
+          echo "Design tokens are inlined in the built docs CSS."
+
+      # Every relative asset web/index.html asks for must either sit in web/ or
+      # be one of the two build outputs the deploy job drops in beside it. This
+      # catches a forgotten `cp` at PR time; the deploy job asserts the same
+      # property again against the assembled artifact.
+      - name: Demo's local asset references must resolve
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          BUILT = {'gssk.js', 'gssk.wasm'}   # dropped in beside the demo at deploy time
+          html = open('web/index.html').read()
+          refs = [r for r in re.findall(r'(?:href|src)="([^"#?:]+)"', html)
+                  if not r.startswith(('http', '//', 'data:'))
+                  and not r.endswith('/')]   # `../` is a link to the docs, not an asset
+          missing = [r for r in refs
+                     if os.path.basename(r) not in BUILT
+                     and not os.path.exists(os.path.join('web', r))]
+          if missing:
+              print(f'::error::web/index.html references files that are not in web/ '
+                    f'and are not build outputs: {missing}')
+              sys.exit(1)
+          print(f'All {len(refs)} local demo asset references resolve.')
+          PY
+
+  # ────────────────────────────────────────────────────────────
   # Swift package (macOS) — separate job, different OS.
   # ────────────────────────────────────────────────────────────
   swift:
@@ -364,7 +431,7 @@ jobs:
   # lives in the separate `release` job below.
   # ────────────────────────────────────────────────────────────
   deploy:
-    needs: [ build-native, quality, swift, wasm ]
+    needs: [ build-native, quality, swift, wasm, docs ]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
@@ -406,10 +473,36 @@ jobs:
           cp -r docs/.vitepress/dist/* public/
           cp web/index.html public/demo/
           cp web/favicon.png public/demo/
+          # The demo links this with a relative href and has no build step, so
+          # it has to travel with index.html. Without it every colour on the
+          # page falls back to an unset custom property and the demo renders
+          # unstyled — a failure that only appears in the deployed artifact.
+          cp web/energese.css public/demo/
           cp dist/gssk.js public/demo/
           cp dist/gssk.wasm public/demo/
           touch public/.nojekyll
           sed -i 's|../dist/gssk.js|gssk.js|' public/demo/index.html
+
+      # The demo is assembled by copying files, not by a bundler, so nothing
+      # checks that what index.html asks for actually arrived. A missing
+      # stylesheet or wasm blob is invisible until someone loads the deployed
+      # page. This asserts every local asset the demo references is in the
+      # artifact.
+      - name: Verify the demo's local assets reached the artifact
+        run: |
+          python3 - <<'PY'
+          import os, re, sys
+          html = open('public/demo/index.html').read()
+          refs = [r for r in re.findall(r'(?:href|src)="([^"#?:]+)"', html)
+                  if not r.startswith(('http', '//', 'data:'))
+                  and not r.endswith('/')]   # `../` is a link to the docs, not an asset
+          missing = [r for r in refs
+                     if not os.path.exists(os.path.join('public/demo', r))]
+          if missing:
+              print(f'::error::demo assets referenced but not in the artifact: {missing}')
+              sys.exit(1)
+          print(f'All {len(refs)} local demo asset references resolve.')
+          PY
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

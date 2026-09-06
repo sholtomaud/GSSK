@@ -6,64 +6,56 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GSSK | General Systems Visualizer</title>
     <link rel="icon" href="favicon.png">
+    <link rel="stylesheet" href="energese.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script>
+        // Every colour is a token from energese.css, so light/dark is one
+        // definition rather than two sets of utility classes. The channel
+        // triples exist because Tailwind's alpha modifiers (text-ink/60) need
+        // rgb(... / <alpha-value>), which cannot be composed from a hex.
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        brand: {
-                            DEFAULT: '#a8b1ff',
-                            hover: '#5c73e7',
-                        },
-                        vpbg: '#1b1b1f',
-                        vpsoft: '#202127',
+                        brand: 'rgb(var(--e-accent-rgb) / <alpha-value>)',
+                        ink: 'rgb(var(--e-ink-rgb) / <alpha-value>)',
+                        surface: 'rgb(var(--e-surface-rgb) / <alpha-value>)',
+                        ground: 'rgb(var(--e-ground-rgb) / <alpha-value>)',
+                        muted: 'var(--e-muted)',
+                        rule: 'var(--e-rule)',
+                        good: 'var(--e-good)',
+                        critical: 'var(--e-critical)',
                     },
                     fontFamily: {
-                        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+                        sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'sans-serif'],
                     }
                 }
             }
         }
     </script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-
-        body {
-            background: #1b1b1f;
-            color: rgba(255, 255, 255, 0.87);
-            font-family: 'Inter', sans-serif;
-        }
-
-        .glass {
-            background: rgba(32, 33, 39, 0.8);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        }
-    </style>
 </head>
 
-<body class="min-h-screen p-8">
+<body class="e-base min-h-screen p-8 font-sans">
     <div class="max-w-6xl mx-auto">
         <header class="mb-12 flex justify-between items-center">
             <div>
-                <h1 class="text-4xl font-extrabold tracking-tight text-white mb-2">GSSK WASM Demo</h1>
-                <p class="text-white/60">Numerical engine running in-browser via Emscripten</p>
+                <h1 class="text-4xl font-extrabold tracking-tight text-ink mb-2">GSSK WASM Demo</h1>
+                <p class="text-ink/60">Numerical engine running in-browser via Emscripten</p>
                 <div class="mt-4 flex gap-4">
                     <a href="../" class="text-brand hover:text-brand-hover text-sm font-semibold flex items-center gap-1 transition-colors">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5s3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5s3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                         </svg>
                         View Documentation
                     </a>
-                    <a href="https://github.com/energese-project/GSSK" class="text-white/40 hover:text-white text-sm font-semibold flex items-center gap-1 transition-colors">
+                    <a href="https://github.com/energese-project/GSSK" class="text-muted hover:text-ink text-sm font-semibold flex items-center gap-1 transition-colors">
                         <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
                         GitHub
                     </a>
                 </div>
             </div>
-            <div id="status" class="px-4 py-2 rounded-full glass text-sm font-medium text-brand">
+            <div id="status" class="px-4 py-2 rounded-full e-card text-sm font-medium text-brand">
                 WASM Loading...
             </div>
         </header>
@@ -71,9 +63,9 @@
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <!-- Sidebar: Controls & Model -->
             <div class="lg:col-span-1 space-y-6">
-                <div class="glass p-6 rounded-2xl">
+                <div class="e-card p-6 rounded-2xl">
                     <h2 class="text-xl font-semibold mb-4 text-brand">Model Selection</h2>
-                    <select id="modelSelect" class="w-full bg-vpsoft border-white/10 rounded-lg p-3 text-white/90">
+                    <select id="modelSelect" class="w-full bg-[var(--e-surface-sunken)] border-rule rounded-lg p-3 text-ink/90">
                         <option value="oscillator">Predator-Prey Oscillator</option>
                         <option value="decay">Linear Decay</option>
                         <option value="saturation">Saturation (Limit Logic)</option>
@@ -83,92 +75,92 @@
                     </select>
                 </div>
 
-                <div class="glass p-6 rounded-2xl">
+                <div class="e-card p-6 rounded-2xl">
                     <h2 class="text-xl font-semibold mb-4 text-brand">Simulation Mode</h2>
-                    <select id="simMode" class="w-full bg-vpsoft border-white/10 rounded-lg p-3 text-white/90 mb-4">
+                    <select id="simMode" class="w-full bg-[var(--e-surface-sunken)] border-rule rounded-lg p-3 text-ink/90 mb-4">
                         <option value="bulk">Bulk (Static)</option>
                         <option value="streaming" selected>Streaming (Real-time)</option>
                         <option value="ensemble">Ensemble Forecasting</option>
                         <option value="calibrate">Parameter Calibration</option>
                     </select>
 
-                    <div id="paramsSection" class="space-y-4 pt-4 border-t border-white/5">
-                        <h3 class="text-xs font-bold text-white/30 uppercase tracking-widest">Override Parameters</h3>
+                    <div id="paramsSection" class="space-y-4 pt-4 border-t border-rule">
+                        <h3 class="text-xs font-bold text-muted uppercase tracking-widest">Override Parameters</h3>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-xs text-white/40 mb-1">Start Time</label>
-                                <input type="number" id="inputTStart" value="0" step="0.1" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                                <label class="block text-xs text-muted mb-1">Start Time</label>
+                                <input type="number" id="inputTStart" value="0" step="0.1" class="w-full bg-[var(--e-surface-sunken)] border border-rule rounded p-2 text-sm text-ink/90">
                             </div>
                             <div>
-                                <label class="block text-xs text-white/40 mb-1">End Time</label>
-                                <input type="number" id="inputTEnd" value="1000" step="10" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                                <label class="block text-xs text-muted mb-1">End Time</label>
+                                <input type="number" id="inputTEnd" value="1000" step="10" class="w-full bg-[var(--e-surface-sunken)] border border-rule rounded p-2 text-sm text-ink/90">
                             </div>
                         </div>
                         <div>
-                            <label class="block text-xs text-white/40 mb-1">Time Step (dt)</label>
-                            <input type="number" id="inputDt" value="0.1" step="0.01" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                            <label class="block text-xs text-muted mb-1">Time Step (dt)</label>
+                            <input type="number" id="inputDt" value="0.1" step="0.01" class="w-full bg-[var(--e-surface-sunken)] border border-rule rounded p-2 text-sm text-ink/90">
                         </div>
                         <div id="recommendation" class="text-[10px] text-brand/60 italic"></div>
                     </div>
 
-                    <div id="ensembleSettings" class="space-y-4 pt-4 border-t border-white/5 hidden">
-                        <h3 class="text-xs font-bold text-white/30 uppercase tracking-widest">Ensemble Settings</h3>
+                    <div id="ensembleSettings" class="space-y-4 pt-4 border-t border-rule hidden">
+                        <h3 class="text-xs font-bold text-muted uppercase tracking-widest">Ensemble Settings</h3>
                         <div class="grid grid-cols-2 gap-4">
                             <div>
-                                <label class="block text-xs text-white/40 mb-1">Runs</label>
-                                <input type="number" id="ensembleRuns" value="50" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                                <label class="block text-xs text-muted mb-1">Runs</label>
+                                <input type="number" id="ensembleRuns" value="50" class="w-full bg-[var(--e-surface-sunken)] border border-rule rounded p-2 text-sm text-ink/90">
                             </div>
                             <div>
-                                <label class="block text-xs text-white/40 mb-1">Perturb %</label>
-                                <input type="number" id="ensemblePerturb" value="10" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                                <label class="block text-xs text-muted mb-1">Perturb %</label>
+                                <input type="number" id="ensemblePerturb" value="10" class="w-full bg-[var(--e-surface-sunken)] border border-rule rounded p-2 text-sm text-ink/90">
                             </div>
                         </div>
                     </div>
 
-                    <div id="calibrationSettings" class="space-y-4 pt-4 border-t border-white/5 hidden">
-                        <h3 class="text-xs font-bold text-white/30 uppercase tracking-widest">Calibration Settings</h3>
+                    <div id="calibrationSettings" class="space-y-4 pt-4 border-t border-rule hidden">
+                        <h3 class="text-xs font-bold text-muted uppercase tracking-widest">Calibration Settings</h3>
                         <div>
-                            <label class="block text-xs text-white/40 mb-1">Optimizer Iterations</label>
-                            <input type="number" id="calibIter" value="100" class="w-full bg-vpsoft border border-white/5 rounded p-2 text-sm text-white/90">
+                            <label class="block text-xs text-muted mb-1">Optimizer Iterations</label>
+                            <input type="number" id="calibIter" value="100" class="w-full bg-[var(--e-surface-sunken)] border border-rule rounded p-2 text-sm text-ink/90">
                         </div>
                         <div id="calibInfo" class="text-[10px] text-brand/60">Fits 'Linear Decay' model to synthetic data.</div>
                     </div>
                 </div>
 
-                <div id="calibrationResults" class="glass p-6 rounded-2xl hidden">
+                <div id="calibrationResults" class="e-card p-6 rounded-2xl hidden">
                     <h2 class="text-xl font-semibold mb-4 text-brand">Calibration Results</h2>
-                    <div id="resultsList" class="space-y-2 text-xs text-white/70">
+                    <div id="resultsList" class="space-y-2 text-xs text-ink/70">
                         <!-- Populated by JS -->
                     </div>
                 </div>
 
-                <div class="glass p-6 rounded-2xl">
+                <div class="e-card p-6 rounded-2xl">
                     <h2 class="text-xl font-semibold mb-4 text-brand">Engine Stats</h2>
                     <div class="space-y-3 text-sm">
                         <div class="flex justify-between">
-                            <span class="text-white/40">Integration</span>
-                            <span id="statMethod" class="text-white/90 uppercase">-</span>
+                            <span class="text-muted">Integration</span>
+                            <span id="statMethod" class="text-ink/90 uppercase">-</span>
                         </div>
                         <div class="flex justify-between">
-                            <span class="text-white/40">Step Size (dt)</span>
-                            <span id="statDt" class="text-white/90">-</span>
+                            <span class="text-muted">Step Size (dt)</span>
+                            <span id="statDt" class="text-ink/90">-</span>
                         </div>
                         <div class="flex justify-between">
-                            <span class="text-white/40">Performance</span>
-                            <span id="statPerf" class="text-emerald-400">-</span>
+                            <span class="text-muted">Performance</span>
+                            <span id="statPerf" class="text-good">-</span>
                         </div>
                     </div>
                 </div>
 
                 <button id="runBtn"
-                    class="w-full py-4 bg-brand hover:bg-brand-hover text-vpbg transition-all rounded-2xl font-bold shadow-lg shadow-brand/20">
+                    class="w-full py-4 bg-brand hover:bg-brand-hover text-ground transition-all rounded-2xl font-bold shadow-lg shadow-brand/20">
                     Run Simulation
                 </button>
             </div>
 
             <!-- Main Panel: Chart -->
             <div class="lg:col-span-2">
-                <div class="glass p-8 rounded-3xl h-[600px]">
+                <div class="e-card p-8 rounded-3xl h-[600px]">
                     <canvas id="mainChart"></canvas>
                 </div>
             </div>
@@ -242,11 +234,88 @@
         createGSSK().then(instance => {
             gssk = instance;
             document.getElementById('status').innerText = 'WASM Ready';
-            document.getElementById('status').classList.replace('text-brand', 'text-emerald-400');
+            document.getElementById('status').classList.replace('text-brand', 'text-good');
         }).catch(err => {
             console.error("WASM Load Error:", err);
             document.getElementById('status').innerText = 'WASM Load Failed';
-            document.getElementById('status').classList.replace('text-brand', 'text-red-400');
+            document.getElementById('status').classList.replace('text-brand', 'text-critical');
+        });
+
+        // ── Chart theming ────────────────────────────────────────────────
+        // Every chart colour is read from the energese.css tokens rather than
+        // written here, so light/dark is one definition and the palette cannot
+        // drift from the rest of the page.
+        function token(name) {
+            return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        }
+
+        // The eight categorical hues, in validated order. The ORDER is a
+        // colour-blindness-safety property, not a preference: candidate
+        // orderings were run through a validator and only ones clearing every
+        // adjacent-pair gate in both light and dark were kept.
+        function seriesPalette() {
+            return Array.from({ length: 8 }, (_, i) => token(`--e-series-${i + 1}`));
+        }
+
+        // Past eight series, hue is reused and LINE STYLE carries the
+        // difference. This replaces a golden-angle hue generator
+        // (hsl(i * 137.5, 70%, 60%)) that produced an unbounded number of
+        // unvalidated colours — some indistinguishable from each other, none
+        // checked against either surface. Composite encoding keeps identity
+        // legible past the point where hue alone can carry it, and a model with
+        // 23 state nodes is well past that point.
+        const SERIES_DASHES = [[], [6, 4], [2, 3]];
+
+        function seriesStyle(i) {
+            const palette = seriesPalette();
+            return {
+                borderColor: palette[i % palette.length],
+                borderDash: SERIES_DASHES[Math.floor(i / palette.length) % SERIES_DASHES.length],
+            };
+        }
+
+        function withAlpha(hex, alpha) {
+            const h = hex.replace('#', '');
+            const n = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+            const int = parseInt(n, 16);
+            return `rgba(${(int >> 16) & 255}, ${(int >> 8) & 255}, ${int & 255}, ${alpha})`;
+        }
+
+        function chartChrome() {
+            return {
+                scales: {
+                    y: { grid: { color: token('--e-grid') }, ticks: { color: token('--e-tick') } },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: token('--e-tick'), maxRotation: 0 }
+                    }
+                },
+                // A legend is always present. Three of the light-mode hues sit
+                // below 3:1 against the white card, so identity must not rest
+                // on colour alone; the legend's text labels are what discharge
+                // that. Do not remove it to save space.
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: token('--e-ink'),
+                            font: { family: 'ui-sans-serif, system-ui, sans-serif' }
+                        }
+                    }
+                }
+            };
+        }
+
+        // Follow the viewer if they change the OS setting mid-session.
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            if (!chart) return;
+            const chrome = chartChrome();
+            chart.options.scales = chrome.scales;
+            chart.options.plugins.legend = chrome.plugins.legend;
+            chart.data.datasets.forEach((ds, i) => {
+                if (ds.type === 'scatter') { ds.borderColor = token('--e-warning'); return; }
+                Object.assign(ds, seriesStyle(i));
+            });
+            chart.update();
         });
 
         function stopSimulation() {
@@ -261,8 +330,8 @@
             }
             const btn = document.getElementById('runBtn');
             btn.innerText = 'Run Simulation';
-            btn.classList.remove('bg-red-500', 'hover:bg-red-400', 'text-white');
-            btn.classList.add('bg-brand', 'hover:bg-brand-hover', 'text-vpbg');
+            btn.classList.remove('bg-critical', 'hover:brightness-110', 'text-white');
+            btn.classList.add('bg-brand', 'hover:bg-brand-hover', 'text-ground');
         }
 
         function runSimulation() {
@@ -328,7 +397,7 @@
                 datasets.push({
                     label: id,
                     data: [],
-                    borderColor: `hsl(${(i * 137.5) % 360}, 70%, 60%)`,
+                    ...seriesStyle(i),
                     borderWidth: 2,
                     tension: 0.2,
                     pointRadius: 0
@@ -345,19 +414,15 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     animation: false,
-                    scales: {
-                        y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: 'rgba(255,255,255,0.5)' } },
-                        x: { grid: { display: false }, ticks: { color: 'rgba(255,255,255,0.5)', maxRotation: 0 } }
-                    },
-                    plugins: { legend: { labels: { color: 'rgba(255,255,255,0.87)', font: { family: 'Inter' } } } }
+                    ...chartChrome()
                 }
             });
 
             isRunning = true;
             const btn = document.getElementById('runBtn');
             btn.innerText = 'Stop Simulation';
-            btn.classList.remove('bg-brand', 'hover:bg-brand-hover', 'text-vpbg');
-            btn.classList.add('bg-red-500', 'hover:bg-red-400', 'text-white');
+            btn.classList.remove('bg-brand', 'hover:bg-brand-hover', 'text-ground');
+            btn.classList.add('bg-critical', 'hover:brightness-110', 'text-white');
 
             let t = t_start;
             const startTime = performance.now();
@@ -387,7 +452,8 @@
                 for (let i = 0; i < node_count; i++) {
                     // For each node, we'll create a shaded area dataset and a mean line dataset
                     // But to keep it clean, let's just do it for the first few nodes if many
-                    const color = `hsl(${(i * 137.5) % 360}, 70%, 60%)`;
+                    const color = seriesStyle(i).borderColor;
+                    const band = withAlpha(color, 0.15);
 
                     const minData = [];
                     const maxData = [];
@@ -415,12 +481,12 @@
                         data: maxData,
                         fill: {
                             target: i, // Fill towards the mean dataset (index i)
-                            above: color.replace(')', ', 0.15)').replace('hsl', 'hsla'),
-                            below: color.replace(')', ', 0.15)').replace('hsl', 'hsla')
+                            above: band,
+                            below: band
                         },
                         borderColor: 'transparent',
                         pointRadius: 0,
-                        backgroundColor: color.replace(')', ', 0.15)').replace('hsl', 'hsla')
+                        backgroundColor: band
                     });
 
                     // We also need the "bottom" of the range
@@ -489,7 +555,7 @@
                     for (let i = 0; i < edgeCount; i++) {
                         const k = gssk._GSSK_GetEdgeK(currentKernel, i);
                         const div = document.createElement('div');
-                        div.className = 'flex justify-between border-b border-white/5 pb-1';
+                        div.className = 'flex justify-between border-b border-rule pb-1';
                         div.innerHTML = `<span>Edge ${i} k:</span> <span class="text-brand font-mono">${k.toFixed(4)}</span>`;
                         resultsList.appendChild(div);
                     }
@@ -530,7 +596,8 @@
                             showLine: false,
                             pointStyle: 'crossRot',
                             pointRadius: 6,
-                            borderColor: '#fbbf24',
+                            borderColor: token('--e-ink'),
+                            backgroundColor: token('--e-ink'),
                             type: 'scatter'
                         };
                         datasets.push(obsDataset);

@@ -1,0 +1,190 @@
+/* ============================================================================
+ * energese.css — the Energese design tokens
+ * ============================================================================
+ *
+ * PROVENANCE. This file is kept BYTE-IDENTICAL in more than one repository:
+ *
+ *     energese-project.github.io   src/styles/energese.css   ← canonical
+ *     GSSK                         web/energese.css
+ *
+ * The canonical copy is the one in energese-project.github.io. If the two ever
+ * disagree, that one is right. `diff` them — they are meant to match exactly,
+ * this header included, so any difference at all is drift.
+ *
+ * --e-tokens-version below is the quick check: compare it before assuming the
+ * palettes still agree.
+ *
+ * We duplicate rather than share a package deliberately. GSSK's demo has no
+ * build step — its deploy workflow copies web/index.html into the Pages
+ * artifact as a raw file — so consuming a published stylesheet would mean
+ * adding npm to a C99 kernel whose releases are archived and citable. That is a
+ * real dependency edge to buy a guarantee about a colour. The trade is that
+ * drift is possible; the version token is what stops it being silent.
+ *
+ * TO CHANGE A COLOUR: edit the canonical copy, bump --e-tokens-version, then
+ * copy the whole file into every consumer. Do not patch one copy in place.
+ *
+ * ----------------------------------------------------------------------------
+ * The series palette is NOT a matter of taste. The eight categorical hues and
+ * their ORDER are a colour-blindness-safety mechanism: candidate orderings were
+ * run through a validator and only ones clearing every adjacent-pair gate in
+ * both modes were kept. Reordering them, or adding a ninth, silently breaks
+ * that. Past eight, cycle the hues and vary the LINE STYLE instead of
+ * inventing a ninth hue (SERIES_DASHES, in GSSK's web/index.html).
+ * ========================================================================== */
+
+:root {
+  --e-tokens-version: '1.0.0';
+
+  color-scheme: light;
+
+  /* Surfaces and ink ------------------------------------------------------ */
+  --e-ground: #fbfaf7; /* page plane */
+  --e-surface: #ffffff; /* cards, panels, the chart surface */
+  --e-surface-sunken: #f4f2ec; /* inputs, wells */
+  --e-ink: #14201f;
+  --e-muted: #4f625f;
+  --e-rule: #e3e0d8;
+
+  /* Brand ----------------------------------------------------------------- */
+  --e-accent: #0f766e;
+  --e-accent-hover: #0b5c56;
+  --e-accent-soft: #ccfbf1; /* chip / badge ground */
+  --e-accent-on-soft: #0f766e;
+
+  /* Channel triples. Tailwind's alpha modifiers (text-brand/60) need the
+     channels separately, because rgb(var(--x) / <alpha-value>) cannot be
+     composed from a hex. Keep these in step with the hexes above. */
+  --e-accent-rgb: 15 118 110;
+  --e-ink-rgb: 20 32 31;
+  --e-surface-rgb: 255 255 255;
+  --e-ground-rgb: 251 250 247;
+
+  /* Status. Fixed, never themed, never reused as a series colour. Each ships
+     with an icon or a label — a status colour never carries meaning alone. */
+  --e-good: #0ca30c;
+  --e-warning: #fab219;
+  --e-serious: #ec835a;
+  --e-critical: #d03b3b;
+
+  /* Chart chrome ---------------------------------------------------------- */
+  --e-grid: #e1e0d9;
+  --e-axis: #c3c2b7;
+  --e-tick: #898781;
+
+  /* Categorical series, in validated order. Slot 1 is the brand teal.
+     Worst adjacent pair: CVD ΔE 9.2, normal-vision ΔE 19.6 — both above gate. */
+  --e-series-1: #1baf7a; /* aqua   */
+  --e-series-2: #eb6834; /* orange */
+  --e-series-3: #2a78d6; /* blue   */
+  --e-series-4: #eda100; /* yellow */
+  --e-series-5: #e87ba4; /* magenta*/
+  --e-series-6: #008300; /* green  */
+  --e-series-7: #4a3aa7; /* violet */
+  --e-series-8: #e34948; /* red    */
+}
+
+/* Dark. Declared under BOTH scopes: the media query covers the OS setting, the
+   class/attribute scopes cover an explicit toggle, which must win in both
+   directions. The :not() guard lets an explicit light choice beat OS-dark.
+   VitePress stamps `.dark` on <html>; other consumers use [data-theme]. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not(.light) {
+    color-scheme: dark;
+
+    --e-ground: #101716;
+    --e-surface: #1a2321;
+    --e-surface-sunken: #141d1b;
+    --e-ink: #eceae4;
+    --e-muted: #9aaba7;
+    --e-rule: #2a3432;
+
+    --e-accent: #2dd4bf;
+    --e-accent-hover: #5eead4;
+    --e-accent-soft: #0f3d38;
+    --e-accent-on-soft: #5eead4;
+
+    --e-accent-rgb: 45 212 191;
+    --e-ink-rgb: 236 234 228;
+    --e-surface-rgb: 26 35 33;
+    --e-ground-rgb: 16 23 22;
+
+    --e-grid: #232d2b;
+    --e-axis: #38423f;
+    --e-tick: #898781;
+
+    /* The same eight hues, stepped for the dark surface — not an automatic
+       flip. Validated as a set against #1a2321. */
+    --e-series-1: #199e70;
+    --e-series-2: #d95926;
+    --e-series-3: #3987e5;
+    --e-series-4: #c98500;
+    --e-series-5: #d55181;
+    --e-series-6: #008300;
+    --e-series-7: #9085e9;
+    --e-series-8: #e66767;
+  }
+}
+
+:root[data-theme='dark'],
+:root.dark {
+  color-scheme: dark;
+
+  --e-ground: #101716;
+  --e-surface: #1a2321;
+  --e-surface-sunken: #141d1b;
+  --e-ink: #eceae4;
+  --e-muted: #9aaba7;
+  --e-rule: #2a3432;
+
+  --e-accent: #2dd4bf;
+  --e-accent-hover: #5eead4;
+  --e-accent-soft: #0f3d38;
+  --e-accent-on-soft: #5eead4;
+
+  --e-accent-rgb: 45 212 191;
+  --e-ink-rgb: 236 234 228;
+  --e-surface-rgb: 26 35 33;
+  --e-ground-rgb: 16 23 22;
+
+  --e-grid: #232d2b;
+  --e-axis: #38423f;
+  --e-tick: #898781;
+
+  --e-series-1: #199e70;
+  --e-series-2: #d95926;
+  --e-series-3: #3987e5;
+  --e-series-4: #c98500;
+  --e-series-5: #d55181;
+  --e-series-6: #008300;
+  --e-series-7: #9085e9;
+  --e-series-8: #e66767;
+}
+
+/* Base ---------------------------------------------------------------------
+   Consumers that are whole pages (the demo) take this. VitePress supplies its
+   own base layer and only maps its variables onto the tokens above. */
+.e-base {
+  background-color: var(--e-ground);
+  color: var(--e-ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+/* A panel. Replaces the frosted-glass card the demo used to draw: the blur was
+   doing nothing on an opaque page and cost a compositing layer per card. */
+.e-card {
+  background-color: var(--e-surface);
+  border: 1px solid var(--e-rule);
+  border-radius: 1rem;
+}
+
+.e-sunken {
+  background-color: var(--e-surface-sunken);
+  border: 1px solid var(--e-rule);
+  color: var(--e-ink);
+}
+
+.e-chip {
+  background-color: var(--e-accent-soft);
+  color: var(--e-accent-on-soft);
+}
